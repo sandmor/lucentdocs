@@ -1,0 +1,12 @@
+{
+  "name": "plotline",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter './apps/api' dev",
+    "build": "bun run --filter './apps/web' build",
+    "serve": "NODE_ENV=production bun run --filter './apps/api' start"
+  }
+}
