@@ -163,7 +163,7 @@ function resolveTheme(value: unknown): 'light' | 'dark' {
 
 function applyHtmlThemeClass(template: string, theme: 'light' | 'dark'): string {
   if (template.includes('<html')) {
-    if (/\<html[^>]*class=["'][^"']*["'][^>]*>/i.test(template)) {
+    if (/<html[^>]*class=["'][^"']*["'][^>]*>/i.test(template)) {
       return template.replace(
         /<html([^>]*)class=["'][^"']*["']([^>]*)>/i,
         `<html$1class="${theme}"$2>`

@@ -85,6 +85,7 @@ export function HomePage() {
               >
                 <Input
                   autoFocus
+                  autoComplete="off"
                   placeholder="The Great Novel..."
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
