@@ -29,7 +29,11 @@ async function initializeTable(): Promise<Table> {
   const tableNames = await db.tableNames()
 
   if (tableNames.includes(TABLE_NAME)) {
-    return db.openTable(TABLE_NAME)
+    try {
+      return await db.openTable(TABLE_NAME)
+    } catch {
+      // Table exists but data is corrupted/missing - fall through to recreate
+    }
   }
 
   const sentinel: Record<string, unknown> = {
