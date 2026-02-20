@@ -23,7 +23,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { Plus, Trash2, BookOpen } from 'lucide-react'
 
@@ -31,7 +30,7 @@ export function HomePage() {
   const navigate = useNavigate()
   const [newTitle, setNewTitle] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [projectToDelete, setProjectToDelete] = useState<{ id: string; title: string } | null>(null)
 
   const projectsQuery = trpc.projects.list.useQuery()
   const createMutation = trpc.projects.create.useMutation({
@@ -43,7 +42,7 @@ export function HomePage() {
   })
   const deleteMutation = trpc.projects.delete.useMutation({
     onSuccess: () => {
-      setDeleteId(null)
+      setProjectToDelete(null)
       projectsQuery.refetch()
     },
   })
@@ -86,14 +85,14 @@ export function HomePage() {
               >
                 <Input
                   autoFocus
-                  placeholder="The Great Novel…"
+                  placeholder="The Great Novel..."
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                 />
                 <DialogFooter className="mt-4">
                   <DialogClose render={<Button variant="outline">Cancel</Button>} />
                   <Button type="submit" disabled={!newTitle.trim() || createMutation.isPending}>
-                    {createMutation.isPending ? 'Creating…' : 'Create'}
+                    {createMutation.isPending ? 'Creating...' : 'Create'}
                   </Button>
                 </DialogFooter>
               </form>
@@ -101,7 +100,7 @@ export function HomePage() {
           </Dialog>
         </div>
 
-        {projectsQuery.isLoading && <p className="text-muted-foreground">Loading projects…</p>}
+        {projectsQuery.isLoading && <p className="text-muted-foreground">Loading projects...</p>}
 
         {projectsQuery.data?.length === 0 && (
           <div className="flex flex-col items-center gap-4 py-24 text-center">
@@ -134,36 +133,41 @@ export function HomePage() {
                 </CardDescription>
               </CardHeader>
               <CardFooter className="justify-end">
-                <AlertDialog
-                  open={deleteId === project.id}
-                  onOpenChange={(open) => setDeleteId(open ? project.id : null)}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setProjectToDelete(project)
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
                 >
-                  <AlertDialogTrigger
-                    render={
-                      <Button variant="ghost" size="icon-sm" onClick={(e) => e.stopPropagation()} />
-                    }
-                  >
-                    <Trash2 className="size-4 text-destructive" />
-                  </AlertDialogTrigger>
-                  <AlertDialogContent size="sm">
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete project?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        "{project.title}" will be permanently deleted.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => deleteMutation.mutate({ id: project.id })}>
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                  <Trash2 className="size-4 text-destructive" />
+                </Button>
               </CardFooter>
             </Card>
           ))}
         </div>
+
+        <AlertDialog
+          open={projectToDelete !== null}
+          onOpenChange={(open) => !open && setProjectToDelete(null)}
+        >
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete project?</AlertDialogTitle>
+              <AlertDialogDescription>
+                "{projectToDelete?.title}" will be permanently deleted.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => deleteMutation.mutate({ id: projectToDelete!.id })}>
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   )
