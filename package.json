@@ -1,12 +1,29 @@
 {
   "name": "plotline",
   "private": true,
+  "type": "module",
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
-    "dev": "bun run --filter './apps/api' dev",
+    "dev": "bun run --env-file=.env --filter './apps/api' dev",
     "build": "bun run --filter './apps/web' build",
-    "serve": "NODE_ENV=production bun run --filter './apps/api' start"
+    "serve": "NODE_ENV=production bun run --env-file=.env --filter './apps/api' start",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "bun run --filter './apps/api' typecheck && bun run --filter './apps/web' typecheck && bun run --filter './packages/shared' typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "prettier": "^3.4.2",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.4"
   }
 }

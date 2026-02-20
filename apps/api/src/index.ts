@@ -1,65 +1,238 @@
-import express from 'express';
-import path from 'path';
-import fs from 'fs';
-import { type ViteDevServer } from 'vite';
+import express from 'express'
+import path from 'path'
+import fs from 'fs'
+import { type Express } from 'express'
+import { createServer, type ViteDevServer } from 'vite'
+import { createExpressMiddleware } from '@trpc/server/adapters/express'
+import { z } from 'zod/v4'
+import { appRouter } from './trpc/router.js'
+import { PROJECT_ROOT } from './paths.js'
+import { generate, generateStream } from './ai/index.js'
+import { SYSTEM_PROMPT, buildContinuePrompt, buildPromptPrompt } from './ai/prompts.js'
 
-const isProd = process.env.NODE_ENV === 'production';
-const port = process.env.PORT || 5677;
+const isProd = process.env.NODE_ENV === 'production'
+const port = process.env.PORT || 5677
+const WEB_ROOT = path.join(PROJECT_ROOT, 'apps/web')
 
-async function startServer() {
-    const app = express();
-
-    let vite: ViteDevServer | null = null;
-    if (!isProd) {
-        const { createServer } = await import('vite');
-        vite = await createServer({
-            server: { middlewareMode: true },
-            appType: 'custom',
-            root: path.join(import.meta.dir, '../../web'),
-        });
-        app.use(vite.middlewares);
-    } else {
-        const compression = (await import('compression')).default;
-        const sirv = (await import('sirv')).default;
-        app.use(compression());
-        app.use('/', sirv(path.join(import.meta.dir, '../../web/dist/client'), { extensions: [] }))
+const aiStreamInputSchema = z
+  .object({
+    mode: z.enum(['continue', 'prompt']),
+    context: z.string().trim().min(1),
+    hint: z.string().optional(),
+    prompt: z.string().optional(),
+    maxOutputTokens: z.number().min(64).max(4096).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.mode === 'prompt' && !value.prompt?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['prompt'],
+        message: 'Prompt is required when mode is "prompt".',
+      })
     }
+  })
 
-    app.use('{*path}', async (req, res) => {
-        try {
-            const url = req.originalUrl.replace('/', '');
-            let template, render;
-
-            if (!isProd) {
-                template = fs.readFileSync(path.join(import.meta.dir, '../../web/index.html'), 'utf-8');
-                template = await vite!.transformIndexHtml(url, template);
-                render = (await vite!.ssrLoadModule('/src/entry-server.tsx')).render;
-            } else {
-                template = fs.readFileSync(path.join(import.meta.dir, '../../web/dist/client/index.html'), 'utf-8');
-                const serverEntryPoint = path.join(import.meta.dir, '../../web/dist/server/entry-server.js');
-                render = (await import(serverEntryPoint)).render;
-            }
-
-            const appHtml = await render(url);
-
-            const html = template.replace(`<!--app-html-->`, appHtml);
-
-            res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
-        }
-        catch (e: any) {
-            console.error(e.stack);
-            res.status(500).end(e.stack);
-        }
-    });
-
-    const server = app.listen(port, () => {
-        console.log(`Server started at http://localhost:${port} in ${isProd ? 'production' : 'development'} mode`);
-    });
-
-    process.on('SIGINT', () => {
-        console.log('Shutting down server...');
-        server.close(() => process.exit(0));
-    });
+function registerMetaRoutes(app: Express): void {
+  app.get('/.well-known/{*path}', (_req, res) => {
+    res.status(204).end()
+  })
 }
 
-startServer();
+function registerAiStreamRoute(app: Express): void {
+  app.post('/api/ai/stream', async (req, res) => {
+    const parsed = aiStreamInputSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ message: 'Invalid AI stream payload', issues: parsed.error.issues })
+      return
+    }
+
+    const input = parsed.data
+    const userPrompt =
+      input.mode === 'continue'
+        ? buildContinuePrompt(input.context, input.hint)
+        : buildPromptPrompt(input.context, input.prompt!.trim())
+
+    const abortController = new AbortController()
+    const abortIfClientDisconnected = () => {
+      if (!res.writableEnded) {
+        abortController.abort()
+      }
+    }
+
+    req.on('aborted', abortIfClientDisconnected)
+    res.on('close', abortIfClientDisconnected)
+
+    try {
+      const result = await generateStream({
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt,
+        maxOutputTokens: input.maxOutputTokens ?? 512,
+        temperature: 0.85,
+        abortSignal: abortController.signal,
+      })
+
+      let hasWritten = false
+      for await (const part of result.fullStream) {
+        if (part.type === 'text-delta') {
+          if (!hasWritten) {
+            res.status(200).set({
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Cache-Control': 'no-cache',
+              Connection: 'keep-alive',
+            })
+          }
+          hasWritten = true
+          res.write(part.text)
+          continue
+        }
+
+        if (part.type === 'error') {
+          const streamErrorMessage =
+            part.error instanceof Error ? part.error.message : 'AI provider returned an error'
+
+          if (!hasWritten) {
+            const fallbackText = await generate({
+              systemPrompt: SYSTEM_PROMPT,
+              userPrompt,
+              maxOutputTokens: input.maxOutputTokens ?? 512,
+              temperature: 0.85,
+              abortSignal: abortController.signal,
+            })
+
+            if (fallbackText) {
+              res.status(200).set({ 'Content-Type': 'text/plain; charset=utf-8' }).end(fallbackText)
+              return
+            }
+
+            res.status(500).json({ message: streamErrorMessage })
+            return
+          }
+
+          res.end()
+          return
+        }
+      }
+
+      if (!hasWritten) {
+        const fallbackText = await generate({
+          systemPrompt: SYSTEM_PROMPT,
+          userPrompt,
+          maxOutputTokens: input.maxOutputTokens ?? 512,
+          temperature: 0.85,
+          abortSignal: abortController.signal,
+        })
+
+        if (fallbackText) {
+          res.status(200).set({ 'Content-Type': 'text/plain; charset=utf-8' }).end(fallbackText)
+          return
+        }
+
+        res.status(502).json({ message: 'AI stream finished without output' })
+        return
+      }
+
+      res.end()
+    } catch (error: unknown) {
+      if (abortController.signal.aborted) {
+        if (!res.headersSent) res.end()
+        return
+      }
+
+      const message = error instanceof Error ? error.message : 'Failed to generate text stream'
+      if (!res.headersSent) {
+        res.status(500).json({ message })
+      } else {
+        res.end()
+      }
+    }
+  })
+}
+
+function registerTrpcRoutes(app: Express): void {
+  app.use('/api/trpc', createExpressMiddleware({ router: appRouter }))
+}
+
+async function setupWebRuntime(app: Express): Promise<ViteDevServer | null> {
+  if (!isProd) {
+    const vite = await createServer({
+      server: { middlewareMode: true },
+      appType: 'custom',
+      root: WEB_ROOT,
+    })
+    app.use(vite.middlewares)
+    return vite
+  }
+
+  const compression = (await import('compression')).default
+  const sirv = (await import('sirv')).default
+  app.use(compression())
+  app.use('/', sirv(path.join(WEB_ROOT, 'dist/client'), { extensions: [] }))
+  return null
+}
+
+function registerSsrRoute(app: Express, vite: ViteDevServer | null): void {
+  app.use('{*path}', async (req, res) => {
+    try {
+      const url = req.originalUrl
+      let template: string
+      let render: (requestUrl: string) => Promise<string> | string
+
+      if (!isProd) {
+        template = fs.readFileSync(path.join(WEB_ROOT, 'index.html'), 'utf-8')
+        template = await vite!.transformIndexHtml(url, template)
+        render = (await vite!.ssrLoadModule('/src/entry-server.tsx')).render
+      } else {
+        template = fs.readFileSync(path.join(WEB_ROOT, 'dist/client/index.html'), 'utf-8')
+        const serverEntryPoint = path.join(WEB_ROOT, 'dist/server/entry-server.js')
+        render = (await import(serverEntryPoint)).render
+      }
+
+      const appHtml = await render(url)
+      const html = template.replace('<!--app-html-->', appHtml)
+
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html)
+    } catch (error: unknown) {
+      if (error instanceof Response) {
+        const body = await error.text()
+        res.status(error.status).set({ 'Content-Type': 'text/plain; charset=utf-8' }).end(body)
+        return
+      }
+
+      if (!isProd) {
+        vite?.ssrFixStacktrace(error as Error)
+      }
+      const message = error instanceof Error ? (error.stack ?? error.message) : String(error)
+      console.error(message)
+      res.status(500).end(message)
+    }
+  })
+}
+
+function registerProcessHandlers(server: ReturnType<Express['listen']>): void {
+  process.on('SIGINT', () => {
+    console.log('Shutting down...')
+    server.close(() => process.exit(0))
+  })
+}
+
+async function startServer() {
+  const app = express()
+  app.use(express.json())
+
+  registerMetaRoutes(app)
+  registerAiStreamRoute(app)
+  registerTrpcRoutes(app)
+
+  const vite = await setupWebRuntime(app)
+  registerSsrRoute(app, vite)
+
+  const server = app.listen(port, () => {
+    console.log(
+      `Plotline started at http://localhost:${port} [${isProd ? 'production' : 'development'}]`
+    )
+  })
+
+  registerProcessHandlers(server)
+}
+
+startServer()

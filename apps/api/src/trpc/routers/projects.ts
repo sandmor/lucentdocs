@@ -1,0 +1,65 @@
+import { z } from 'zod/v4'
+import { TRPCError } from '@trpc/server'
+import { router, publicProcedure } from '../index.js'
+import { projectsRepo } from '../../db/index.js'
+import { isValidId } from '@plotline/shared'
+
+const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
+const titleSchema = z.string().trim().min(1).max(200)
+
+export const projectsRouter = router({
+  list: publicProcedure.query(async () => {
+    return projectsRepo.listProjects()
+  }),
+
+  get: publicProcedure.input(z.object({ id: idSchema })).query(async ({ input }) => {
+    const project = await projectsRepo.getProject(input.id)
+    if (!project) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: `Project ${input.id} not found`,
+      })
+    }
+    return project
+  }),
+
+  create: publicProcedure.input(z.object({ title: titleSchema })).mutation(async ({ input }) => {
+    return projectsRepo.createProject(input.title)
+  }),
+
+  update: publicProcedure
+    .input(
+      z
+        .object({
+          id: idSchema,
+          title: titleSchema.optional(),
+          content: z.string().min(1).optional(),
+        })
+        .refine((value) => value.title !== undefined || value.content !== undefined, {
+          message: 'At least one field must be provided',
+          path: ['title'],
+        })
+    )
+    .mutation(async ({ input }) => {
+      const { id, ...data } = input
+      const project = await projectsRepo.updateProject(id, data)
+      if (!project) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Project ${id} not found`,
+        })
+      }
+      return project
+    }),
+
+  delete: publicProcedure.input(z.object({ id: idSchema })).mutation(async ({ input }) => {
+    const deleted = await projectsRepo.deleteProject(input.id)
+    if (!deleted) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: `Project ${input.id} not found`,
+      })
+    }
+    return { success: true }
+  }),
+})

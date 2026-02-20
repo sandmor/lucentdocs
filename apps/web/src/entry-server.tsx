@@ -1,11 +1,22 @@
-import { StrictMode } from "react";
-import { renderToString } from "react-dom/server";
-import App from "./App.tsx";
+import { StrictMode } from 'react'
+import { renderToString } from 'react-dom/server'
+import { createStaticHandler, createStaticRouter } from 'react-router'
+import { routes } from './router.tsx'
+import App from './App.tsx'
 
-export function render() {
+export async function render(url: string) {
+  const handler = createStaticHandler(routes)
+  const context = await handler.query(new Request(new URL(url, 'http://localhost')))
+
+  if (context instanceof Response) {
+    throw context
+  }
+
+  const router = createStaticRouter(handler.dataRoutes, context)
+
   return renderToString(
     <StrictMode>
-      <App />
+      <App router={router} />
     </StrictMode>
-  );
+  )
 }
