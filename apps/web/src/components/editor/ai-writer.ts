@@ -1,6 +1,7 @@
 import { EditorView } from 'prosemirror-view'
 import { toast } from 'sonner'
 import { aiWriterPluginKey } from './ai-writer-plugin'
+import { StuckDetector } from './ai-writer-stuck-detector'
 import { parseMarkdownishToSlice } from './markdownish'
 
 type StreamingHandler = (streaming: boolean) => void
@@ -15,7 +16,7 @@ export interface AIWriterController {
   acceptAI: (view: EditorView) => void
   rejectAI: (view: EditorView) => void
   isAIActive: (view: EditorView) => boolean
-  cancelAI: () => void
+  cancelAI: (view?: EditorView) => void
 }
 
 export function createAIWriterController(
@@ -26,9 +27,29 @@ export function createAIWriterController(
   let streamedText = ''
   const onStreamingChange = options.onStreamingChange ?? null
   const getIncludeAfterContext = options.getIncludeAfterContext ?? (() => false)
+  let currentView: EditorView | null = null
 
-  function setStreamingState(streaming: boolean): void {
+  const stuckDetector = new StuckDetector({
+    onStuckStart() {
+      if (!currentView) return
+      const tr = currentView.state.tr.setMeta(aiWriterPluginKey, { type: 'stuck_start' })
+      currentView.dispatch(tr)
+    },
+    onStuckStop() {
+      if (!currentView) return
+      const tr = currentView.state.tr.setMeta(aiWriterPluginKey, { type: 'stuck_stop' })
+      currentView.dispatch(tr)
+    },
+  })
+
+  function setStreamingState(streaming: boolean, view?: EditorView): void {
     onStreamingChange?.(streaming)
+    if (!streaming && view) {
+      stuckDetector.reset()
+      currentView = null
+      const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'streaming_stop' })
+      view.dispatch(tr)
+    }
   }
 
   async function streamAI(view: EditorView, payload: StreamPayload): Promise<void> {
@@ -36,6 +57,8 @@ export function createAIWriterController(
     const requestAbortController = new AbortController()
     abortController = requestAbortController
     const requestId = ++currentRequestId
+    currentView = view
+    stuckDetector.reset()
     setStreamingState(true)
 
     try {
@@ -68,6 +91,7 @@ export function createAIWriterController(
           const chunk = decoder.decode(value, { stream: true })
           if (chunk) {
             streamedText += chunk
+            stuckDetector.onChunk()
             insertChunk(view, streamedText)
           }
         }
@@ -84,7 +108,7 @@ export function createAIWriterController(
     } finally {
       if (requestId === currentRequestId && abortController === requestAbortController) {
         abortController = null
-        setStreamingState(false)
+        setStreamingState(false, view)
       }
     }
   }
@@ -98,12 +122,14 @@ export function createAIWriterController(
     if (isEmpty) {
       stopAI(view)
     } else {
-      setStreamingState(false)
+      setStreamingState(false, view)
       abortController = null
     }
   }
 
   function stopAI(view: EditorView): void {
+    stuckDetector.reset()
+    currentView = null
     setStreamingState(false)
     streamedText = ''
     const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'stop' })
@@ -163,6 +189,8 @@ export function createAIWriterController(
     abortController?.abort()
     abortController = null
     streamedText = ''
+    stuckDetector.reset()
+    currentView = null
     setStreamingState(false)
 
     const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'accept' })
@@ -177,6 +205,8 @@ export function createAIWriterController(
     abortController?.abort()
     abortController = null
     streamedText = ''
+    stuckDetector.reset()
+    currentView = null
     setStreamingState(false)
 
     const { from, to } = pluginState
@@ -199,11 +229,17 @@ export function createAIWriterController(
     return pluginState?.active ?? false
   }
 
-  function cancelAI(): void {
+  function cancelAI(view?: EditorView): void {
     abortController?.abort()
     abortController = null
     streamedText = ''
-    setStreamingState(false)
+    stuckDetector.reset()
+    currentView = null
+    if (view) {
+      setStreamingState(false, view)
+    } else {
+      setStreamingState(false)
+    }
   }
 
   return {

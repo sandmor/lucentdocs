@@ -94,8 +94,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
             onReject() {
               if (viewHolder.current) aiController.rejectAI(viewHolder.current)
             },
-            onCancelAI() {
-              aiController.cancelAI()
+            onCancelAI(view) {
+              aiController.cancelAI(view)
             },
           },
         }),

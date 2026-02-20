@@ -6,6 +6,8 @@ export interface AIWriterState {
   active: boolean
   from: number | null
   to: number | null
+  streaming: boolean
+  stuck: boolean
 }
 
 export interface AIWriterDraftRange {
@@ -16,7 +18,7 @@ export interface AIWriterDraftRange {
 export interface AIWriterActionHandlers {
   onAccept: () => void
   onReject: () => void
-  onCancelAI: () => void
+  onCancelAI: (view: EditorView) => void
 }
 
 export const aiWriterPluginKey = new PluginKey<AIWriterState>('ai_writer')
@@ -52,18 +54,20 @@ export function createAIWriterPlugin(
     state: {
       init(_config, instanceState): AIWriterState {
         if (!initialRange) {
-          return { active: false, from: null, to: null }
+          return { active: false, from: null, to: null, streaming: false, stuck: false }
         }
 
         const clamped = clampDraftRange(initialRange, instanceState.doc.content.size)
         if (!clamped) {
-          return { active: false, from: null, to: null }
+          return { active: false, from: null, to: null, streaming: false, stuck: false }
         }
 
         return {
           active: true,
           from: clamped.from,
           to: clamped.to,
+          streaming: false,
+          stuck: false,
         }
       },
       apply(tr, value): AIWriterState {
@@ -74,19 +78,33 @@ export function createAIWriterPlugin(
             active: true,
             from: meta.pos,
             to: meta.pos,
+            streaming: true,
+            stuck: false,
           }
         }
 
+        if (meta?.type === 'streaming_stop') {
+          return { ...value, streaming: false, stuck: false }
+        }
+
+        if (meta?.type === 'stuck_start') {
+          return { ...value, stuck: true }
+        }
+
+        if (meta?.type === 'stuck_stop') {
+          return { ...value, stuck: false }
+        }
+
         if (meta?.type === 'stop') {
-          return { active: false, from: null, to: null }
+          return { active: false, from: null, to: null, streaming: false, stuck: false }
         }
 
         if (meta?.type === 'accept') {
-          return { active: false, from: null, to: null }
+          return { active: false, from: null, to: null, streaming: false, stuck: false }
         }
 
         if (meta?.type === 'reject') {
-          return { active: false, from: null, to: null }
+          return { active: false, from: null, to: null, streaming: false, stuck: false }
         }
 
         if (value.active && tr.docChanged && value.from !== null && value.to !== null) {
@@ -98,6 +116,8 @@ export function createAIWriterPlugin(
             active: true,
             from: Math.min(from, to),
             to: Math.max(from, to),
+            streaming: value.streaming,
+            stuck: value.stuck,
           }
         }
 
@@ -168,7 +188,7 @@ export function createAIWriterPlugin(
         // If user types at the end of the zone (at 'to'), cancel streaming
         // but keep zone active for accept/reject. User text goes outside zone.
         if (from === zoneTo) {
-          handlers.onCancelAI()
+          handlers.onCancelAI(view)
           return false
         }
 
@@ -191,7 +211,7 @@ export function createAIWriterPlugin(
 
         // If pasting at the end of zone, cancel streaming
         if (selection.from === zoneTo && selection.to === zoneTo) {
-          handlers.onCancelAI()
+          handlers.onCancelAI(view)
           return false
         }
 

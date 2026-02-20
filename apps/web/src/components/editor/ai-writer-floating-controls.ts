@@ -7,10 +7,17 @@ interface VirtualElement {
   getBoundingClientRect(): DOMRect
 }
 
+const LOADER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`
+
 function createFloatingControlsDOM(handlers: AIWriterActionHandlers): HTMLDivElement {
   const container = document.createElement('div')
   container.className =
     'ai-writer-floating-controls fixed z-[60] inline-flex items-center gap-1.5 p-1 border border-border rounded-md bg-background shadow-sm'
+
+  const spinner = document.createElement('span')
+  spinner.className = 'text-muted-foreground'
+  spinner.setAttribute('data-spinner', 'true')
+  spinner.innerHTML = LOADER_SVG
 
   const acceptBtn = document.createElement('button')
   acceptBtn.className =
@@ -44,6 +51,7 @@ function createFloatingControlsDOM(handlers: AIWriterActionHandlers): HTMLDivEle
     handlers.onReject()
   }
 
+  container.appendChild(spinner)
   container.appendChild(acceptBtn)
   container.appendChild(rejectBtn)
   return container
@@ -66,6 +74,11 @@ export class FloatingControls {
     if (!state?.active || state.from === null || state.to === null || state.from >= state.to) {
       this.hide()
       return
+    }
+
+    const spinner = this.root.querySelector('[data-spinner="true"]') as HTMLElement | null
+    if (spinner) {
+      spinner.style.display = state.streaming && state.stuck ? 'inline-flex' : 'none'
     }
 
     const zoneTo = state.to

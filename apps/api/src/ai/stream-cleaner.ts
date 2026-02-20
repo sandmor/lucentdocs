@@ -15,7 +15,7 @@ function createPrefixMatcher(contextBefore: string) {
         return char
       }
 
-      let nextCandidates: number[] = []
+      const nextCandidates: number[] = []
 
       if (candidates === null) {
         for (let i = 0; i < contextLength; i += 1) {
