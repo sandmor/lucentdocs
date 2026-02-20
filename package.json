@@ -14,7 +14,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "bun run --filter './apps/api' typecheck && bun run --filter './apps/web' typecheck && bun run --filter './packages/shared' typecheck"
+    "typecheck": "bun run --filter './apps/api' typecheck && bun run --filter './apps/web' typecheck && bun run --filter './packages/shared' typecheck",
+    "test": "bun run --filter './apps/api' --filter './packages/shared' test && bun run --cwd apps/web test"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

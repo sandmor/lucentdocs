@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { Kbd } from '@/components/ui/kbd'
 import { Sparkles, ArrowRight, Loader2 } from 'lucide-react'
 
@@ -9,9 +10,17 @@ interface AiPanelProps {
   onContinue: () => void
   onGenerate: (prompt: string) => void
   isGenerating: boolean
+  includeAfterContext: boolean
+  onIncludeAfterContextChange: (value: boolean) => void
 }
 
-export function AiPanel({ onContinue, onGenerate, isGenerating }: AiPanelProps) {
+export function AiPanel({
+  onContinue,
+  onGenerate,
+  isGenerating,
+  includeAfterContext,
+  onIncludeAfterContextChange,
+}: AiPanelProps) {
   const [prompt, setPrompt] = useState('')
 
   const handleGenerate = () => {
@@ -42,6 +51,18 @@ export function AiPanel({ onContinue, onGenerate, isGenerating }: AiPanelProps) 
         )}
         Continue writing
       </Button>
+
+      <div className="flex items-center gap-2">
+        <Switch
+          id="include-after"
+          checked={includeAfterContext}
+          onCheckedChange={onIncludeAfterContextChange}
+          disabled={isGenerating}
+        />
+        <label htmlFor="include-after" className="text-xs">
+          Include text after cursor
+        </label>
+      </div>
 
       <div className="flex flex-col gap-2">
         <label className="text-muted-foreground text-xs font-medium">

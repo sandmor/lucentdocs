@@ -8,7 +8,7 @@ import cookieParser from 'cookie-parser'
 import { z } from 'zod/v4'
 import { appRouter } from './trpc/router.js'
 import { PROJECT_ROOT } from './paths.js'
-import { generate, generateStream } from './ai/index.js'
+import { generate, generateStream, createStreamCleaner, cleanText } from './ai/index.js'
 import { SYSTEM_PROMPT, buildContinuePrompt, buildPromptPrompt } from './ai/prompts.js'
 
 const isProd = process.env.NODE_ENV === 'production'
@@ -22,10 +22,11 @@ const MAX_PROMPT_CHARS = 50_000
 const aiStreamInputSchema = z
   .object({
     mode: z.enum(['continue', 'prompt']),
-    context: z.string().trim().min(1).max(MAX_CONTEXT_CHARS),
+    contextBefore: z.string().min(1).max(MAX_CONTEXT_CHARS),
+    contextAfter: z.string().max(MAX_CONTEXT_CHARS).optional(),
     hint: z.string().trim().max(MAX_HINT_CHARS).optional(),
     prompt: z.string().trim().max(MAX_PROMPT_CHARS).optional(),
-    maxOutputTokens: z.number().min(64).max(4096).optional(),
+    maxOutputTokens: z.number().int().min(64).max(4096).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.mode === 'prompt' && !value.prompt?.trim()) {
@@ -33,6 +34,14 @@ const aiStreamInputSchema = z
         code: z.ZodIssueCode.custom,
         path: ['prompt'],
         message: 'Prompt is required when mode is "prompt".',
+      })
+    }
+    const totalContext = value.contextBefore.length + (value.contextAfter?.length ?? 0)
+    if (totalContext > MAX_CONTEXT_CHARS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['contextBefore'],
+        message: `Combined contextBefore and contextAfter length exceeds ${MAX_CONTEXT_CHARS} characters.`,
       })
     }
   })
@@ -52,10 +61,28 @@ function registerAiStreamRoute(app: Express): void {
     }
 
     const input = parsed.data
+    const contextAfter = input.contextAfter ?? null
     const userPrompt =
       input.mode === 'continue'
-        ? buildContinuePrompt(input.context, input.hint)
-        : buildPromptPrompt(input.context, input.prompt!.trim())
+        ? buildContinuePrompt(input.contextBefore, contextAfter, input.hint)
+        : buildPromptPrompt(input.contextBefore, contextAfter, input.prompt!.trim())
+
+    const cleaner = createStreamCleaner(input.contextBefore, contextAfter)
+    const generateCleanFallback = async (): Promise<string | null> => {
+      const fallbackText = await generate({
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt,
+        maxOutputTokens: input.maxOutputTokens ?? 512,
+        temperature: 0.85,
+        abortSignal: abortController.signal,
+      })
+
+      if (!fallbackText) {
+        return null
+      }
+
+      return cleanText(fallbackText, input.contextBefore, contextAfter)
+    }
 
     const abortController = new AbortController()
     const abortIfClientDisconnected = () => {
@@ -86,8 +113,11 @@ function registerAiStreamRoute(app: Express): void {
               Connection: 'keep-alive',
             })
           }
-          hasWritten = true
-          res.write(part.text)
+          const cleaned = cleaner.process(part.text)
+          if (cleaned) {
+            hasWritten = true
+            res.write(cleaned)
+          }
           continue
         }
 
@@ -96,16 +126,13 @@ function registerAiStreamRoute(app: Express): void {
             part.error instanceof Error ? part.error.message : 'AI provider returned an error'
 
           if (!hasWritten) {
-            const fallbackText = await generate({
-              systemPrompt: SYSTEM_PROMPT,
-              userPrompt,
-              maxOutputTokens: input.maxOutputTokens ?? 512,
-              temperature: 0.85,
-              abortSignal: abortController.signal,
-            })
+            const cleanedFallback = await generateCleanFallback()
 
-            if (fallbackText) {
-              res.status(200).set({ 'Content-Type': 'text/plain; charset=utf-8' }).end(fallbackText)
+            if (cleanedFallback) {
+              res
+                .status(200)
+                .set({ 'Content-Type': 'text/plain; charset=utf-8' })
+                .end(cleanedFallback)
               return
             }
 
@@ -119,16 +146,10 @@ function registerAiStreamRoute(app: Express): void {
       }
 
       if (!hasWritten) {
-        const fallbackText = await generate({
-          systemPrompt: SYSTEM_PROMPT,
-          userPrompt,
-          maxOutputTokens: input.maxOutputTokens ?? 512,
-          temperature: 0.85,
-          abortSignal: abortController.signal,
-        })
+        const cleanedFallback = await generateCleanFallback()
 
-        if (fallbackText) {
-          res.status(200).set({ 'Content-Type': 'text/plain; charset=utf-8' }).end(fallbackText)
+        if (cleanedFallback) {
+          res.status(200).set({ 'Content-Type': 'text/plain; charset=utf-8' }).end(cleanedFallback)
           return
         }
 
@@ -136,6 +157,10 @@ function registerAiStreamRoute(app: Express): void {
         return
       }
 
+      const final = cleaner.flush()
+      if (final) {
+        res.write(final)
+      }
       res.end()
     } catch (error: unknown) {
       if (abortController.signal.aborted) {

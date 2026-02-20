@@ -23,6 +23,7 @@ export function EditorPage() {
   const [showAi, setShowAi] = useState(true)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [includeAfterContext, setIncludeAfterContext] = useState(false)
 
   const projectQuery = trpc.projects.get.useQuery({ id: id! }, { enabled: !!id })
 
@@ -202,6 +203,7 @@ export function EditorPage() {
               initialAIDraft={parsedContent.aiDraft}
               onChange={handleContentChange}
               onStreamingChange={handleStreamingChange}
+              includeAfterContext={includeAfterContext}
               className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
             />
           </div>
@@ -215,6 +217,8 @@ export function EditorPage() {
                 onContinue={() => editorRef.current?.startAIContinuation()}
                 onGenerate={(prompt) => editorRef.current?.startAIPrompt(prompt)}
                 isGenerating={isGenerating}
+                includeAfterContext={includeAfterContext}
+                onIncludeAfterContextChange={setIncludeAfterContext}
               />
             </aside>
           </>

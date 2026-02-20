@@ -37,20 +37,24 @@ interface EditorProps {
   /** Called when AI streaming starts/stops (zone may still be active) */
   onStreamingChange?: (streaming: boolean) => void
   initialAIDraft?: AIWriterDraftRange | null
+  /** Whether to include text after cursor for AI context */
+  includeAfterContext?: boolean
   className?: string
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { initialContent, onChange, onStreamingChange, initialAIDraft, className },
+  { initialContent, onChange, onStreamingChange, initialAIDraft, includeAfterContext, className },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   const onStreamingChangeRef = useRef(onStreamingChange)
+  const includeAfterContextRef = useRef(includeAfterContext ?? false)
   const aiControllerRef = useRef<AIWriterController | null>(null)
   onChangeRef.current = onChange
   onStreamingChangeRef.current = onStreamingChange
+  includeAfterContextRef.current = includeAfterContext ?? false
 
   // Mount editor
   useEffect(() => {
@@ -59,6 +63,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     const aiController = createAIWriterController({
       onStreamingChange(streaming) {
         onStreamingChangeRef.current?.(streaming)
+      },
+      getIncludeAfterContext() {
+        return includeAfterContextRef.current
       },
     })
     aiControllerRef.current = aiController

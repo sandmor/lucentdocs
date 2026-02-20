@@ -1,10 +1,12 @@
 import { EditorView } from 'prosemirror-view'
 import { toast } from 'sonner'
 import { aiWriterPluginKey } from './ai-writer-plugin'
+import { parseMarkdownishToSlice } from './markdownish'
 
 type StreamingHandler = (streaming: boolean) => void
 interface AIWriterControllerOptions {
   onStreamingChange?: StreamingHandler
+  getIncludeAfterContext?: () => boolean
 }
 
 export interface AIWriterController {
@@ -21,7 +23,9 @@ export function createAIWriterController(
 ): AIWriterController {
   let abortController: AbortController | null = null
   let currentRequestId = 0
+  let streamedText = ''
   const onStreamingChange = options.onStreamingChange ?? null
+  const getIncludeAfterContext = options.getIncludeAfterContext ?? (() => false)
 
   function setStreamingState(streaming: boolean): void {
     onStreamingChange?.(streaming)
@@ -43,7 +47,7 @@ export function createAIWriterController(
       })
 
       if (!response.ok) {
-        const message = await response.text()
+        const message = await readErrorMessage(response)
         handleAIError(view, message)
         return
       }
@@ -62,7 +66,10 @@ export function createAIWriterController(
 
         if (value && !requestAbortController.signal.aborted) {
           const chunk = decoder.decode(value, { stream: true })
-          insertChunk(view, chunk)
+          if (chunk) {
+            streamedText += chunk
+            insertChunk(view, streamedText)
+          }
         }
 
         const pluginState = aiWriterPluginKey.getState(view.state)
@@ -98,6 +105,7 @@ export function createAIWriterController(
 
   function stopAI(view: EditorView): void {
     setStreamingState(false)
+    streamedText = ''
     const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'stop' })
     view.dispatch(tr)
   }
@@ -114,9 +122,10 @@ export function createAIWriterController(
     tr.setMeta(aiWriterPluginKey, { type: 'start', pos })
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
+    streamedText = ''
 
-    const context = getDocumentContext(view)
-    void streamAI(view, { mode: 'continue', context })
+    const { contextBefore, contextAfter } = getDocumentContext(view, getIncludeAfterContext())
+    void streamAI(view, { mode: 'continue', contextBefore, contextAfter })
   }
 
   function startAIPrompt(view: EditorView, prompt: string): void {
@@ -136,9 +145,15 @@ export function createAIWriterController(
     tr.setMeta(aiWriterPluginKey, { type: 'start', pos })
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
+    streamedText = ''
 
-    const context = getDocumentContext(view)
-    void streamAI(view, { mode: 'prompt', context, prompt: trimmedPrompt })
+    const { contextBefore, contextAfter } = getDocumentContext(view, getIncludeAfterContext())
+    void streamAI(view, {
+      mode: 'prompt',
+      contextBefore,
+      contextAfter,
+      prompt: trimmedPrompt,
+    })
   }
 
   function acceptAI(view: EditorView): void {
@@ -147,6 +162,7 @@ export function createAIWriterController(
 
     abortController?.abort()
     abortController = null
+    streamedText = ''
     setStreamingState(false)
 
     const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'accept' })
@@ -160,6 +176,7 @@ export function createAIWriterController(
 
     abortController?.abort()
     abortController = null
+    streamedText = ''
     setStreamingState(false)
 
     const { from, to } = pluginState
@@ -185,6 +202,7 @@ export function createAIWriterController(
   function cancelAI(): void {
     abortController?.abort()
     abortController = null
+    streamedText = ''
     setStreamingState(false)
   }
 
@@ -198,18 +216,31 @@ export function createAIWriterController(
   }
 }
 
-function getDocumentContext(view: EditorView): string {
+function getDocumentContext(
+  view: EditorView,
+  includeAfter: boolean
+): { contextBefore: string; contextAfter?: string } {
   const caretPos = view.state.selection.from
-  return view.state.doc.textBetween(0, caretPos, '\n\n', '\n')
+  const docEnd = view.state.doc.content.size
+
+  const contextBefore = view.state.doc.textBetween(0, caretPos, '\n\n', '\n')
+
+  if (!includeAfter || caretPos >= docEnd) {
+    return { contextBefore }
+  }
+
+  const contextAfter = view.state.doc.textBetween(caretPos, docEnd, '\n\n', '\n')
+  return { contextBefore, contextAfter }
 }
 
 interface StreamPayload {
   mode: 'continue' | 'prompt'
-  context: string
+  contextBefore: string
+  contextAfter?: string
   prompt?: string
 }
 
-function insertChunk(view: EditorView, chunk: string): void {
+function insertChunk(view: EditorView, generatedText: string): void {
   const pluginState = aiWriterPluginKey.getState(view.state)
   if (
     !pluginState?.active ||
@@ -220,9 +251,37 @@ function insertChunk(view: EditorView, chunk: string): void {
     return
   }
 
+  const $from = view.state.doc.resolve(pluginState.from)
+  const $to = view.state.doc.resolve(pluginState.to)
+  const content = parseMarkdownishToSlice(generatedText, {
+    openStart: $from.parent.inlineContent,
+    openEnd: $to.parent.inlineContent,
+  })
+
   const tr = view.state.tr
-  tr.insertText(chunk, pluginState.to)
+  tr.replaceRange(pluginState.from, pluginState.to, content)
   tr.setMeta(aiWriterPluginKey, { type: 'chunk' })
   tr.setMeta('addToHistory', false)
   view.dispatch(tr)
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const contentType = response.headers.get('content-type') ?? ''
+    if (contentType.includes('application/json')) {
+      const body = (await response.json()) as { message?: unknown }
+      if (typeof body.message === 'string' && body.message.trim()) {
+        return body.message
+      }
+    }
+
+    const text = await response.text()
+    if (text.trim()) {
+      return text
+    }
+  } catch {
+    return `AI request failed with status ${response.status}`
+  }
+
+  return `AI request failed with status ${response.status}`
 }
