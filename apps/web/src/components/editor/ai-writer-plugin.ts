@@ -1,0 +1,269 @@
+import { Plugin, PluginKey } from 'prosemirror-state'
+import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view'
+import { FloatingControls } from './ai-writer-floating-controls'
+
+export interface AIWriterState {
+  active: boolean
+  from: number | null
+  to: number | null
+}
+
+export interface AIWriterDraftRange {
+  from: number
+  to: number
+}
+
+export interface AIWriterActionHandlers {
+  onAccept: () => void
+  onReject: () => void
+  onCancelAI: () => void
+}
+
+export const aiWriterPluginKey = new PluginKey<AIWriterState>('ai_writer')
+
+function clampDraftRange(range: AIWriterDraftRange, docSize: number): AIWriterDraftRange | null {
+  const from = Math.max(0, Math.min(range.from, docSize))
+  const to = Math.max(0, Math.min(range.to, docSize))
+
+  if (from >= to) {
+    return null
+  }
+
+  return { from, to }
+}
+
+export function getAIDraftRange(view: EditorView): AIWriterDraftRange | null {
+  const state = aiWriterPluginKey.getState(view.state)
+  if (!state?.active || state.from === null || state.to === null || state.from >= state.to) {
+    return null
+  }
+
+  return { from: state.from, to: state.to }
+}
+
+export function createAIWriterPlugin(
+  initialDraft: AIWriterDraftRange | null = null,
+  handlers: AIWriterActionHandlers
+): Plugin {
+  const initialRange = initialDraft ?? null
+
+  return new Plugin({
+    key: aiWriterPluginKey,
+    state: {
+      init(_config, instanceState): AIWriterState {
+        if (!initialRange) {
+          return { active: false, from: null, to: null }
+        }
+
+        const clamped = clampDraftRange(initialRange, instanceState.doc.content.size)
+        if (!clamped) {
+          return { active: false, from: null, to: null }
+        }
+
+        return {
+          active: true,
+          from: clamped.from,
+          to: clamped.to,
+        }
+      },
+      apply(tr, value): AIWriterState {
+        const meta = tr.getMeta(aiWriterPluginKey)
+
+        if (meta?.type === 'start') {
+          return {
+            active: true,
+            from: meta.pos,
+            to: meta.pos,
+          }
+        }
+
+        if (meta?.type === 'stop') {
+          return { active: false, from: null, to: null }
+        }
+
+        if (meta?.type === 'accept') {
+          return { active: false, from: null, to: null }
+        }
+
+        if (meta?.type === 'reject') {
+          return { active: false, from: null, to: null }
+        }
+
+        if (value.active && tr.docChanged && value.from !== null && value.to !== null) {
+          const isChunkInsert = meta?.type === 'chunk'
+          const from = tr.mapping.map(value.from, isChunkInsert ? -1 : 1)
+          const to = tr.mapping.map(value.to, isChunkInsert ? 1 : -1)
+
+          return {
+            active: true,
+            from: Math.min(from, to),
+            to: Math.max(from, to),
+          }
+        }
+
+        return value
+      },
+    },
+    view(view) {
+      const floatingControls = new FloatingControls(handlers)
+      floatingControls.update(view)
+
+      return {
+        update(nextView) {
+          floatingControls.update(nextView)
+        },
+        destroy() {
+          floatingControls.destroy()
+        },
+      }
+    },
+    props: {
+      decorations(state) {
+        const pluginState = aiWriterPluginKey.getState(state)
+        if (!pluginState?.active || pluginState.from === null || pluginState.to === null) {
+          return null
+        }
+
+        if (pluginState.from === pluginState.to) {
+          return null
+        }
+
+        const decorations: Decoration[] = []
+
+        decorations.push(
+          Decoration.inline(
+            pluginState.from,
+            pluginState.to,
+            {
+              class: 'ai-generating-text',
+            },
+            {
+              inclusiveStart: false,
+              inclusiveEnd: false,
+            }
+          )
+        )
+
+        return DecorationSet.create(state.doc, decorations)
+      },
+      handleTextInput(view, from, to) {
+        const pluginState = aiWriterPluginKey.getState(view.state)
+        if (!pluginState?.active || pluginState.from === null || pluginState.to === null) {
+          return false
+        }
+
+        const zoneFrom = pluginState.from
+        const zoneTo = pluginState.to
+
+        // Strictly block typing within the bubble.
+        if (from === to && from > zoneFrom && from < zoneTo) {
+          return true
+        }
+
+        // Block replacement typing when it overlaps the AI zone.
+        if (from < zoneTo && to > zoneFrom) {
+          return true
+        }
+
+        // If user types at the end of the zone (at 'to'), cancel streaming
+        // but keep zone active for accept/reject. User text goes outside zone.
+        if (from === zoneTo) {
+          handlers.onCancelAI()
+          return false
+        }
+
+        return false
+      },
+      handlePaste(view, _event, _slice) {
+        const pluginState = aiWriterPluginKey.getState(view.state)
+        if (!pluginState?.active || pluginState.from === null || pluginState.to === null) {
+          return false
+        }
+
+        const selection = view.state.selection
+        const zoneFrom = pluginState.from
+        const zoneTo = pluginState.to
+
+        // Block paste when selection overlaps any part of the AI zone
+        if (selection.from < zoneTo && selection.to > zoneFrom) {
+          return true
+        }
+
+        // If pasting at the end of zone, cancel streaming
+        if (selection.from === zoneTo && selection.to === zoneTo) {
+          handlers.onCancelAI()
+          return false
+        }
+
+        return false
+      },
+      handleKeyDown(view, event) {
+        const pluginState = aiWriterPluginKey.getState(view.state)
+        if (!pluginState?.active) return false
+
+        if (event.key === 'Tab') {
+          event.preventDefault()
+          handlers.onAccept()
+          return true
+        }
+
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          handlers.onReject()
+          return true
+        }
+
+        if (pluginState.from === null || pluginState.to === null) {
+          return false
+        }
+
+        const selection = view.state.selection
+        const zoneFrom = pluginState.from
+        const zoneTo = pluginState.to
+        const isEditKey =
+          event.key === 'Backspace' || event.key === 'Delete' || event.key === 'Enter'
+
+        if (!isEditKey) {
+          return false
+        }
+
+        if (!selection.empty && selection.from < zoneTo && selection.to > zoneFrom) {
+          event.preventDefault()
+          return true
+        }
+
+        if (
+          event.key === 'Backspace' &&
+          selection.empty &&
+          selection.from > zoneFrom &&
+          selection.from <= zoneTo
+        ) {
+          event.preventDefault()
+          return true
+        }
+
+        if (
+          event.key === 'Delete' &&
+          selection.empty &&
+          selection.from >= zoneFrom &&
+          selection.from < zoneTo
+        ) {
+          event.preventDefault()
+          return true
+        }
+
+        if (
+          event.key === 'Enter' &&
+          selection.empty &&
+          selection.from > zoneFrom &&
+          selection.from < zoneTo
+        ) {
+          event.preventDefault()
+          return true
+        }
+
+        return false
+      },
+    },
+  })
+}

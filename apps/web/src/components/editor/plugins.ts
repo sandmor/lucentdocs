@@ -6,6 +6,11 @@ import { inputRules, wrappingInputRule, textblockTypeInputRule } from 'prosemirr
 import { dropCursor } from 'prosemirror-dropcursor'
 import { gapCursor } from 'prosemirror-gapcursor'
 import { schema } from './schema'
+import {
+  createAIWriterPlugin,
+  type AIWriterActionHandlers,
+  type AIWriterDraftRange,
+} from './ai-writer-plugin'
 
 // Input rules (Markdown Shortcuts)
 function buildInputRules() {
@@ -33,7 +38,20 @@ function buildInputRules() {
   return inputRules({ rules })
 }
 
-export function buildPlugins(extraPlugins: Plugin[] = []): Plugin[] {
+interface BuildPluginsOptions {
+  aiDraft?: AIWriterDraftRange | null
+  aiHandlers?: AIWriterActionHandlers
+  extraPlugins?: Plugin[]
+}
+
+export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
+  const { aiDraft = null, aiHandlers, extraPlugins = [] } = options
+  const effectiveHandlers: AIWriterActionHandlers = aiHandlers ?? {
+    onAccept() {},
+    onReject() {},
+    onCancelAI() {},
+  }
+
   return [
     buildInputRules(),
     keymap({
@@ -45,6 +63,7 @@ export function buildPlugins(extraPlugins: Plugin[] = []): Plugin[] {
     dropCursor(),
     gapCursor(),
     history(),
+    createAIWriterPlugin(aiDraft, effectiveHandlers),
     ...extraPlugins,
   ]
 }

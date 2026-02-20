@@ -1,102 +1,23 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
+import { Kbd } from '@/components/ui/kbd'
 import { Sparkles, ArrowRight, Loader2 } from 'lucide-react'
 
 interface AiPanelProps {
-  /** Callback to get the current document text for context */
-  getContext: () => string
-  /** Callback to insert AI-generated text into the editor */
-  onInsert: (text: string) => void
+  onContinue: () => void
+  onGenerate: (prompt: string) => void
+  isGenerating: boolean
 }
 
-export function AiPanel({ getContext, onInsert }: AiPanelProps) {
+export function AiPanel({ onContinue, onGenerate, isGenerating }: AiPanelProps) {
   const [prompt, setPrompt] = useState('')
-  const [lastResult, setLastResult] = useState<string | null>(null)
-  const [isPending, setIsPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    return () => abortRef.current?.abort()
-  }, [])
-
-  async function runStream(payload: {
-    mode: 'continue' | 'prompt'
-    context: string
-    prompt?: string
-    hint?: string
-  }) {
-    abortRef.current?.abort()
-    const abortController = new AbortController()
-    abortRef.current = abortController
-
-    setError(null)
-    setIsPending(true)
-    setLastResult('')
-
-    try {
-      const response = await fetch('/api/ai/stream', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: abortController.signal,
-      })
-
-      if (!response.ok) {
-        const message = await response.text()
-        throw new Error(message || 'AI request failed')
-      }
-
-      if (!response.body) {
-        throw new Error('No stream returned from AI endpoint')
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let text = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value) {
-          text += decoder.decode(value, { stream: true })
-          setLastResult(text)
-        }
-      }
-
-      text += decoder.decode()
-      setLastResult(text)
-    } catch (streamError: unknown) {
-      if (streamError instanceof Error && streamError.name === 'AbortError') return
-      const message =
-        streamError instanceof Error ? streamError.message : 'Failed to stream AI text'
-      setError(message)
-    } finally {
-      setIsPending(false)
-      if (abortRef.current === abortController) {
-        abortRef.current = null
-      }
-    }
-  }
-
-  const handleContinue = () => {
-    const context = getContext()
-    void runStream({ mode: 'continue', context })
-  }
-
-  const handlePrompt = () => {
-    if (!prompt.trim()) return
-    const context = getContext()
-    void runStream({ mode: 'prompt', context, prompt: prompt.trim() })
-  }
-
-  const handleInsert = () => {
-    if (lastResult) {
-      onInsert(lastResult)
-      setLastResult(null)
-    }
+  const handleGenerate = () => {
+    if (!prompt.trim() || isGenerating) return
+    onGenerate(prompt.trim())
+    setPrompt('')
   }
 
   return (
@@ -111,10 +32,10 @@ export function AiPanel({ getContext, onInsert }: AiPanelProps) {
       <Button
         variant="outline"
         className="justify-start"
-        onClick={handleContinue}
-        disabled={isPending}
+        onClick={onContinue}
+        disabled={isGenerating}
       >
-        {isPending ? (
+        {isGenerating ? (
           <Loader2 className="animate-spin" data-icon="inline-start" />
         ) : (
           <ArrowRight data-icon="inline-start" />
@@ -124,16 +45,17 @@ export function AiPanel({ getContext, onInsert }: AiPanelProps) {
 
       <div className="flex flex-col gap-2">
         <label className="text-muted-foreground text-xs font-medium">
-          Or describe what you need…
+          Or describe what you need...
         </label>
         <Textarea
-          placeholder="e.g. Write a tense dialogue between the protagonist and the antagonist…"
+          placeholder="e.g. Write a tense dialogue between the protagonist and the antagonist..."
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           className="min-h-24 text-sm"
+          disabled={isGenerating}
         />
-        <Button size="sm" onClick={handlePrompt} disabled={!prompt.trim() || isPending}>
-          {isPending ? (
+        <Button size="sm" onClick={handleGenerate} disabled={!prompt.trim() || isGenerating}>
+          {isGenerating ? (
             <Loader2 className="animate-spin" data-icon="inline-start" />
           ) : (
             <Sparkles data-icon="inline-start" />
@@ -142,30 +64,10 @@ export function AiPanel({ getContext, onInsert }: AiPanelProps) {
         </Button>
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 text-xs text-destructive">
-          {error}
+      {isGenerating && (
+        <div className="text-muted-foreground rounded-lg border bg-muted/50 p-3 text-xs">
+          Generating... Use <Kbd>Tab</Kbd> to accept or <Kbd>Esc</Kbd> to reject.
         </div>
-      )}
-
-      {lastResult && (
-        <>
-          <Separator />
-          <div className="flex flex-col gap-2">
-            <label className="text-muted-foreground text-xs font-medium">Preview</label>
-            <div className="bg-muted max-h-64 overflow-y-auto rounded-lg p-3 text-sm leading-relaxed whitespace-pre-wrap">
-              {lastResult}
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={handleInsert}>
-                Insert into document
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setLastResult(null)}>
-                Discard
-              </Button>
-            </div>
-          </div>
-        </>
       )}
     </div>
   )

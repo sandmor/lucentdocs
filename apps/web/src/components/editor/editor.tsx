@@ -1,21 +1,32 @@
-import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { EditorState } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { Node as ProseMirrorNode } from 'prosemirror-model'
 import { schema } from './schema'
 import { buildPlugins } from './plugins'
+import { getAIDraftRange, aiWriterPluginKey, type AIWriterDraftRange } from './ai-writer-plugin'
+import { createAIWriterController, type AIWriterController } from './ai-writer'
 
 export interface EditorHandle {
-  /** Get the current document as JSON */
-  getJSON: () => Record<string, unknown>
-  /** Get the current document as plain text */
-  getText: () => string
   /** Replace the entire document with new JSON content */
   setContent: (json: Record<string, unknown>) => void
-  /** Insert text at the current cursor position */
-  insertText: (text: string) => void
   /** Get the ProseMirror view instance */
   getView: () => EditorView | null
+  /** Start AI continuation at current cursor position */
+  startAIContinuation: () => void
+  /** Start AI generation with custom prompt */
+  startAIPrompt: (prompt: string) => void
+  /** Accept the current AI generation */
+  acceptAI: () => void
+  /** Reject the current AI generation */
+  rejectAI: () => void
+  /** Check if AI generation is active */
+  isAIActive: () => boolean
+  /** Get full persisted content (document + AI draft) */
+  getPersistedContent: () => {
+    doc: Record<string, unknown>
+    aiDraft: AIWriterDraftRange | null
+  }
 }
 
 interface EditorProps {
@@ -23,50 +34,86 @@ interface EditorProps {
   initialContent?: Record<string, unknown>
   /** Called whenever the document changes */
   onChange?: (json: Record<string, unknown>) => void
+  /** Called when AI streaming starts/stops (zone may still be active) */
+  onStreamingChange?: (streaming: boolean) => void
+  initialAIDraft?: AIWriterDraftRange | null
   className?: string
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { initialContent, onChange, className },
+  { initialContent, onChange, onStreamingChange, initialAIDraft, className },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
+  const onStreamingChangeRef = useRef(onStreamingChange)
+  const aiControllerRef = useRef<AIWriterController | null>(null)
   onChangeRef.current = onChange
-
-  // Build initial state
-  const createState = useCallback((content?: Record<string, unknown>) => {
-    const doc = content
-      ? ProseMirrorNode.fromJSON(schema, content)
-      : schema.nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
-
-    return EditorState.create({
-      doc,
-      plugins: buildPlugins(),
-    })
-  }, [])
+  onStreamingChangeRef.current = onStreamingChange
 
   // Mount editor
   useEffect(() => {
     if (!containerRef.current) return
 
-    const state = createState(initialContent)
+    const aiController = createAIWriterController({
+      onStreamingChange(streaming) {
+        onStreamingChangeRef.current?.(streaming)
+      },
+    })
+    aiControllerRef.current = aiController
+
+    const viewHolder = { current: null as EditorView | null }
+
+    const createState = (content?: Record<string, unknown>, draft?: AIWriterDraftRange | null) => {
+      let doc = schema.nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
+
+      if (content) {
+        try {
+          doc = ProseMirrorNode.fromJSON(schema, content)
+        } catch {
+          doc = schema.nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
+        }
+      }
+
+      return EditorState.create({
+        doc,
+        plugins: buildPlugins({
+          aiDraft: draft ?? null,
+          aiHandlers: {
+            onAccept() {
+              if (viewHolder.current) aiController.acceptAI(viewHolder.current)
+            },
+            onReject() {
+              if (viewHolder.current) aiController.rejectAI(viewHolder.current)
+            },
+            onCancelAI() {
+              aiController.cancelAI()
+            },
+          },
+        }),
+      })
+    }
+
+    const state = createState(initialContent, initialAIDraft)
     const view = new EditorView(containerRef.current, {
       state,
       dispatchTransaction(tr) {
         const newState = view.state.apply(tr)
         view.updateState(newState)
 
-        if (tr.docChanged) {
+        if (tr.docChanged || Boolean(tr.getMeta(aiWriterPluginKey))) {
           onChangeRef.current?.(newState.doc.toJSON() as Record<string, unknown>)
         }
       },
     })
 
+    viewHolder.current = view
     viewRef.current = view
 
     return () => {
+      aiController.cancelAI()
+      aiControllerRef.current = null
       view.destroy()
       viewRef.current = null
     }
@@ -76,33 +123,56 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
   // Expose handle to parent
   useImperativeHandle(ref, () => ({
-    getJSON() {
-      if (!viewRef.current) return { type: 'doc', content: [] }
-      return viewRef.current.state.doc.toJSON() as Record<string, unknown>
-    },
-    getText() {
-      if (!viewRef.current) return ''
-      return viewRef.current.state.doc.textContent
-    },
     setContent(json: Record<string, unknown>) {
       if (!viewRef.current) return
-      const doc = ProseMirrorNode.fromJSON(schema, json)
+      let doc
+      try {
+        doc = ProseMirrorNode.fromJSON(schema, json)
+      } catch {
+        doc = schema.nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
+      }
+
       const state = EditorState.create({
         doc,
         plugins: viewRef.current.state.plugins,
       })
       viewRef.current.updateState(state)
     },
-    insertText(text: string) {
-      const view = viewRef.current
-      if (!view) return
-      const { state } = view
-      const { from } = state.selection
-      const tr = state.tr.insertText(text, from)
-      view.dispatch(tr)
-    },
     getView() {
       return viewRef.current
+    },
+    startAIContinuation() {
+      if (!viewRef.current) return
+      aiControllerRef.current?.startAIContinuation(viewRef.current)
+    },
+    startAIPrompt(prompt: string) {
+      if (!viewRef.current) return
+      aiControllerRef.current?.startAIPrompt(viewRef.current, prompt)
+    },
+    acceptAI() {
+      if (!viewRef.current) return
+      aiControllerRef.current?.acceptAI(viewRef.current)
+    },
+    rejectAI() {
+      if (!viewRef.current) return
+      aiControllerRef.current?.rejectAI(viewRef.current)
+    },
+    isAIActive() {
+      if (!viewRef.current) return false
+      return aiControllerRef.current?.isAIActive(viewRef.current) ?? false
+    },
+    getPersistedContent() {
+      if (!viewRef.current) {
+        return {
+          doc: { type: 'doc', content: [] },
+          aiDraft: null,
+        }
+      }
+
+      return {
+        doc: viewRef.current.state.doc.toJSON() as Record<string, unknown>,
+        aiDraft: getAIDraftRange(viewRef.current),
+      }
     },
   }))
 

@@ -1,7 +1,7 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import { trpc } from '@/lib/trpc'
-import { parseContent } from '@/lib/prosemirror'
+import { parseContent, serializeContent } from '@/lib/prosemirror'
 import { Editor, type EditorHandle } from '@/components/editor'
 import { AiPanel } from '@/components/editor/ai-panel'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ export function EditorPage() {
   const [title, setTitle] = useState('')
   const [showAi, setShowAi] = useState(true)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
+  const [isGenerating, setIsGenerating] = useState(false)
 
   const projectQuery = trpc.projects.get.useQuery({ id: id! }, { enabled: !!id })
 
@@ -38,7 +39,7 @@ export function EditorPage() {
 
   const save = useCallback(() => {
     if (!id || !editorRef.current || updateMutation.isPending) return
-    const content = JSON.stringify(editorRef.current.getJSON())
+    const content = serializeContent(editorRef.current.getPersistedContent())
     if (content === lastSavedContentRef.current && title === lastSavedTitleRef.current) {
       setSaveStatus('saved')
       return
@@ -103,17 +104,22 @@ export function EditorPage() {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         save()
       }
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        const activeElement = document.activeElement as HTMLElement | null
+        const isEditorFocused = Boolean(activeElement?.closest('.ProseMirror'))
+        if (!isEditorFocused) return
+
+        e.preventDefault()
+        editorRef.current?.startAIContinuation()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [save])
 
-  const getContext = useCallback(() => {
-    return editorRef.current?.getText() ?? ''
-  }, [])
-
-  const handleAiInsert = useCallback((text: string) => {
-    editorRef.current?.insertText(text)
+  const handleStreamingChange = useCallback((streaming: boolean) => {
+    setIsGenerating(streaming)
   }, [])
 
   if (projectQuery.isLoading) {
@@ -135,7 +141,7 @@ export function EditorPage() {
     )
   }
 
-  const initialContent = parseContent(projectQuery.data.content)
+  const parsedContent = parseContent(projectQuery.data.content)
 
   return (
     <div className="flex h-screen flex-col">
@@ -157,7 +163,7 @@ export function EditorPage() {
               {saveStatus === 'saving' && (
                 <>
                   <Loader2 className="size-3 animate-spin" />
-                  Saving…
+                  Saving...
                 </>
               )}
               {saveStatus === 'saved' && (
@@ -192,8 +198,10 @@ export function EditorPage() {
           <div className="mx-auto max-w-3xl px-8 py-10">
             <Editor
               ref={editorRef}
-              initialContent={initialContent}
+              initialContent={parsedContent.doc}
+              initialAIDraft={parsedContent.aiDraft}
               onChange={handleContentChange}
+              onStreamingChange={handleStreamingChange}
               className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
             />
           </div>
@@ -203,7 +211,11 @@ export function EditorPage() {
           <>
             <Separator orientation="vertical" />
             <aside className="w-80 shrink-0 overflow-y-auto border-l">
-              <AiPanel getContext={getContext} onInsert={handleAiInsert} />
+              <AiPanel
+                onContinue={() => editorRef.current?.startAIContinuation()}
+                onGenerate={(prompt) => editorRef.current?.startAIPrompt(prompt)}
+                isGenerating={isGenerating}
+              />
             </aside>
           </>
         )}

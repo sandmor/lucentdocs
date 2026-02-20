@@ -1,10 +1,26 @@
 import { useState } from 'react'
 import { RouterProvider, createBrowserRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ThemeProvider } from 'next-themes'
 import { trpc, createTRPCClient } from '@/lib/trpc'
+import { Toaster } from '@/components/ui/sonner'
 
 interface AppProps {
   router: ReturnType<typeof createBrowserRouter>
+}
+
+function getThemeFromCookie(): 'light' | 'dark' {
+  if (typeof document === 'undefined') return 'light'
+
+  const match = document.cookie.match(/(?:^|;\s*)theme=([^;]*)/)
+  if (!match) return 'light'
+
+  try {
+    const parsed = decodeURIComponent(match[1])
+    return parsed === 'dark' ? 'dark' : 'light'
+  } catch {
+    return 'light'
+  }
 }
 
 export function App({ router }: AppProps) {
@@ -14,7 +30,15 @@ export function App({ router }: AppProps) {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme={getThemeFromCookie()}
+          enableSystem={false}
+          disableTransitionOnChange
+        >
+          <RouterProvider router={router} />
+          <Toaster />
+        </ThemeProvider>
       </QueryClientProvider>
     </trpc.Provider>
   )

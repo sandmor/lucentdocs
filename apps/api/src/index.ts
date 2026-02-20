@@ -4,6 +4,7 @@ import fs from 'fs'
 import { type Express } from 'express'
 import { createServer, type ViteDevServer } from 'vite'
 import { createExpressMiddleware } from '@trpc/server/adapters/express'
+import cookieParser from 'cookie-parser'
 import { z } from 'zod/v4'
 import { appRouter } from './trpc/router.js'
 import { PROJECT_ROOT } from './paths.js'
@@ -14,12 +15,16 @@ const isProd = process.env.NODE_ENV === 'production'
 const port = process.env.PORT || 5677
 const WEB_ROOT = path.join(PROJECT_ROOT, 'apps/web')
 
+const MAX_CONTEXT_CHARS = 1_000_000
+const MAX_HINT_CHARS = 10_000
+const MAX_PROMPT_CHARS = 50_000
+
 const aiStreamInputSchema = z
   .object({
     mode: z.enum(['continue', 'prompt']),
-    context: z.string().trim().min(1),
-    hint: z.string().optional(),
-    prompt: z.string().optional(),
+    context: z.string().trim().min(1).max(MAX_CONTEXT_CHARS),
+    hint: z.string().trim().max(MAX_HINT_CHARS).optional(),
+    prompt: z.string().trim().max(MAX_PROMPT_CHARS).optional(),
     maxOutputTokens: z.number().min(64).max(4096).optional(),
   })
   .superRefine((value, ctx) => {
@@ -152,6 +157,25 @@ function registerTrpcRoutes(app: Express): void {
   app.use('/api/trpc', createExpressMiddleware({ router: appRouter }))
 }
 
+function resolveTheme(value: unknown): 'light' | 'dark' {
+  return value === 'dark' ? 'dark' : 'light'
+}
+
+function applyHtmlThemeClass(template: string, theme: 'light' | 'dark'): string {
+  if (template.includes('<html')) {
+    if (/\<html[^>]*class=["'][^"']*["'][^>]*>/i.test(template)) {
+      return template.replace(
+        /<html([^>]*)class=["'][^"']*["']([^>]*)>/i,
+        `<html$1class="${theme}"$2>`
+      )
+    }
+
+    return template.replace(/<html([^>]*)>/i, `<html$1 class="${theme}">`)
+  }
+
+  return template
+}
+
 async function setupWebRuntime(app: Express): Promise<ViteDevServer | null> {
   if (!isProd) {
     const vite = await createServer({
@@ -188,9 +212,11 @@ function registerSsrRoute(app: Express, vite: ViteDevServer | null): void {
       }
 
       const appHtml = await render(url)
+      const theme = resolveTheme(req.cookies.theme)
       const html = template.replace('<!--app-html-->', appHtml)
+      const themedHtml = applyHtmlThemeClass(html, theme)
 
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(html)
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(themedHtml)
     } catch (error: unknown) {
       if (error instanceof Response) {
         const body = await error.text()
@@ -218,6 +244,7 @@ function registerProcessHandlers(server: ReturnType<Express['listen']>): void {
 async function startServer() {
   const app = express()
   app.use(express.json())
+  app.use(cookieParser())
 
   registerMetaRoutes(app)
   registerAiStreamRoute(app)
