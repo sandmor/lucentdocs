@@ -1,4 +1,4 @@
-import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
+import { useRef, useEffect, forwardRef, useImperativeHandle, useState } from 'react'
 import { EditorState } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { Node as ProseMirrorNode } from 'prosemirror-model'
@@ -6,6 +6,8 @@ import { schema } from './schema'
 import { buildPlugins } from './plugins'
 import { getAIDraftRange, aiWriterPluginKey, type AIWriterDraftRange } from './ai-writer-plugin'
 import { createAIWriterController, type AIWriterController } from './ai-writer'
+import { AIWriterFloatingControls } from './ai-writer-floating-controls'
+import { emitAIStateChange } from './ai-writer-store'
 
 export interface EditorHandle {
   /** Replace the entire document with new JSON content */
@@ -55,6 +57,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   onChangeRef.current = onChange
   onStreamingChangeRef.current = onStreamingChange
   includeAfterContextRef.current = includeAfterContext ?? false
+  const [editorView, setEditorView] = useState<EditorView | null>(null)
 
   // Mount editor
   useEffect(() => {
@@ -112,17 +115,21 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         if (tr.docChanged || Boolean(tr.getMeta(aiWriterPluginKey))) {
           onChangeRef.current?.(newState.doc.toJSON() as Record<string, unknown>)
         }
+
+        emitAIStateChange(view)
       },
     })
 
     viewHolder.current = view
     viewRef.current = view
+    setEditorView(view)
 
     return () => {
       aiController.cancelAI()
       aiControllerRef.current = null
       view.destroy()
       viewRef.current = null
+      setEditorView(null)
     }
     // Only run on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,5 +190,18 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     },
   }))
 
-  return <div ref={containerRef} className={className} />
+  return (
+    <>
+      <div ref={containerRef} className={className} />
+      <AIWriterFloatingControls
+        view={editorView}
+        onAccept={() => {
+          if (viewRef.current) aiControllerRef.current?.acceptAI(viewRef.current)
+        }}
+        onReject={() => {
+          if (viewRef.current) aiControllerRef.current?.rejectAI(viewRef.current)
+        }}
+      />
+    </>
+  )
 })

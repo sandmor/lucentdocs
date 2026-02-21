@@ -1,8 +1,9 @@
 import { EditorView } from 'prosemirror-view'
 import { toast } from 'sonner'
-import { aiWriterPluginKey } from './ai-writer-plugin'
+import { aiWriterPluginKey, type AIMode } from './ai-writer-plugin'
 import { StuckDetector } from './ai-writer-stuck-detector'
 import { parseMarkdownishToSlice } from './markdownish'
+import { setAIChoices } from './ai-writer-store'
 
 type StreamingHandler = (streaming: boolean) => void
 interface AIWriterControllerOptions {
@@ -113,6 +114,156 @@ export function createAIWriterController(
     }
   }
 
+  async function streamAIPrompt(view: EditorView, payload: PromptStreamPayload): Promise<void> {
+    abortController?.abort()
+    const requestAbortController = new AbortController()
+    abortController = requestAbortController
+    const requestId = ++currentRequestId
+    currentView = view
+    stuckDetector.reset()
+    setStreamingState(true)
+
+    let detectedMode: AIMode | null = null
+    let insertIndex: number | null = null
+    const choices: string[] = []
+    let bufferedContent = ''
+    let selectionDeleted = false
+    let deletedSlice: import('prosemirror-model').Slice | null = null
+
+    const deleteSelection = () => {
+      if (selectionDeleted) return
+      const { selectionFrom, selectionTo } = payload
+      if (selectionFrom < selectionTo) {
+        deletedSlice = view.state.doc.slice(selectionFrom, selectionTo)
+        const tr = view.state.tr.delete(selectionFrom, selectionTo)
+        tr.setMeta('addToHistory', false)
+        view.dispatch(tr)
+        selectionDeleted = true
+      }
+    }
+
+    try {
+      const response = await fetch('/api/ai/stream', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: requestAbortController.signal,
+      })
+
+      if (!response.ok) {
+        const message = await readErrorMessage(response)
+        handleAIError(view, message)
+        return
+      }
+
+      if (!response.body) {
+        handleAIError(view, 'No stream returned from AI endpoint')
+        return
+      }
+
+      const modeHeader = response.headers.get('X-AI-Mode')
+      const insertIndexHeader = response.headers.get('X-AI-Insert-Index')
+
+      if (modeHeader && ['replace', 'insert', 'choices'].includes(modeHeader)) {
+        detectedMode = modeHeader as AIMode
+        if (insertIndexHeader) {
+          const parsedInsertIndex = Number.parseInt(insertIndexHeader, 10)
+          insertIndex = Number.isFinite(parsedInsertIndex) ? parsedInsertIndex : null
+        } else {
+          insertIndex = null
+        }
+
+        const tr = view.state.tr.setMeta(aiWriterPluginKey, {
+          type: 'mode_detected',
+          mode: detectedMode,
+          insertIndex,
+        })
+        view.dispatch(tr)
+
+        if (detectedMode === 'replace') {
+          deleteSelection()
+          const pluginState = aiWriterPluginKey.getState(view.state)
+          const pos = pluginState?.originalSelectionFrom ?? payload.selectionFrom
+          const zoneTr = view.state.tr.setMeta(aiWriterPluginKey, {
+            type: 'zone_start',
+            pos,
+            deletedSlice,
+            deletedFrom: deletedSlice ? pos : null,
+          })
+          view.dispatch(zoneTr)
+        } else if (detectedMode === 'insert') {
+          const pluginState = aiWriterPluginKey.getState(view.state)
+          const currentFrom = pluginState?.originalSelectionFrom ?? payload.selectionFrom
+          const currentTo = pluginState?.originalSelectionTo ?? payload.selectionTo
+          const selectionLength = currentTo - currentFrom
+
+          let insertPos: number
+          if (insertIndex === null || insertIndex === 0) insertPos = currentFrom
+          else if (insertIndex < 0) insertPos = currentTo
+          else insertPos = currentFrom + Math.min(insertIndex, selectionLength)
+
+          const zoneTr = view.state.tr.setMeta(aiWriterPluginKey, {
+            type: 'zone_start',
+            pos: insertPos,
+            deletedSlice: null,
+            deletedFrom: null,
+          })
+          view.dispatch(zoneTr)
+        }
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (abortController === requestAbortController && !requestAbortController.signal.aborted) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        if (value && !requestAbortController.signal.aborted) {
+          const chunk = decoder.decode(value, { stream: true })
+          buffer += chunk
+
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+
+            try {
+              const parsed = JSON.parse(line)
+              stuckDetector.onChunk()
+
+              if (detectedMode === 'replace' || detectedMode === 'insert') {
+                bufferedContent += parsed
+                insertChunk(view, bufferedContent)
+              } else if (detectedMode === 'choices') {
+                choices.push(parsed)
+                setAIChoices(view, [...choices])
+              }
+            } catch {
+              console.warn('Failed to parse AI stream chunk payload from AI endpoint', { line })
+            }
+          }
+        }
+
+        const pluginState = aiWriterPluginKey.getState(view.state)
+        if (!pluginState?.active) break
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return
+      }
+      const message = error instanceof Error ? error.message : 'AI streaming error'
+      handleAIError(view, message)
+    } finally {
+      if (requestId === currentRequestId && abortController === requestAbortController) {
+        abortController = null
+        setStreamingState(false, view)
+      }
+    }
+  }
+
   function handleAIError(view: EditorView, message: string): void {
     toast.error('AI generation failed', { description: message })
 
@@ -165,20 +316,30 @@ export function createAIWriterController(
       return
     }
 
-    const pos = view.state.selection.from
+    const { from, to, empty } = view.state.selection
+    const selectedText = empty ? undefined : view.state.doc.textBetween(from, to, '\n\n', '\n')
 
     const tr = view.state.tr
-    tr.setMeta(aiWriterPluginKey, { type: 'start', pos })
+    tr.setMeta(aiWriterPluginKey, {
+      type: 'start',
+      pos: from,
+      deletedSlice: null,
+      selectionFrom: from,
+      selectionTo: empty ? from : to,
+    })
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
     streamedText = ''
 
     const { contextBefore, contextAfter } = getDocumentContext(view, getIncludeAfterContext())
-    void streamAI(view, {
+    void streamAIPrompt(view, {
       mode: 'prompt',
       contextBefore,
       contextAfter,
       prompt: trimmedPrompt,
+      selectedText,
+      selectionFrom: from,
+      selectionTo: empty ? from : to,
     })
   }
 
@@ -192,6 +353,7 @@ export function createAIWriterController(
     stuckDetector.reset()
     currentView = null
     setStreamingState(false)
+    setAIChoices(view, null)
 
     const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'accept' })
     tr.setMeta('addToHistory', true)
@@ -208,20 +370,28 @@ export function createAIWriterController(
     stuckDetector.reset()
     currentView = null
     setStreamingState(false)
+    setAIChoices(view, null)
 
-    const { from, to } = pluginState
+    const { from, to, mode, deletedSlice, deletedFrom } = pluginState
 
-    if (from !== null && to !== null && from < to) {
-      const tr = view.state.tr
-      tr.delete(from, to)
-      tr.setMeta(aiWriterPluginKey, { type: 'reject' })
-      tr.setMeta('addToHistory', true)
-      view.dispatch(tr)
-    } else {
-      const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'reject' })
-      tr.setMeta('addToHistory', true)
-      view.dispatch(tr)
+    const tr = view.state.tr
+
+    if (mode === 'replace') {
+      if (from !== null && to !== null && from < to) {
+        tr.delete(from, to)
+      }
+      if (deletedSlice && deletedFrom !== null) {
+        tr.replace(deletedFrom, deletedFrom, deletedSlice)
+      }
+    } else if (mode === 'insert') {
+      if (from !== null && to !== null && from < to) {
+        tr.delete(from, to)
+      }
     }
+
+    tr.setMeta(aiWriterPluginKey, { type: 'reject' })
+    tr.setMeta('addToHistory', true)
+    view.dispatch(tr)
   }
 
   function isAIActive(view: EditorView): boolean {
@@ -236,6 +406,7 @@ export function createAIWriterController(
     stuckDetector.reset()
     currentView = null
     if (view) {
+      setAIChoices(view, null)
       setStreamingState(false, view)
     } else {
       setStreamingState(false)
@@ -256,16 +427,16 @@ function getDocumentContext(
   view: EditorView,
   includeAfter: boolean
 ): { contextBefore: string; contextAfter?: string } {
-  const caretPos = view.state.selection.from
+  const pos = view.state.selection.from
   const docEnd = view.state.doc.content.size
 
-  const contextBefore = view.state.doc.textBetween(0, caretPos, '\n\n', '\n')
+  const contextBefore = view.state.doc.textBetween(0, pos, '\n\n', '\n')
 
-  if (!includeAfter || caretPos >= docEnd) {
+  if (!includeAfter || pos >= docEnd) {
     return { contextBefore }
   }
 
-  const contextAfter = view.state.doc.textBetween(caretPos, docEnd, '\n\n', '\n')
+  const contextAfter = view.state.doc.textBetween(pos, docEnd, '\n\n', '\n')
   return { contextBefore, contextAfter }
 }
 
@@ -274,6 +445,14 @@ interface StreamPayload {
   contextBefore: string
   contextAfter?: string
   prompt?: string
+  selectedText?: string
+}
+
+interface PromptStreamPayload extends StreamPayload {
+  mode: 'prompt'
+  prompt: string
+  selectionFrom: number
+  selectionTo: number
 }
 
 function insertChunk(view: EditorView, generatedText: string): void {

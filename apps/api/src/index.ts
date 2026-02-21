@@ -9,7 +9,13 @@ import { z } from 'zod/v4'
 import { appRouter } from './trpc/router.js'
 import { PROJECT_ROOT } from './paths.js'
 import { generate, generateStream, createStreamCleaner, cleanText } from './ai/index.js'
-import { SYSTEM_PROMPT, buildContinuePrompt, buildPromptPrompt } from './ai/prompts.js'
+import {
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_STRUCTURED,
+  buildContinuePrompt,
+  buildPromptPrompt,
+} from './ai/prompts.js'
+import { ResponseParser, type AIMode } from './ai/response-parser.js'
 
 const isProd = process.env.NODE_ENV === 'production'
 const port = process.env.PORT || 5677
@@ -26,6 +32,7 @@ const aiStreamInputSchema = z
     contextAfter: z.string().max(MAX_CONTEXT_CHARS).optional(),
     hint: z.string().trim().max(MAX_HINT_CHARS).optional(),
     prompt: z.string().trim().max(MAX_PROMPT_CHARS).optional(),
+    selectedText: z.string().max(MAX_CONTEXT_CHARS).optional(),
     maxOutputTokens: z.number().int().min(64).max(4096).optional(),
   })
   .superRefine((value, ctx) => {
@@ -62,119 +69,253 @@ function registerAiStreamRoute(app: Express): void {
 
     const input = parsed.data
     const contextAfter = input.contextAfter ?? null
-    const userPrompt =
-      input.mode === 'continue'
-        ? buildContinuePrompt(input.contextBefore, contextAfter, input.hint)
-        : buildPromptPrompt(input.contextBefore, contextAfter, input.prompt!.trim())
+    const selectedText = input.selectedText ?? null
 
-    const cleaner = createStreamCleaner(input.contextBefore, contextAfter)
-    const generateCleanFallback = async (): Promise<string | null> => {
-      const fallbackText = await generate({
-        systemPrompt: SYSTEM_PROMPT,
-        userPrompt,
-        maxOutputTokens: input.maxOutputTokens ?? 512,
-        temperature: 0.85,
-        abortSignal: abortController.signal,
+    if (input.mode === 'continue') {
+      await handleContinueStream(
+        req,
+        res,
+        input as typeof input & { mode: 'continue' },
+        contextAfter
+      )
+    } else {
+      await handlePromptStream(
+        req,
+        res,
+        input as typeof input & { mode: 'prompt' },
+        contextAfter,
+        selectedText
+      )
+    }
+  })
+}
+
+async function handleGenericStream(
+  req: express.Request,
+  res: express.Response,
+  options: {
+    systemPrompt: string
+    userPrompt: string
+    maxOutputTokens?: number
+    onDelta: (
+      text: string,
+      hasWrittenHeaders: boolean,
+      writeHeaders: (mode?: AIMode, insertIndex?: number) => void,
+      writeContent: (content: string) => void,
+      writeChoice: (choice: string) => void
+    ) => void
+    generateFallback: (signal: AbortSignal) => Promise<string | null>
+    onFallbackDone: (
+      fallbackText: string,
+      writeHeaders: (mode?: AIMode, insertIndex?: number) => void,
+      writeContent: (content: string) => void,
+      writeChoice: (choice: string) => void
+    ) => boolean
+    onFlush?: () => string | null
+  }
+) {
+  const abortController = new AbortController()
+  const abortIfClientDisconnected = () => {
+    if (!res.writableEnded) abortController.abort()
+  }
+  req.on('aborted', abortIfClientDisconnected)
+  res.on('close', abortIfClientDisconnected)
+
+  let hasWrittenHeaders = false
+
+  const writeHeaders = (mode?: AIMode, insertIndex?: number) => {
+    if (!hasWrittenHeaders) {
+      res.status(200).set({
+        'Content-Type': mode ? 'application/jsonl; charset=utf-8' : 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        ...(mode ? { 'X-AI-Mode': mode } : {}),
       })
+      if (insertIndex !== undefined) res.set('X-AI-Insert-Index', String(insertIndex))
+      hasWrittenHeaders = true
+    }
+  }
 
-      if (!fallbackText) {
-        return null
+  const writeContent = (content: string) => {
+    // If we wrote headers with X-AI-Mode, we output JSON stringified lines
+    // Otherwise just output the raw text for plain stream (continue)
+    if (hasWrittenHeaders && res.getHeader('X-AI-Mode')) {
+      res.write(JSON.stringify(content) + '\n')
+    } else {
+      res.write(content)
+    }
+  }
+
+  const writeChoice = (choice: string) => {
+    res.write(JSON.stringify(choice) + '\n')
+  }
+
+  try {
+    const result = await generateStream({
+      systemPrompt: options.systemPrompt,
+      userPrompt: options.userPrompt,
+      maxOutputTokens: options.maxOutputTokens ?? 512,
+      temperature: 0.85,
+      abortSignal: abortController.signal,
+    })
+
+    for await (const part of result.fullStream) {
+      if (part.type === 'text-delta') {
+        options.onDelta(part.text, hasWrittenHeaders, writeHeaders, writeContent, writeChoice)
+        continue
       }
 
-      return cleanText(fallbackText, input.contextBefore, contextAfter)
-    }
-
-    const abortController = new AbortController()
-    const abortIfClientDisconnected = () => {
-      if (!res.writableEnded) {
-        abortController.abort()
-      }
-    }
-
-    req.on('aborted', abortIfClientDisconnected)
-    res.on('close', abortIfClientDisconnected)
-
-    try {
-      const result = await generateStream({
-        systemPrompt: SYSTEM_PROMPT,
-        userPrompt,
-        maxOutputTokens: input.maxOutputTokens ?? 512,
-        temperature: 0.85,
-        abortSignal: abortController.signal,
-      })
-
-      let hasWritten = false
-      for await (const part of result.fullStream) {
-        if (part.type === 'text-delta') {
-          if (!hasWritten) {
-            res.status(200).set({
-              'Content-Type': 'text/plain; charset=utf-8',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-            })
-          }
-          const cleaned = cleaner.process(part.text)
-          if (cleaned) {
-            hasWritten = true
-            res.write(cleaned)
-          }
-          continue
-        }
-
-        if (part.type === 'error') {
-          const streamErrorMessage =
-            part.error instanceof Error ? part.error.message : 'AI provider returned an error'
-
-          if (!hasWritten) {
-            const cleanedFallback = await generateCleanFallback()
-
-            if (cleanedFallback) {
-              res
-                .status(200)
-                .set({ 'Content-Type': 'text/plain; charset=utf-8' })
-                .end(cleanedFallback)
-              return
-            }
-
-            res.status(500).json({ message: streamErrorMessage })
+      if (part.type === 'error') {
+        const errMessage =
+          part.error instanceof Error ? part.error.message : 'AI provider returned an error'
+        if (!hasWrittenHeaders) {
+          const fallbackText = await options.generateFallback(abortController.signal)
+          if (
+            fallbackText &&
+            options.onFallbackDone(fallbackText, writeHeaders, writeContent, writeChoice)
+          ) {
+            res.end()
             return
           }
-
-          res.end()
+          res.status(500).json({ message: errMessage })
           return
         }
-      }
-
-      if (!hasWritten) {
-        const cleanedFallback = await generateCleanFallback()
-
-        if (cleanedFallback) {
-          res.status(200).set({ 'Content-Type': 'text/plain; charset=utf-8' }).end(cleanedFallback)
-          return
-        }
-
-        res.status(502).json({ message: 'AI stream finished without output' })
-        return
-      }
-
-      const final = cleaner.flush()
-      if (final) {
-        res.write(final)
-      }
-      res.end()
-    } catch (error: unknown) {
-      if (abortController.signal.aborted) {
-        if (!res.headersSent) res.end()
-        return
-      }
-
-      const message = error instanceof Error ? error.message : 'Failed to generate text stream'
-      if (!res.headersSent) {
-        res.status(500).json({ message })
-      } else {
         res.end()
+        return
       }
     }
+
+    if (!hasWrittenHeaders) {
+      const fallbackText = await options.generateFallback(abortController.signal)
+      if (
+        fallbackText &&
+        options.onFallbackDone(fallbackText, writeHeaders, writeContent, writeChoice)
+      ) {
+        res.end()
+        return
+      }
+      res.status(502).json({ message: 'AI stream finished without output' })
+      return
+    }
+
+    const finalFlush = options.onFlush?.()
+    if (finalFlush) writeContent(finalFlush)
+    res.end()
+  } catch (error: unknown) {
+    if (abortController.signal.aborted) {
+      if (!res.headersSent) res.end()
+      return
+    }
+    const message = error instanceof Error ? error.message : 'Failed to generate text stream'
+    if (!res.headersSent) res.status(500).json({ message })
+    else res.end()
+  }
+}
+
+async function handleContinueStream(
+  req: express.Request,
+  res: express.Response,
+  input: z.infer<typeof aiStreamInputSchema> & { mode: 'continue' },
+  contextAfter: string | null
+): Promise<void> {
+  const userPrompt = buildContinuePrompt(input.contextBefore, contextAfter, input.hint)
+  const cleaner = createStreamCleaner(input.contextBefore, contextAfter)
+
+  await handleGenericStream(req, res, {
+    systemPrompt: SYSTEM_PROMPT,
+    userPrompt,
+    maxOutputTokens: input.maxOutputTokens,
+    onDelta: (text, _hasWrittenHeaders, writeHeaders, writeContent) => {
+      writeHeaders()
+      const cleaned = cleaner.process(text)
+      if (cleaned) writeContent(cleaned)
+    },
+    generateFallback: async (signal) => {
+      const fallback = await generate({
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt,
+        maxOutputTokens: input.maxOutputTokens ?? 512,
+        temperature: 0.85,
+        abortSignal: signal,
+      })
+      return fallback ? cleanText(fallback, input.contextBefore, contextAfter) : null
+    },
+    onFallbackDone: (fallbackText, writeHeaders, writeContent) => {
+      writeHeaders()
+      writeContent(fallbackText)
+      return true
+    },
+    onFlush: () => cleaner.flush(),
+  })
+}
+
+async function handlePromptStream(
+  req: express.Request,
+  res: express.Response,
+  input: z.infer<typeof aiStreamInputSchema> & { mode: 'prompt' },
+  contextAfter: string | null,
+  selectedText: string | null
+): Promise<void> {
+  const userPrompt = buildPromptPrompt(
+    input.contextBefore,
+    contextAfter,
+    input.prompt!.trim(),
+    selectedText
+  )
+
+  const cleaner = createStreamCleaner(input.contextBefore, contextAfter)
+  const parser = new ResponseParser()
+  let lastSentContentLength = 0
+  let lastSentChoicesCount = 0
+
+  await handleGenericStream(req, res, {
+    systemPrompt: SYSTEM_PROMPT_STRUCTURED,
+    userPrompt,
+    maxOutputTokens: input.maxOutputTokens,
+    onDelta: (text, hasWrittenHeaders, writeHeaders, writeContent, writeChoice) => {
+      const parseResult = parser.feed(text)
+      if (parseResult.mode && !hasWrittenHeaders)
+        writeHeaders(parseResult.mode, parseResult.insertIndex ?? undefined)
+      if (parseResult.mode === 'replace' || parseResult.mode === 'insert') {
+        const newContent = parseResult.content.slice(lastSentContentLength)
+        if (newContent) {
+          const cleaned = cleaner.process(newContent)
+          if (cleaned) writeContent(cleaned)
+          lastSentContentLength = parseResult.content.length
+        }
+      } else if (parseResult.mode === 'choices') {
+        for (let i = lastSentChoicesCount; i < parseResult.choices.length; i++)
+          writeChoice(parseResult.choices[i])
+        lastSentChoicesCount = parseResult.choices.length
+      }
+    },
+    generateFallback: async (signal) => {
+      return await generate({
+        systemPrompt: SYSTEM_PROMPT_STRUCTURED,
+        userPrompt,
+        maxOutputTokens: input.maxOutputTokens ?? 512,
+        temperature: 0.85,
+        abortSignal: signal,
+      })
+    },
+    onFallbackDone: (fallbackText, writeHeaders, writeContent, writeChoice) => {
+      const fallbackParser = new ResponseParser()
+      fallbackParser.feed(fallbackText)
+      const fallbackResponse = fallbackParser.finalize()
+      if (fallbackResponse) {
+        const insertIndex = fallbackResponse.mode === 'insert' ? fallbackResponse.index : undefined
+        writeHeaders(fallbackResponse.mode, insertIndex)
+        if (fallbackResponse.mode === 'replace' || fallbackResponse.mode === 'insert') {
+          const cleaned = cleanText(fallbackResponse.content, input.contextBefore, contextAfter)
+          if (cleaned) writeContent(cleaned)
+        } else if (fallbackResponse.mode === 'choices') {
+          for (const choice of fallbackResponse.choices) writeChoice(choice)
+        }
+        return true
+      }
+      return false
+    },
+    onFlush: () => cleaner.flush(),
   })
 }
 

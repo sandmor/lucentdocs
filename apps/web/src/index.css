@@ -129,9 +129,11 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply font-sans bg-background text-foreground;
   }
+
   html {
     @apply font-sans;
   }
@@ -161,9 +163,11 @@
 .ProseMirror h1 {
   font-size: 1.75rem;
 }
+
 .ProseMirror h2 {
   font-size: 1.5rem;
 }
+
 .ProseMirror h3 {
   font-size: 1.25rem;
 }
@@ -219,4 +223,36 @@
 
 .dark .ai-generating-text {
   background: oklch(0.6 0.12 260 / 0.25);
+}
+
+/* AI Writer Floating Controls */
+@keyframes ai-fc-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.7);
+  }
+
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ai-fc-dot {
+  display: inline-block;
+  border-radius: 50%;
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  animation: ai-fc-pulse 1.2s ease-in-out infinite both;
+}
+
+.ai-fc-dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.ai-fc-dot:nth-child(3) {
+  animation-delay: 0.32s;
 }

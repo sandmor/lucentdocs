@@ -1,6 +1,7 @@
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view'
-import { FloatingControls } from './ai-writer-floating-controls'
+
+export type AIMode = 'replace' | 'insert' | 'choices'
 
 export interface AIWriterState {
   active: boolean
@@ -8,6 +9,12 @@ export interface AIWriterState {
   to: number | null
   streaming: boolean
   stuck: boolean
+  deletedSlice: import('prosemirror-model').Slice | null
+  deletedFrom: number | null
+  mode: AIMode | null
+  insertIndex: number | null
+  originalSelectionFrom: number | null
+  originalSelectionTo: number | null
 }
 
 export interface AIWriterDraftRange {
@@ -22,6 +29,22 @@ export interface AIWriterActionHandlers {
 }
 
 export const aiWriterPluginKey = new PluginKey<AIWriterState>('ai_writer')
+
+function createInactiveState(): AIWriterState {
+  return {
+    active: false,
+    from: null,
+    to: null,
+    streaming: false,
+    stuck: false,
+    deletedSlice: null,
+    deletedFrom: null,
+    mode: null,
+    insertIndex: null,
+    originalSelectionFrom: null,
+    originalSelectionTo: null,
+  }
+}
 
 function clampDraftRange(range: AIWriterDraftRange, docSize: number): AIWriterDraftRange | null {
   const from = Math.max(0, Math.min(range.from, docSize))
@@ -54,12 +77,12 @@ export function createAIWriterPlugin(
     state: {
       init(_config, instanceState): AIWriterState {
         if (!initialRange) {
-          return { active: false, from: null, to: null, streaming: false, stuck: false }
+          return createInactiveState()
         }
 
         const clamped = clampDraftRange(initialRange, instanceState.doc.content.size)
         if (!clamped) {
-          return { active: false, from: null, to: null, streaming: false, stuck: false }
+          return createInactiveState()
         }
 
         return {
@@ -68,6 +91,12 @@ export function createAIWriterPlugin(
           to: clamped.to,
           streaming: false,
           stuck: false,
+          deletedSlice: null,
+          deletedFrom: null,
+          mode: null,
+          insertIndex: null,
+          originalSelectionFrom: null,
+          originalSelectionTo: null,
         }
       },
       apply(tr, value): AIWriterState {
@@ -80,6 +109,38 @@ export function createAIWriterPlugin(
             to: meta.pos,
             streaming: true,
             stuck: false,
+            deletedSlice: meta.deletedSlice ?? null,
+            deletedFrom: meta.deletedSlice ? meta.pos : null,
+            mode: null,
+            insertIndex: null,
+            originalSelectionFrom: meta.selectionFrom ?? meta.pos,
+            originalSelectionTo: meta.selectionTo ?? meta.pos,
+          }
+        }
+
+        if (meta?.type === 'mode_detected') {
+          return {
+            ...value,
+            mode: meta.mode,
+            insertIndex: meta.insertIndex ?? null,
+          }
+        }
+
+        if (meta?.type === 'zone_start') {
+          return {
+            ...value,
+            from: meta.pos,
+            to: meta.pos,
+            deletedSlice: meta.deletedSlice ?? value.deletedSlice,
+            deletedFrom: meta.deletedFrom ?? value.deletedFrom,
+          }
+        }
+
+        if (meta?.type === 'zone_set') {
+          return {
+            ...value,
+            from: meta.from,
+            to: meta.to,
           }
         }
 
@@ -96,15 +157,15 @@ export function createAIWriterPlugin(
         }
 
         if (meta?.type === 'stop') {
-          return { active: false, from: null, to: null, streaming: false, stuck: false }
+          return createInactiveState()
         }
 
         if (meta?.type === 'accept') {
-          return { active: false, from: null, to: null, streaming: false, stuck: false }
+          return createInactiveState()
         }
 
         if (meta?.type === 'reject') {
-          return { active: false, from: null, to: null, streaming: false, stuck: false }
+          return createInactiveState()
         }
 
         if (value.active && tr.docChanged && value.from !== null && value.to !== null) {
@@ -113,29 +174,14 @@ export function createAIWriterPlugin(
           const to = tr.mapping.map(value.to, isChunkInsert ? 1 : -1)
 
           return {
-            active: true,
+            ...value,
             from: Math.min(from, to),
             to: Math.max(from, to),
-            streaming: value.streaming,
-            stuck: value.stuck,
           }
         }
 
         return value
       },
-    },
-    view(view) {
-      const floatingControls = new FloatingControls(handlers)
-      floatingControls.update(view)
-
-      return {
-        update(nextView) {
-          floatingControls.update(nextView)
-        },
-        destroy() {
-          floatingControls.destroy()
-        },
-      }
     },
     props: {
       decorations(state) {
