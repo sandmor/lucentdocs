@@ -47,12 +47,13 @@ interface BuildPluginsOptions {
 export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   const { aiDraft = null, aiHandlers, extraPlugins = [] } = options
   const effectiveHandlers: AIWriterActionHandlers = aiHandlers ?? {
-    onAccept() {},
-    onReject() {},
-    onCancelAI() {},
+    onAccept() { },
+    onReject() { },
+    onCancelAI() { },
   }
 
   return [
+    createAIWriterPlugin(aiDraft, effectiveHandlers),
     buildInputRules(),
     keymap({
       'Mod-z': undo,
@@ -63,7 +64,6 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
     dropCursor(),
     gapCursor(),
     history(),
-    createAIWriterPlugin(aiDraft, effectiveHandlers),
     ...extraPlugins,
   ]
 }

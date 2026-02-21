@@ -355,9 +355,53 @@ export function createAIWriterController(
     setStreamingState(false)
     setAIChoices(view, null)
 
-    const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'accept' })
-    tr.setMeta('addToHistory', true)
-    view.dispatch(tr)
+    const { from, to, mode, deletedSlice, deletedFrom, originalSelectionFrom, originalSelectionTo } = pluginState
+
+    if (from !== null && to !== null) {
+      const finalSlice = view.state.doc.slice(from, to)
+
+      // 1) Revert to pre-AI state silently
+      const revertTr = view.state.tr
+
+      if (mode === 'replace') {
+        if (from < to) {
+          revertTr.delete(from, to)
+        }
+        if (deletedSlice && deletedFrom !== null) {
+          revertTr.replace(deletedFrom, deletedFrom, deletedSlice)
+        }
+      } else {
+        if (from < to) {
+          revertTr.delete(from, to)
+        }
+      }
+
+      revertTr.setMeta(aiWriterPluginKey, { type: 'revert_for_accept' })
+      revertTr.setMeta('addToHistory', false)
+      view.dispatch(revertTr)
+
+      // 2) Apply as single undoable history step
+      const applyTr = view.state.tr
+
+      if (mode === 'replace') {
+        const mappedFrom = revertTr.mapping.map(originalSelectionFrom ?? deletedFrom ?? from)
+        const mappedTo = revertTr.mapping.map(originalSelectionTo ?? deletedFrom ?? to)
+        const minPos = Math.min(mappedFrom, mappedTo)
+        const maxPos = Math.max(mappedFrom, mappedTo)
+        applyTr.replace(minPos, maxPos, finalSlice)
+      } else {
+        const mappedFrom = revertTr.mapping.map(from)
+        applyTr.insert(mappedFrom, finalSlice.content)
+      }
+
+      applyTr.setMeta(aiWriterPluginKey, { type: 'accept' })
+      applyTr.setMeta('addToHistory', true)
+      view.dispatch(applyTr)
+    } else {
+      const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'accept' })
+      tr.setMeta('addToHistory', true)
+      view.dispatch(tr)
+    }
   }
 
   function rejectAI(view: EditorView): void {
@@ -383,7 +427,7 @@ export function createAIWriterController(
       if (deletedSlice && deletedFrom !== null) {
         tr.replace(deletedFrom, deletedFrom, deletedSlice)
       }
-    } else if (mode === 'insert') {
+    } else {
       if (from !== null && to !== null && from < to) {
         tr.delete(from, to)
       }

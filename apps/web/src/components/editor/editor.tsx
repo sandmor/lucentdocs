@@ -112,7 +112,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         const newState = view.state.apply(tr)
         view.updateState(newState)
 
-        if (tr.docChanged || Boolean(tr.getMeta(aiWriterPluginKey))) {
+        const meta = tr.getMeta(aiWriterPluginKey)
+        const isRevert = meta?.type === 'revert_for_accept'
+
+        if (!isRevert && (tr.docChanged || Boolean(meta))) {
           onChangeRef.current?.(newState.doc.toJSON() as Record<string, unknown>)
         }
 

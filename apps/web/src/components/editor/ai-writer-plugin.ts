@@ -169,14 +169,24 @@ export function createAIWriterPlugin(
         }
 
         if (value.active && tr.docChanged && value.from !== null && value.to !== null) {
+          if (meta?.type === 'revert_for_accept') {
+            return value
+          }
+
           const isChunkInsert = meta?.type === 'chunk'
           const from = tr.mapping.map(value.from, isChunkInsert ? -1 : 1)
           const to = tr.mapping.map(value.to, isChunkInsert ? 1 : -1)
+          const deletedFrom = value.deletedFrom !== null ? tr.mapping.map(value.deletedFrom) : null
+          const originalSelectionFrom = value.originalSelectionFrom !== null ? tr.mapping.map(value.originalSelectionFrom) : null
+          const originalSelectionTo = value.originalSelectionTo !== null ? tr.mapping.map(value.originalSelectionTo) : null
 
           return {
             ...value,
             from: Math.min(from, to),
             to: Math.max(from, to),
+            deletedFrom,
+            originalSelectionFrom,
+            originalSelectionTo,
           }
         }
 
@@ -274,6 +284,12 @@ export function createAIWriterPlugin(
         }
 
         if (event.key === 'Escape') {
+          event.preventDefault()
+          handlers.onReject()
+          return true
+        }
+
+        if ((event.key === 'z' || event.key === 'y') && (event.metaKey || event.ctrlKey)) {
           event.preventDefault()
           handlers.onReject()
           return true
