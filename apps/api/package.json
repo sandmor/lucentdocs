@@ -12,7 +12,6 @@
     "@ai-sdk/anthropic": "^3.0.46",
     "@ai-sdk/openai": "^3.0.30",
     "@ai-sdk/openai-compatible": "^2.0.30",
-    "@lancedb/lancedb": "^0.26.2",
     "@plotline/shared": "workspace:*",
     "@trpc/server": "^11.10.0",
     "ai": "^6.0.94",
@@ -22,6 +21,8 @@
     "nanoid": "^5.1.6",
     "openai": "^6.22.0",
     "sirv": "^3.0.2",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
     "superjson": "^2.2.6",
     "vite": "^7.3.1",
     "zod": "^4.3.6"
@@ -31,6 +32,7 @@
     "@types/compression": "^1.8.1",
     "@types/cookie-parser": "^1.4.9",
     "@types/express": "^5.0.6",
+    "@types/sqlite3": "^5.1.0",
     "api": "^6.1.3"
   }
 }

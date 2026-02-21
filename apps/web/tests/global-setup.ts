@@ -7,9 +7,9 @@ const __dirname = dirname(__filename)
 
 const projectRoot = resolve(__dirname, '..', '..', '..')
 const testDbDir = resolve(projectRoot, 'data-test')
-const lanceDir = resolve(testDbDir, 'lancedb')
+const sqliteFile = resolve(testDbDir, 'sqlite.db')
 
 export default async function globalSetup() {
-  await rm(lanceDir, { recursive: true, force: true })
+  await rm(sqliteFile, { force: true })
   await mkdir(testDbDir, { recursive: true })
 }
