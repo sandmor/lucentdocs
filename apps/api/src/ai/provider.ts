@@ -2,13 +2,9 @@ import { generateText, streamText, type LanguageModel } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import { configManager, type ResolvedAiConfig } from '../config/manager.js'
 
-export interface AiConfig {
-  provider: 'openai' | 'anthropic' | 'openai-compatible'
-  baseURL: string
-  apiKey: string
-  model: string
-}
+export type AiConfig = ResolvedAiConfig
 
 interface ResolvedProvider {
   model: LanguageModel
@@ -17,50 +13,8 @@ interface ResolvedProvider {
 
 let providerPromise: Promise<ResolvedProvider> | null = null
 
-function getBaseURL(): string {
-  return process.env.AI_BASE_URL || ''
-}
-
-function guessProviderFromDomain(baseURL: string, model: string): AiConfig['provider'] {
-  let hostname = ''
-  if (baseURL) {
-    try {
-      hostname = new URL(baseURL).hostname.toLowerCase()
-    } catch {
-      hostname = ''
-    }
-  }
-
-  if (hostname.includes('anthropic')) return 'anthropic'
-  if (hostname.includes('openai')) return 'openai'
-
-  if (model.toLowerCase().startsWith('claude')) return 'anthropic'
-  if (!baseURL) return 'openai'
-
-  return 'openai-compatible'
-}
-
 function getConfig(): AiConfig {
-  const baseURL = getBaseURL()
-  const defaultModel = process.env.AI_MODEL || 'gpt-4o-mini'
-  const provider = guessProviderFromDomain(baseURL, defaultModel)
-  const apiKey = process.env.AI_API_KEY || ''
-
-  if (provider === 'anthropic') {
-    return {
-      provider,
-      baseURL: baseURL || 'https://api.anthropic.com/v1',
-      apiKey,
-      model: process.env.AI_MODEL || 'claude-3-5-haiku-latest',
-    }
-  }
-
-  return {
-    provider,
-    baseURL: baseURL || 'https://api.openai.com/v1',
-    apiKey,
-    model: defaultModel,
-  }
+  return configManager.getConfig().ai
 }
 
 async function getProvider(): Promise<ResolvedProvider> {
@@ -68,7 +22,7 @@ async function getProvider(): Promise<ResolvedProvider> {
     const config = getConfig()
 
     if (!config.apiKey) {
-      throw new Error('Missing API key: set AI_API_KEY')
+      throw new Error(`Missing API key: set AI_API_KEY in env or ${configManager.getConfig().paths.configFile}`)
     }
 
     providerPromise = Promise.resolve(
@@ -101,7 +55,7 @@ async function getProvider(): Promise<ResolvedProvider> {
   return providerPromise
 }
 
-/** Invalidate the client so the next call picks up new env vars. */
+/** Invalidate the client so the next call picks up updated config values. */
 export function resetClient(): void {
   providerPromise = null
 }

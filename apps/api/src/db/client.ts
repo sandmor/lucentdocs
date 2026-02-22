@@ -1,20 +1,19 @@
 import sqlite3 from 'sqlite3'
 import { open, Database } from 'sqlite'
-import path from 'path'
 import { mkdirSync } from 'fs'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { resolveFromRoot } from '../paths.js'
+import { configManager } from '../config/manager.js'
 
 let dbPromise: Promise<Database> | null = null
 let initPromise: Promise<void> | null = null
 const dbContext = new AsyncLocalStorage<Database>()
 
 function resolveDataDir(): string {
-  return resolveFromRoot(process.env.PLOTLINE_DATA_DIR || './data')
+  return configManager.getConfig().paths.dataDir
 }
 
 function resolveDbFile(): string {
-  return path.join(resolveDataDir(), 'sqlite.db')
+  return configManager.getConfig().paths.dbFile
 }
 
 function ensureDataDir(): void {

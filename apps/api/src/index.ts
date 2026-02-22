@@ -11,6 +11,7 @@ import { z } from 'zod/v4'
 import { type WebSocketServer } from 'ws'
 import { appRouter } from './trpc/router.js'
 import { PROJECT_ROOT } from './paths.js'
+import { configManager } from './config/manager.js'
 import { generate, generateStream, createStreamCleaner, cleanText } from './ai/index.js'
 import {
   SYSTEM_PROMPT,
@@ -27,30 +28,16 @@ import {
   stopSnapshotTimer,
 } from './yjs/server.js'
 
-const isProd = process.env.NODE_ENV === 'production'
-const DEFAULT_PORT = 5677
-const DEFAULT_HOST = '127.0.0.1'
-
-function resolvePort(rawPort: string | undefined): number {
-  const parsed = Number.parseInt(rawPort ?? '', 10)
-  if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65_535) {
-    return parsed
-  }
-  return DEFAULT_PORT
-}
-
-function resolveHost(rawHost: string | undefined): string {
-  const trimmed = rawHost?.trim()
-  return trimmed ? trimmed : DEFAULT_HOST
-}
+const appConfig = configManager.getConfig()
+const isProd = appConfig.runtime.isProduction
 
 function displayHostForLog(bindHost: string): string {
   if (bindHost === '0.0.0.0' || bindHost === '::') return 'localhost'
   return bindHost.includes(':') ? `[${bindHost}]` : bindHost
 }
 
-const port = resolvePort(process.env.PORT)
-const host = resolveHost(process.env.HOST)
+const port = appConfig.server.port
+const host = appConfig.server.host
 const WEB_ROOT = path.join(PROJECT_ROOT, 'apps/web')
 
 const MAX_CONTEXT_CHARS = 1_000_000
