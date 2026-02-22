@@ -51,6 +51,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [isGenerating, setIsGenerating] = useState(false)
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
   const [isEditorFocused, setIsEditorFocused] = useState(false)
+  const [providerSessionKey, setProviderSessionKey] = useState(0)
 
   useEffect(() => {
     includeAfterContextRef.current = includeAfterContext ?? false
@@ -97,10 +98,18 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       }
     }
 
-    const provider = createYjsProvider(documentId, handleConnectionChange, () => {
-      if (destroyed) return
-      setIsLoading(false)
-    })
+    const provider = createYjsProvider(
+      documentId,
+      handleConnectionChange,
+      () => {
+        if (destroyed) return
+        setIsLoading(false)
+      },
+      () => {
+        if (destroyed) return
+        setProviderSessionKey((value) => value + 1)
+      }
+    )
     providerRef.current = provider
 
     const type = provider.type
@@ -257,7 +266,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       setIsEditorFocused(false)
       selectionToolbarInteractingRef.current = false
     }
-  }, [documentId, showOfflineToast, dismissOfflineToast, onConnectionChange])
+  }, [documentId, providerSessionKey, showOfflineToast, dismissOfflineToast, onConnectionChange])
 
   useImperativeHandle(ref, () => ({
     startAIContinuation() {

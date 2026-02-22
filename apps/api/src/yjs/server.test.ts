@@ -74,4 +74,25 @@ describe('yjs server replaceDocument', () => {
     expect(parsed.content?.length).toBe(1)
     expect(parsed.content?.[0]?.type).toBe('paragraph')
   })
+
+  test('pre-restore in-memory state cannot overwrite replaced content', async () => {
+    const documentName = nanoid()
+
+    await ensureDocumentLoaded(documentName)
+    const liveDoc = docs.get(documentName)
+    expect(liveDoc).toBeTruthy()
+
+    const staleDoc = prosemirrorJSONToYDoc(schema, makeDoc('stale-live'))
+    const staleUpdate = Y.encodeStateAsUpdate(staleDoc)
+    staleDoc.destroy()
+    Y.applyUpdate(liveDoc!, staleUpdate)
+
+    await replaceDocument(documentName, makeDoc('restored'), { evictLive: false })
+    await flushAllDocumentStates()
+
+    const content = await getDocumentContent(documentName)
+    expect(content).not.toBeNull()
+    expect(content!).toContain('restored')
+    expect(content!).not.toContain('stale-live')
+  })
 })

@@ -2,6 +2,7 @@ import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
+const YJS_RESTORE_CLOSE_CODE = 4401
 
 export interface YjsProviderResult {
   doc: Y.Doc
@@ -15,7 +16,8 @@ export interface YjsProviderResult {
 export function createYjsProvider(
   documentId: string,
   onConnectionChange?: (status: ConnectionStatus) => void,
-  onSync?: () => void
+  onSync?: () => void,
+  onRestoreReset?: () => void
 ): YjsProviderResult {
   const doc = new Y.Doc()
   const type = doc.getXmlFragment('prosemirror')
@@ -42,6 +44,12 @@ export function createYjsProvider(
   provider.on('sync', (synced: boolean) => {
     if (synced) {
       onSync?.()
+    }
+  })
+
+  provider.on('connection-close', (event: CloseEvent | null) => {
+    if (event?.code === YJS_RESTORE_CLOSE_CODE) {
+      onRestoreReset?.()
     }
   })
 

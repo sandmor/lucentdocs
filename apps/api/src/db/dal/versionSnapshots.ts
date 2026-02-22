@@ -13,6 +13,10 @@ export type VersionSnapshotMetaRow = {
   createdAt: number
 }
 
+export type VersionSnapshotCursorRow = VersionSnapshotRow & {
+  rowId: number
+}
+
 export async function insert(
   row: Omit<VersionSnapshotRow, 'createdAt'> & { createdAt?: number }
 ): Promise<void> {
@@ -36,4 +40,32 @@ export async function findMetadataByDocumentId(
 export async function findById(id: string): Promise<VersionSnapshotRow | undefined> {
   const db = await getDb()
   return db.get<VersionSnapshotRow>('SELECT * FROM version_snapshots WHERE id = ?', [id])
+}
+
+export async function findCursorById(
+  documentId: string,
+  id: string
+): Promise<VersionSnapshotCursorRow | undefined> {
+  const db = await getDb()
+  return db.get<VersionSnapshotCursorRow>(
+    'SELECT id, documentId, content, createdAt, rowid AS rowId FROM version_snapshots WHERE id = ? AND documentId = ?',
+    [id, documentId]
+  )
+}
+
+export async function deleteSnapshotsAfterCursor(
+  documentId: string,
+  cursorCreatedAt: number,
+  cursorRowId: number
+): Promise<void> {
+  const db = await getDb()
+  await db.run(
+    `DELETE FROM version_snapshots
+     WHERE documentId = ?
+       AND (
+         createdAt > ?
+         OR (createdAt = ? AND rowid > ?)
+       )`,
+    [documentId, cursorCreatedAt, cursorCreatedAt, cursorRowId]
+  )
 }

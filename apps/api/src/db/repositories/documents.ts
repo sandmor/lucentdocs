@@ -177,7 +177,8 @@ export async function createVersionSnapshot(id: string): Promise<VersionSnapshot
 
 export async function restoreToSnapshot(
   documentId: string,
-  snapshotId: string
+  snapshotId: string,
+  options: { evictLive?: boolean } = {}
 ): Promise<DocumentWithContent | null> {
   if (!isValidId(documentId)) return null
   if (!isValidId(snapshotId)) return null
@@ -185,23 +186,26 @@ export async function restoreToSnapshot(
   const doc = await dalDocs.findById(documentId)
   if (!doc) return null
 
-  const snapshot = await dalVersionSnapshots.findById(snapshotId)
-  if (!snapshot || snapshot.documentId !== documentId) return null
+  const snapshot = await dalVersionSnapshots.findCursorById(documentId, snapshotId)
+  if (!snapshot) return null
 
   const content = parseJsonObjectContent(snapshot.content)
   if (!content) return null
 
-  await replaceYjsDocument(documentId, content)
+  await dalVersionSnapshots.deleteSnapshotsAfterCursor(
+    documentId,
+    snapshot.createdAt,
+    snapshot.rowId
+  )
+  await replaceYjsDocument(documentId, content, { evictLive: options.evictLive ?? true })
 
   const now = Date.now()
   await dalDocs.update(documentId, { updatedAt: now })
 
-  const normalizedContent = await getDocumentContent(documentId)
-
   return {
     ...doc,
     updatedAt: now,
-    content: normalizedContent,
+    content: JSON.stringify(content),
   }
 }
 

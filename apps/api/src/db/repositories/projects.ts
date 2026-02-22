@@ -5,6 +5,11 @@ import * as dalProjectDocs from '../dal/projectDocuments.js'
 import * as docsRepo from './documents.js'
 import type { DocumentWithContent, VersionSnapshot } from './documents.js'
 import { withTransaction } from '../transaction.js'
+import {
+  evictLiveDocument,
+  YJS_RESTORE_CLOSE_CODE,
+  YJS_RESTORE_CLOSE_REASON,
+} from '../../yjs/server.js'
 
 export interface ProjectWithContent extends Project {
   documentId: string
@@ -138,14 +143,18 @@ export async function restoreProject(
 ): Promise<ProjectWithContent | null> {
   if (!isValidId(id)) return null
 
-  return withTransaction(async () => {
+  let restoredDocumentId: string | null = null
+  const restored = await withTransaction(async () => {
     const project = await dal.findById(id)
     if (!project) return null
 
     const projectDoc = await dalProjectDocs.findDocumentByProjectId(id)
     if (!projectDoc) return null
+    restoredDocumentId = projectDoc.documentId
 
-    const doc = await docsRepo.restoreToSnapshot(projectDoc.documentId, snapshotId)
+    const doc = await docsRepo.restoreToSnapshot(projectDoc.documentId, snapshotId, {
+      evictLive: false,
+    })
     if (!doc) return null
 
     const nextProject: Project = {
@@ -161,6 +170,15 @@ export async function restoreProject(
 
     return docToProjectWithContent(doc, nextProject)
   })
+
+  if (!restored || !restoredDocumentId) return restored
+
+  evictLiveDocument(restoredDocumentId, {
+    closeCode: YJS_RESTORE_CLOSE_CODE,
+    closeReason: YJS_RESTORE_CLOSE_REASON,
+  })
+
+  return restored
 }
 
 export async function getProjectVersions(id: string): Promise<VersionSnapshot[]> {
