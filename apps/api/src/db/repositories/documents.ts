@@ -83,7 +83,9 @@ async function setProjectDefaultDocument(projectId: string, documentId: string):
 }
 
 function hasAncestorFileConflict(paths: string[]): boolean {
-  const normalized = paths.map((path) => normalizeDocumentPath(path)).filter((path) => path.length > 0)
+  const normalized = paths
+    .map((path) => normalizeDocumentPath(path))
+    .filter((path) => path.length > 0)
   const filePaths = new Set(normalized.filter((path) => !isDirectorySentinelPath(path)))
 
   for (const path of normalized) {
@@ -100,7 +102,9 @@ function hasAncestorFileConflict(paths: string[]): boolean {
 }
 
 function hasPathCollision(paths: string[]): boolean {
-  const normalized = paths.map((path) => normalizeDocumentPath(path)).filter((path) => path.length > 0)
+  const normalized = paths
+    .map((path) => normalizeDocumentPath(path))
+    .filter((path) => path.length > 0)
   return new Set(normalized).size !== normalized.length
 }
 
@@ -498,7 +502,10 @@ export async function moveDirectoryForProject(
   const normalizedSourcePath = normalizeDocumentPath(sourcePath)
   const normalizedDestinationPath = normalizeDocumentPath(destinationPath)
   if (!normalizedSourcePath || !normalizedDestinationPath) return null
-  if (pathHasSentinelSegment(normalizedSourcePath) || pathHasSentinelSegment(normalizedDestinationPath))
+  if (
+    pathHasSentinelSegment(normalizedSourcePath) ||
+    pathHasSentinelSegment(normalizedDestinationPath)
+  )
     return null
   if (normalizedSourcePath === normalizedDestinationPath) {
     return { movedDocumentIds: [], destinationPath: normalizedDestinationPath }
@@ -546,7 +553,9 @@ export async function moveDirectoryForProject(
       normalizedTitle === normalizedSourcePath
         ? ''
         : normalizedTitle.slice(normalizedSourcePath.length + 1)
-    const remappedPath = suffix ? `${normalizedDestinationPath}/${suffix}` : normalizedDestinationPath
+    const remappedPath = suffix
+      ? `${normalizedDestinationPath}/${suffix}`
+      : normalizedDestinationPath
     updates.set(doc.id, normalizeDocumentPath(remappedPath))
     movedDocumentIds.push(doc.id)
   }

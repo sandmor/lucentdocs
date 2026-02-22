@@ -154,10 +154,15 @@ export function BrowserDialogs({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={renameTarget !== null} onOpenChange={(open) => !open && onRenameTargetChange(null)}>
+      <Dialog
+        open={renameTarget !== null}
+        onOpenChange={(open) => !open && onRenameTargetChange(null)}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{renameTarget?.type === 'directory' ? 'Rename directory' : 'Rename document'}</DialogTitle>
+            <DialogTitle>
+              {renameTarget?.type === 'directory' ? 'Rename directory' : 'Rename document'}
+            </DialogTitle>
             <DialogDescription>{renameDescription}</DialogDescription>
           </DialogHeader>
           <form
@@ -186,7 +191,9 @@ export function BrowserDialogs({
       <Dialog open={moveTarget !== null} onOpenChange={(open) => !open && onMoveTargetChange(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{moveTarget?.type === 'directory' ? 'Move directory' : 'Move document'}</DialogTitle>
+            <DialogTitle>
+              {moveTarget?.type === 'directory' ? 'Move directory' : 'Move document'}
+            </DialogTitle>
             <DialogDescription>
               Enter destination directory path. Leave empty to move to root.
             </DialogDescription>
@@ -214,7 +221,10 @@ export function BrowserDialogs({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && onDeleteTargetChange(null)}>
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && onDeleteTargetChange(null)}
+      >
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
             <AlertDialogTitle>

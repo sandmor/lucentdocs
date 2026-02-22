@@ -84,7 +84,10 @@ export function useDocumentBrowser({
         .flatMap((value) => (value ? [value] : [])),
     [allDocuments]
   )
-  const explicitDirectoryPathSet = useMemo(() => new Set(explicitDirectoryPaths), [explicitDirectoryPaths])
+  const explicitDirectoryPathSet = useMemo(
+    () => new Set(explicitDirectoryPaths),
+    [explicitDirectoryPaths]
+  )
 
   const rows = useMemo(() => buildRows(allDocuments, currentPath), [allDocuments, currentPath])
   const breadcrumbs = useMemo(() => pathSegments(currentPath), [currentPath])
@@ -183,7 +186,9 @@ export function useDocumentBrowser({
       }
 
       if (isPathInsideDirectory(currentPath, variables.sourcePath)) {
-        setCurrentPath(remapPathInsideDirectory(currentPath, variables.sourcePath, result.destinationPath))
+        setCurrentPath(
+          remapPathInsideDirectory(currentPath, variables.sourcePath, result.destinationPath)
+        )
       }
     },
     onError: (error) => {
@@ -254,7 +259,14 @@ export function useDocumentBrowser({
     }
 
     createMutation.mutate({ projectId, title: nextPath })
-  }, [createMutation, currentPath, documentPathSet, isDirectoryPathTaken, newDocumentName, projectId])
+  }, [
+    createMutation,
+    currentPath,
+    documentPathSet,
+    isDirectoryPathTaken,
+    newDocumentName,
+    projectId,
+  ])
 
   const handleCreateDirectory = useCallback(() => {
     const trimmed = newDirectoryName.trim()
@@ -278,7 +290,14 @@ export function useDocumentBrowser({
     }
 
     createDirectoryMutation.mutate({ projectId, path: nextPath })
-  }, [createDirectoryMutation, currentPath, documentPathSet, isDirectoryPathTaken, newDirectoryName, projectId])
+  }, [
+    createDirectoryMutation,
+    currentPath,
+    documentPathSet,
+    isDirectoryPathTaken,
+    newDirectoryName,
+    projectId,
+  ])
 
   const handleRename = useCallback(() => {
     if (!renameTarget) return
@@ -286,7 +305,9 @@ export function useDocumentBrowser({
     const trimmed = renameName.trim()
     if (!trimmed) return
     if (trimmed.includes('/')) {
-      toast.error(`${renameTarget.type === 'directory' ? 'Directory' : 'Document'} name cannot include slashes`)
+      toast.error(
+        `${renameTarget.type === 'directory' ? 'Directory' : 'Document'} name cannot include slashes`
+      )
       return
     }
 
@@ -417,7 +438,8 @@ export function useDocumentBrowser({
 
       if (!activeData || !dropData) return
 
-      const destinationDirectory = dropData.kind === 'root' ? '' : normalizeDocumentPath(dropData.path)
+      const destinationDirectory =
+        dropData.kind === 'root' ? '' : normalizeDocumentPath(dropData.path)
 
       if (activeData.kind === 'document') {
         const sourcePath = normalizeDocumentPath(activeData.path)
@@ -521,7 +543,9 @@ export function useDocumentBrowser({
       {
         accessorKey: 'updatedAt',
         header: 'Updated',
-        cell: ({ row }) => <span className="text-muted-foreground">{formatDate(row.original.updatedAt)}</span>,
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">{formatDate(row.original.updatedAt)}</span>
+        ),
       },
       {
         id: 'actions',

@@ -10,7 +10,11 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
   const browser = useDocumentBrowser(props)
 
   return (
-    <DndContext sensors={browser.sensors} collisionDetection={closestCenter} onDragEnd={browser.handleDragEnd}>
+    <DndContext
+      sensors={browser.sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={browser.handleDragEnd}
+    >
       <section className="bg-muted/15 flex h-full w-full flex-col border-b md:w-[360px] md:shrink-0 md:border-r md:border-b-0">
         <BrowserHeader
           breadcrumbs={browser.breadcrumbs}

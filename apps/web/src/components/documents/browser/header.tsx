@@ -28,7 +28,10 @@ export function BrowserHeader({
           <div className="text-muted-foreground mt-1 flex items-center gap-1 text-xs">
             <span
               ref={rootDropRef}
-              className={cn('rounded px-1 py-0.5', isOverRoot && 'bg-accent text-accent-foreground')}
+              className={cn(
+                'rounded px-1 py-0.5',
+                isOverRoot && 'bg-accent text-accent-foreground'
+              )}
             >
               <button className="hover:text-foreground" onClick={() => onGoToCrumb(-1)}>
                 root
@@ -37,7 +40,10 @@ export function BrowserHeader({
             {breadcrumbs.map((crumb, index) => (
               <span key={`${crumb}-${index}`} className="flex items-center gap-1">
                 <ChevronRight className="size-3" />
-                <button className="hover:text-foreground truncate" onClick={() => onGoToCrumb(index)}>
+                <button
+                  className="hover:text-foreground truncate"
+                  onClick={() => onGoToCrumb(index)}
+                >
                   {crumb}
                 </button>
               </span>

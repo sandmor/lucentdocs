@@ -64,7 +64,10 @@ export function EditorPage() {
       return requestedDocumentId
     }
 
-    if (defaultDocumentIdFromProject && visibleDocuments.some((doc) => doc.id === defaultDocumentIdFromProject)) {
+    if (
+      defaultDocumentIdFromProject &&
+      visibleDocuments.some((doc) => doc.id === defaultDocumentIdFromProject)
+    ) {
       return defaultDocumentIdFromProject
     }
 
@@ -433,7 +436,17 @@ export function EditorPage() {
         }
       )
     },
-    [id, navigate, openOrCreateDefaultDocumentMutation, searchParams, setSearchParams, utils.documents.get, utils.documents.list, utils.documents.versions, utils.projects.get]
+    [
+      id,
+      navigate,
+      openOrCreateDefaultDocumentMutation,
+      searchParams,
+      setSearchParams,
+      utils.documents.get,
+      utils.documents.list,
+      utils.documents.versions,
+      utils.projects.get,
+    ]
   )
 
   trpc.sync.onProjectEvent.useSubscription(
@@ -486,7 +499,9 @@ export function EditorPage() {
             />
           </div>
 
-          <span className="text-muted-foreground hidden text-sm md:inline">{projectQuery.data.title}</span>
+          <span className="text-muted-foreground hidden text-sm md:inline">
+            {projectQuery.data.title}
+          </span>
 
           <div className="ml-auto flex items-center gap-2">
             <Badge variant={connectionStatus === 'disconnected' ? 'destructive' : 'secondary'}>
@@ -534,10 +549,10 @@ export function EditorPage() {
           {!hasDocuments &&
             !documentsQuery.isLoading &&
             !openOrCreateDefaultDocumentMutation.isPending && (
-            <div className="text-muted-foreground flex h-full items-center justify-center px-6 text-sm">
-              Create a document from the left panel to start writing.
-            </div>
-          )}
+              <div className="text-muted-foreground flex h-full items-center justify-center px-6 text-sm">
+                Create a document from the left panel to start writing.
+              </div>
+            )}
 
           {(documentsQuery.isLoading || openOrCreateDefaultDocumentMutation.isPending) && (
             <div className="flex h-full items-center justify-center">
@@ -551,19 +566,23 @@ export function EditorPage() {
             </div>
           )}
 
-          {hasDocuments && (documentQuery.error || !documentQuery.data) && !documentQuery.isLoading && (
-            <div className="flex h-full flex-col items-center justify-center gap-4">
-              <p className="text-destructive">{documentQuery.error?.message ?? 'Document not found'}</p>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (fallbackDocumentId) handleOpenDocument(fallbackDocumentId)
-                }}
-              >
-                Open default document
-              </Button>
-            </div>
-          )}
+          {hasDocuments &&
+            (documentQuery.error || !documentQuery.data) &&
+            !documentQuery.isLoading && (
+              <div className="flex h-full flex-col items-center justify-center gap-4">
+                <p className="text-destructive">
+                  {documentQuery.error?.message ?? 'Document not found'}
+                </p>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (fallbackDocumentId) handleOpenDocument(fallbackDocumentId)
+                  }}
+                >
+                  Open default document
+                </Button>
+              </div>
+            )}
 
           {hasDocuments && documentQuery.data && !documentQuery.isLoading && currentDocumentId && (
             <div className="mx-auto max-w-3xl px-8 py-10">

@@ -139,7 +139,8 @@ describe('documents repository', () => {
     expect(
       docs.some(
         (doc) =>
-          isDirectorySentinelPath(doc.title) && directoryPathFromSentinel(doc.title) === 'book/chapter-1'
+          isDirectorySentinelPath(doc.title) &&
+          directoryPathFromSentinel(doc.title) === 'book/chapter-1'
       )
     ).toBe(true)
   })

@@ -1,9 +1,4 @@
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from '@tanstack/react-table'
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import {
   Table,
   TableBody,
@@ -66,7 +61,10 @@ export function DataTable<TData, TValue>({
             ))
           ) : (
             <TableRow>
-              <TableCell colSpan={columns.length} className="text-muted-foreground h-20 text-center">
+              <TableCell
+                colSpan={columns.length}
+                className="text-muted-foreground h-20 text-center"
+              >
                 {emptyMessage}
               </TableCell>
             </TableRow>

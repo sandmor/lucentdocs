@@ -34,7 +34,9 @@ export async function findSoleDocumentIdsByProjectId(projectId: string): Promise
   return rows.map((row) => row.documentId)
 }
 
-export async function findSoleProjectIdByDocumentId(documentId: string): Promise<string | undefined> {
+export async function findSoleProjectIdByDocumentId(
+  documentId: string
+): Promise<string | undefined> {
   const db = await getDb()
   const row = await db.get<{ projectId: string }>(
     `SELECT MIN(projectId) AS projectId
