@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState } from 'react'
+import { useRef, useCallback, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { trpc } from '@/lib/trpc'
@@ -46,26 +46,81 @@ export function EditorPage() {
   useEffect(() => {
     if (!id || projectQuery.data?.id !== id) return
 
-    if (projectTitle !== undefined && lastSavedTitleRef.current === null) {
+    if (projectTitle === undefined) return
+
+    if (lastSavedTitleRef.current === null) {
       lastSavedTitleRef.current = projectTitle
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTitleInput(projectTitle)
+      return
     }
-  }, [id, projectQuery.data?.id, projectTitle])
+
+    if (projectTitle !== lastSavedTitleRef.current && titleInput === lastSavedTitleRef.current) {
+      lastSavedTitleRef.current = projectTitle
+      setTitleInput(projectTitle)
+    }
+  }, [id, projectQuery.data?.id, projectTitle, titleInput])
+
+  const commitTitle = useCallback(() => {
+    if (!id || updateMutation.isPending) return
+
+    const trimmedTitle = titleInput.trim()
+    if (!trimmedTitle) {
+      setTitleInput(lastSavedTitleRef.current ?? projectTitle ?? '')
+      return
+    }
+
+    if (trimmedTitle === lastSavedTitleRef.current) {
+      if (trimmedTitle !== titleInput) {
+        setTitleInput(trimmedTitle)
+      }
+      return
+    }
+
+    updateMutation.mutate(
+      { id, title: trimmedTitle },
+      {
+        onSuccess: (project) => {
+          lastSavedTitleRef.current = project.title
+          setTitleInput(project.title)
+          utils.projects.get.setData({ id }, project)
+          utils.projects.list.setData(undefined, (projects) =>
+            projects?.map((item) =>
+              item.id === id
+                ? { ...item, title: project.title, updatedAt: project.updatedAt }
+                : item
+            )
+          )
+        },
+        onError: (error) => {
+          setTitleInput(lastSavedTitleRef.current ?? projectTitle ?? '')
+          toast.error('Failed to update project title', {
+            description: error.message,
+          })
+        },
+      }
+    )
+  }, [id, projectTitle, titleInput, updateMutation, utils])
 
   const handleTitleBlur = useCallback(() => {
-    const trimmedTitle = titleInput.trim()
-    if (id && trimmedTitle && trimmedTitle !== lastSavedTitleRef.current) {
-      updateMutation.mutate(
-        { id, title: trimmedTitle },
-        {
-          onSuccess: () => {
-            lastSavedTitleRef.current = trimmedTitle
-          },
-        }
-      )
-    }
-  }, [id, titleInput, updateMutation])
+    commitTitle()
+  }, [commitTitle])
+
+  const handleTitleKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        commitTitle()
+        e.currentTarget.blur()
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setTitleInput(lastSavedTitleRef.current ?? projectTitle ?? '')
+        e.currentTarget.blur()
+      }
+    },
+    [commitTitle, projectTitle]
+  )
 
   const handleRestore = useCallback(
     (snapshotId: string) => {
@@ -161,6 +216,8 @@ export function EditorPage() {
             value={titleInput}
             onChange={(e) => setTitleInput(e.target.value)}
             onBlur={handleTitleBlur}
+            onKeyDown={handleTitleKeyDown}
+            autoComplete="off"
             className="max-w-xs border-none bg-transparent text-base font-semibold shadow-none focus-visible:ring-0"
           />
 
