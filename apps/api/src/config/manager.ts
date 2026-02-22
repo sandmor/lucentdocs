@@ -1,5 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import TOML from '@iarna/toml'
+import {
+  CONFIG_FIELD_BY_KEY,
+  CONFIG_FIELD_DEFINITIONS,
+  DEFAULT_PERSISTED_CONFIG,
+  EDITABLE_CONFIG_KEYS,
+  PERSISTED_CONFIG_KEYS,
+  type PersistedAppConfig,
+  type PersistedConfigKey,
+  type PersistedConfigSection,
+} from '@plotline/shared'
 import {
   CONFIG_FILE_NAME,
   DEFAULT_DATA_DIR,
@@ -8,28 +19,12 @@ import {
   resolveDataFile,
 } from '../paths.js'
 
-const DEFAULT_PORT = 5677
-const DEFAULT_HOST = '127.0.0.1'
-const DEFAULT_NODE_ENV = 'development'
-const DEFAULT_YJS_PERSISTENCE_FLUSH_MS = 2000
-const DEFAULT_YJS_VERSION_INTERVAL_MS = 300000
-const DEFAULT_AI_MODEL = 'gpt-4o-mini'
+const DEFAULT_AI_MODEL = 'gpt-5'
 const DEFAULT_ANTHROPIC_MODEL = 'claude-3-5-haiku-latest'
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1'
 
-export interface PersistedAppConfig {
-  NODE_ENV: string
-  HOST: string
-  PORT: number
-  AI_API_KEY: string
-  AI_BASE_URL: string
-  AI_MODEL: string
-  YJS_PERSISTENCE_FLUSH_MS: number
-  YJS_VERSION_INTERVAL_MS: number
-}
-
-type PersistedConfigKey = keyof PersistedAppConfig
+export type ConfigValueSource = 'env' | 'file' | 'default'
 
 export type AiProvider = 'openai' | 'anthropic' | 'openai-compatible'
 
@@ -62,15 +57,17 @@ export interface AppConfig {
   }
 }
 
-const DEFAULT_PERSISTED_CONFIG: PersistedAppConfig = {
-  NODE_ENV: DEFAULT_NODE_ENV,
-  HOST: DEFAULT_HOST,
-  PORT: DEFAULT_PORT,
-  AI_API_KEY: '',
-  AI_BASE_URL: '',
-  AI_MODEL: '',
-  YJS_PERSISTENCE_FLUSH_MS: DEFAULT_YJS_PERSISTENCE_FLUSH_MS,
-  YJS_VERSION_INTERVAL_MS: DEFAULT_YJS_VERSION_INTERVAL_MS,
+export interface ConfigStateSnapshot {
+  config: AppConfig
+  fileConfig: Partial<PersistedAppConfig>
+  sources: Record<PersistedConfigKey, ConfigValueSource>
+}
+
+export interface UpdateConfigResult {
+  state: ConfigStateSnapshot
+  changedFileKeys: PersistedConfigKey[]
+  changedEffectiveKeys: PersistedConfigKey[]
+  overriddenChangedKeys: PersistedConfigKey[]
 }
 
 function hasEnvValue(env: NodeJS.ProcessEnv, key: string): boolean {
@@ -103,215 +100,70 @@ function normalizeDataDir(value: string | undefined): string {
   return trimmed ? trimmed : DEFAULT_DATA_DIR
 }
 
-function normalizeHost(value: string | undefined): string {
-  const trimmed = value?.trim()
-  return trimmed ? trimmed : DEFAULT_HOST
-}
+function normalizeConfigValue(
+  key: PersistedConfigKey,
+  value: unknown
+): PersistedAppConfig[PersistedConfigKey] {
+  const field = CONFIG_FIELD_BY_KEY[key]
 
-function normalizeNodeEnv(value: string | undefined): string {
-  const trimmed = value?.trim()
-  return trimmed ? trimmed : DEFAULT_NODE_ENV
-}
-
-function normalizePort(value: number | undefined): number {
-  if (typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 65_535) {
-    return value
-  }
-  return DEFAULT_PORT
-}
-
-function normalizePositiveInt(value: number | undefined, fallback: number): number {
-  if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value
-  return fallback
-}
-
-function normalizeAiValue(value: string | undefined): string {
-  return value?.trim() ?? ''
-}
-
-function parseTomlString(raw: string): string | undefined {
-  if (raw.length < 2) return undefined
-  const quote = raw[0]
-  if ((quote !== '"' && quote !== "'") || raw[raw.length - 1] !== quote) return undefined
-
-  const body = raw.slice(1, -1)
-  if (quote === "'") return body
-
-  let result = ''
-  for (let i = 0; i < body.length; i += 1) {
-    const current = body[i]
-    if (current !== '\\') {
-      result += current
-      continue
+  if (field.kind === 'string') {
+    const trimmed = typeof value === 'string' ? value.trim() : ''
+    if (!trimmed && !field.allowEmptyString) {
+      return String(field.defaultValue)
     }
-
-    const next = body[i + 1]
-    if (!next) {
-      result += '\\'
-      continue
-    }
-
-    i += 1
-    switch (next) {
-      case 'n':
-        result += '\n'
-        break
-      case 'r':
-        result += '\r'
-        break
-      case 't':
-        result += '\t'
-        break
-      case '"':
-        result += '"'
-        break
-      case '\\':
-        result += '\\'
-        break
-      default:
-        result += next
-        break
-    }
+    return trimmed
   }
 
-  return result
-}
-
-function stripInlineComment(raw: string): string {
-  let inSingleQuoted = false
-  let inDoubleQuoted = false
-  let escaped = false
-
-  for (let i = 0; i < raw.length; i += 1) {
-    const char = raw[i]
-    if (escaped) {
-      escaped = false
-      continue
-    }
-
-    if (char === '\\' && (inSingleQuoted || inDoubleQuoted)) {
-      escaped = true
-      continue
-    }
-
-    if (char === "'" && !inDoubleQuoted) {
-      inSingleQuoted = !inSingleQuoted
-      continue
-    }
-
-    if (char === '"' && !inSingleQuoted) {
-      inDoubleQuoted = !inDoubleQuoted
-      continue
-    }
-
-    if (char === '#' && !inSingleQuoted && !inDoubleQuoted) {
-      return raw.slice(0, i)
-    }
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return Number(field.defaultValue)
   }
 
-  return raw
-}
-
-function parseTomlValue(raw: string): string | number | undefined {
-  const trimmed = stripInlineComment(raw).trim()
-  if (!trimmed) return undefined
-
-  const parsedString = parseTomlString(trimmed)
-  if (parsedString !== undefined) return parsedString
-
-  if (/^[+-]?\d+$/.test(trimmed)) {
-    const parsedInt = Number.parseInt(trimmed, 10)
-    if (Number.isInteger(parsedInt)) return parsedInt
+  if (field.min !== undefined && value < field.min) {
+    return Number(field.defaultValue)
   }
 
-  return undefined
+  if (field.max !== undefined && value > field.max) {
+    return Number(field.defaultValue)
+  }
+
+  return value
 }
 
-function assignParsedValue(
-  parsed: Partial<PersistedAppConfig>,
-  configKey: PersistedConfigKey,
-  value: string | number
-): void {
-  switch (configKey) {
-    case 'NODE_ENV':
-      if (typeof value === 'string' && value.trim()) parsed.NODE_ENV = value.trim()
-      break
-    case 'HOST':
-      if (typeof value === 'string' && value.trim()) parsed.HOST = value.trim()
-      break
-    case 'PORT':
-      if (typeof value === 'number') parsed.PORT = value
-      break
-    case 'AI_API_KEY':
-      if (typeof value === 'string') parsed.AI_API_KEY = value.trim()
-      break
-    case 'AI_BASE_URL':
-      if (typeof value === 'string') parsed.AI_BASE_URL = value.trim()
-      break
-    case 'AI_MODEL':
-      if (typeof value === 'string') parsed.AI_MODEL = value.trim()
-      break
-    case 'YJS_PERSISTENCE_FLUSH_MS':
-      if (typeof value === 'number') parsed.YJS_PERSISTENCE_FLUSH_MS = value
-      break
-    case 'YJS_VERSION_INTERVAL_MS':
-      if (typeof value === 'number') parsed.YJS_VERSION_INTERVAL_MS = value
-      break
-    default:
-      break
+function parseConfigValue(
+  key: PersistedConfigKey,
+  value: unknown
+): PersistedAppConfig[PersistedConfigKey] | undefined {
+  const field = CONFIG_FIELD_BY_KEY[key]
+
+  if (field.kind === 'string') {
+    if (typeof value !== 'string') return undefined
+    const trimmed = value.trim()
+    if (!trimmed && !field.allowEmptyString) return undefined
+    return trimmed
   }
+
+  if (typeof value !== 'number' || !Number.isInteger(value)) return undefined
+  if (field.min !== undefined && value < field.min) return undefined
+  if (field.max !== undefined && value > field.max) return undefined
+  return value
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function parseFileConfig(contents: string): Partial<PersistedAppConfig> {
   const parsed: Partial<PersistedAppConfig> = {}
-  let section = ''
+  const parsedRecord = parsed as Record<PersistedConfigKey, string | number>
+  const document = TOML.parse(contents)
+  if (!isRecordValue(document)) return parsed
 
-  for (const line of contents.split(/\r?\n/)) {
-    const trimmedLine = line.trim()
-    if (!trimmedLine || trimmedLine.startsWith('#')) continue
+  for (const field of CONFIG_FIELD_DEFINITIONS) {
+    const section = document[field.section]
+    if (!isRecordValue(section)) continue
 
-    if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) {
-      section = trimmedLine.slice(1, -1).trim().toLowerCase()
-      continue
-    }
-
-    const equalsIndex = trimmedLine.indexOf('=')
-    if (equalsIndex <= 0) continue
-
-    const key = trimmedLine.slice(0, equalsIndex).trim()
-    const value = parseTomlValue(trimmedLine.slice(equalsIndex + 1))
-    if (value === undefined) continue
-
-    const normalizedKey = key.toLowerCase()
-    if (section === 'app') {
-      if (normalizedKey === 'environment') {
-        assignParsedValue(parsed, 'NODE_ENV', value)
-      }
-      continue
-    }
-
-    if (section === 'server') {
-      if (normalizedKey === 'host') assignParsedValue(parsed, 'HOST', value)
-      if (normalizedKey === 'port') assignParsedValue(parsed, 'PORT', value)
-      continue
-    }
-
-    if (section === 'ai') {
-      if (normalizedKey === 'api_key') assignParsedValue(parsed, 'AI_API_KEY', value)
-      if (normalizedKey === 'base_url') assignParsedValue(parsed, 'AI_BASE_URL', value)
-      if (normalizedKey === 'model') assignParsedValue(parsed, 'AI_MODEL', value)
-      continue
-    }
-
-    if (section === 'yjs') {
-      if (normalizedKey === 'persistence_flush_interval_ms') {
-        assignParsedValue(parsed, 'YJS_PERSISTENCE_FLUSH_MS', value)
-      }
-      if (normalizedKey === 'version_snapshot_interval_ms') {
-        assignParsedValue(parsed, 'YJS_VERSION_INTERVAL_MS', value)
-      }
-      continue
-    }
+    const value = parseConfigValue(field.key, section[field.tomlKey])
+    if (value !== undefined) parsedRecord[field.key] = value
   }
 
   return parsed
@@ -333,91 +185,59 @@ function readConfigFromFile(configPath: string): Partial<PersistedAppConfig> {
 
 function readConfigFromEnv(env: NodeJS.ProcessEnv): Partial<PersistedAppConfig> {
   const envConfig: Partial<PersistedAppConfig> = {}
+  const envRecord = envConfig as Record<PersistedConfigKey, string | number>
 
-  const nodeEnv = readEnvString(env, 'NODE_ENV')
-  if (nodeEnv !== undefined) envConfig.NODE_ENV = nodeEnv
+  for (const field of CONFIG_FIELD_DEFINITIONS) {
+    if (field.kind === 'string') {
+      const raw = readEnvString(env, field.envVar, { allowEmpty: field.allowEmptyString })
+      if (raw === undefined) continue
+      const value = parseConfigValue(field.key, raw)
+      if (value !== undefined) envRecord[field.key] = value
+      continue
+    }
 
-  const host = readEnvString(env, 'HOST')
-  if (host !== undefined) envConfig.HOST = host
-
-  const port = readEnvInt(env, 'PORT')
-  if (port !== undefined) envConfig.PORT = port
-
-  const apiKey = readEnvString(env, 'AI_API_KEY', { allowEmpty: true })
-  if (apiKey !== undefined) envConfig.AI_API_KEY = apiKey
-
-  const baseURL = readEnvString(env, 'AI_BASE_URL', { allowEmpty: true })
-  if (baseURL !== undefined) envConfig.AI_BASE_URL = baseURL
-
-  const model = readEnvString(env, 'AI_MODEL', { allowEmpty: true })
-  if (model !== undefined) envConfig.AI_MODEL = model
-
-  const persistenceFlushMs = readEnvInt(env, 'YJS_PERSISTENCE_FLUSH_MS')
-  if (persistenceFlushMs !== undefined) envConfig.YJS_PERSISTENCE_FLUSH_MS = persistenceFlushMs
-
-  const versionIntervalMs = readEnvInt(env, 'YJS_VERSION_INTERVAL_MS')
-  if (versionIntervalMs !== undefined) envConfig.YJS_VERSION_INTERVAL_MS = versionIntervalMs
+    const raw = readEnvInt(env, field.envVar)
+    if (raw === undefined) continue
+    const value = parseConfigValue(field.key, raw)
+    if (value !== undefined) envRecord[field.key] = value
+  }
 
   return envConfig
 }
 
 function mergeConfig(
   fileConfig: Partial<PersistedAppConfig>,
-  envConfig: Partial<PersistedAppConfig>
+  envConfig: Partial<PersistedAppConfig> = {}
 ): PersistedAppConfig {
-  const merged: PersistedAppConfig = {
+  const merged: Partial<PersistedAppConfig> = {
     ...DEFAULT_PERSISTED_CONFIG,
     ...fileConfig,
     ...envConfig,
   }
 
-  return {
-    NODE_ENV: normalizeNodeEnv(merged.NODE_ENV),
-    HOST: normalizeHost(merged.HOST),
-    PORT: normalizePort(merged.PORT),
-    AI_API_KEY: normalizeAiValue(merged.AI_API_KEY),
-    AI_BASE_URL: normalizeAiValue(merged.AI_BASE_URL),
-    AI_MODEL: normalizeAiValue(merged.AI_MODEL),
-    YJS_PERSISTENCE_FLUSH_MS: normalizePositiveInt(
-      merged.YJS_PERSISTENCE_FLUSH_MS,
-      DEFAULT_YJS_PERSISTENCE_FLUSH_MS
-    ),
-    YJS_VERSION_INTERVAL_MS: normalizePositiveInt(
-      merged.YJS_VERSION_INTERVAL_MS,
-      DEFAULT_YJS_VERSION_INTERVAL_MS
-    ),
-  }
-}
+  const normalizedRecord = {} as Record<PersistedConfigKey, string | number>
 
-function escapeTomlString(value: string): string {
-  return `"${value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r')
-    .replace(/\t/g, '\\t')}"`
+  for (const key of PERSISTED_CONFIG_KEYS) {
+    normalizedRecord[key] = normalizeConfigValue(key, merged[key])
+  }
+
+  return normalizedRecord as unknown as PersistedAppConfig
 }
 
 function serializeConfig(config: PersistedAppConfig): string {
-  return [
-    '# Plotline application configuration.',
-    '[app]',
-    `environment = ${escapeTomlString(config.NODE_ENV)}`,
-    '',
-    '[server]',
-    `host = ${escapeTomlString(config.HOST)}`,
-    `port = ${config.PORT}`,
-    '',
-    '[ai]',
-    `api_key = ${escapeTomlString(config.AI_API_KEY)}`,
-    `base_url = ${escapeTomlString(config.AI_BASE_URL)}`,
-    `model = ${escapeTomlString(config.AI_MODEL)}`,
-    '',
-    '[yjs]',
-    `persistence_flush_interval_ms = ${config.YJS_PERSISTENCE_FLUSH_MS}`,
-    `version_snapshot_interval_ms = ${config.YJS_VERSION_INTERVAL_MS}`,
-    '',
-  ].join('\n')
+  const sections: Record<PersistedConfigSection, Record<string, string | number>> = {
+    app: {},
+    server: {},
+    ai: {},
+    yjs: {},
+  }
+
+  for (const field of CONFIG_FIELD_DEFINITIONS) {
+    sections[field.section][field.tomlKey] = config[field.key]
+  }
+
+  const body = TOML.stringify(sections).trimEnd()
+  return `# Plotline application configuration.\n${body}\n`
 }
 
 function writeConfigAtomically(configPath: string, contents: string): void {
@@ -490,48 +310,162 @@ function freezeResolvedConfig(config: AppConfig): AppConfig {
   return Object.freeze(config)
 }
 
+function buildResolvedConfig(
+  rawConfig: PersistedAppConfig,
+  configuredDataDir: string,
+  configFilePath: string
+): AppConfig {
+  const aiConfig = resolveAiConfig(rawConfig)
+  return freezeResolvedConfig({
+    raw: { ...rawConfig },
+    runtime: {
+      nodeEnv: rawConfig.NODE_ENV,
+      isProduction: rawConfig.NODE_ENV === 'production',
+    },
+    server: {
+      host: rawConfig.HOST,
+      port: rawConfig.PORT,
+    },
+    paths: {
+      dataDir: resolveDataDir(configuredDataDir),
+      configFile: configFilePath,
+      dbFile: resolveDataFile(configuredDataDir, SQLITE_FILE_NAME),
+    },
+    ai: { ...aiConfig },
+    yjs: {
+      persistenceFlushIntervalMs: rawConfig.YJS_PERSISTENCE_FLUSH_MS,
+      versionSnapshotIntervalMs: rawConfig.YJS_VERSION_INTERVAL_MS,
+    },
+  })
+}
+
+function resolveConfigSources(
+  fileConfig: Partial<PersistedAppConfig>,
+  envConfig: Partial<PersistedAppConfig>
+): Record<PersistedConfigKey, ConfigValueSource> {
+  const sources = {} as Record<PersistedConfigKey, ConfigValueSource>
+
+  for (const key of PERSISTED_CONFIG_KEYS) {
+    if (envConfig[key] !== undefined) {
+      sources[key] = 'env'
+      continue
+    }
+    if (fileConfig[key] !== undefined) {
+      sources[key] = 'file'
+      continue
+    }
+    sources[key] = 'default'
+  }
+
+  return sources
+}
+
+const editableConfigKeySet = new Set<PersistedConfigKey>(EDITABLE_CONFIG_KEYS)
+
+function sanitizeEditablePatch(
+  patch: Partial<PersistedAppConfig>
+): Partial<PersistedAppConfig> {
+  const sanitized: Partial<PersistedAppConfig> = {}
+  const sanitizedRecord = sanitized as Record<
+    PersistedConfigKey,
+    PersistedAppConfig[PersistedConfigKey] | undefined
+  >
+
+  for (const [rawKey, rawValue] of Object.entries(patch)) {
+    if (rawValue === undefined) continue
+
+    const key = rawKey as PersistedConfigKey
+    if (!editableConfigKeySet.has(key)) {
+      throw new Error(`Config key ${rawKey} is not editable.`)
+    }
+
+    const parsedValue = parseConfigValue(key, rawValue)
+    if (parsedValue === undefined) {
+      throw new Error(`Invalid value for config key ${rawKey}.`)
+    }
+
+    sanitizedRecord[key] = parsedValue
+  }
+
+  return sanitized
+}
+
 export class ConfigManager {
   private resolvedConfig: AppConfig | null = null
 
-  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
+  private readonly env: NodeJS.ProcessEnv
+
+  constructor(env: NodeJS.ProcessEnv = process.env) {
+    this.env = env
+  }
+
+  private loadState(): ConfigStateSnapshot {
+    const configuredDataDir = normalizeDataDir(readEnvString(this.env, 'PLOTLINE_DATA_DIR'))
+    const configFilePath = resolveDataFile(configuredDataDir, CONFIG_FILE_NAME)
+
+    mkdirSync(resolveDataDir(configuredDataDir), { recursive: true })
+    if (!existsSync(configFilePath)) {
+      writeConfigAtomically(configFilePath, serializeConfig(DEFAULT_PERSISTED_CONFIG))
+    }
+
+    const fileConfigPartial = readConfigFromFile(configFilePath)
+    const envConfig = readConfigFromEnv(this.env)
+    const rawConfig = mergeConfig(fileConfigPartial, envConfig)
+
+    return {
+      config: buildResolvedConfig(rawConfig, configuredDataDir, configFilePath),
+      fileConfig: fileConfigPartial,
+      sources: resolveConfigSources(fileConfigPartial, envConfig),
+    }
+  }
 
   getConfig(): AppConfig {
     if (this.resolvedConfig) return this.resolvedConfig
 
-    const configuredDataDir = normalizeDataDir(readEnvString(this.env, 'PLOTLINE_DATA_DIR'))
-    const configFilePath = resolveDataFile(configuredDataDir, CONFIG_FILE_NAME)
-    const envConfig = readConfigFromEnv(this.env)
-    const fileConfig = readConfigFromFile(configFilePath)
-    const rawConfig = mergeConfig(fileConfig, envConfig)
+    const state = this.loadState()
+    this.resolvedConfig = state.config
+    return state.config
+  }
 
-    mkdirSync(resolveDataDir(configuredDataDir), { recursive: true })
-    writeConfigAtomically(configFilePath, serializeConfig(rawConfig))
+  getState(): ConfigStateSnapshot {
+    const state = this.loadState()
+    this.resolvedConfig = state.config
+    return state
+  }
 
-    const aiConfig = resolveAiConfig(rawConfig)
-    const resolved = freezeResolvedConfig({
-      raw: { ...rawConfig },
-      runtime: {
-        nodeEnv: rawConfig.NODE_ENV,
-        isProduction: rawConfig.NODE_ENV === 'production',
-      },
-      server: {
-        host: rawConfig.HOST,
-        port: rawConfig.PORT,
-      },
-      paths: {
-        dataDir: resolveDataDir(configuredDataDir),
-        configFile: configFilePath,
-        dbFile: resolveDataFile(configuredDataDir, SQLITE_FILE_NAME),
-      },
-      ai: { ...aiConfig },
-      yjs: {
-        persistenceFlushIntervalMs: rawConfig.YJS_PERSISTENCE_FLUSH_MS,
-        versionSnapshotIntervalMs: rawConfig.YJS_VERSION_INTERVAL_MS,
-      },
+  updateFileConfig(patch: Partial<PersistedAppConfig>): UpdateConfigResult {
+    const previousState = this.getState()
+    const previousFileConfig = mergeConfig(previousState.fileConfig)
+    const validatedPatch = sanitizeEditablePatch(patch)
+    const nextFileConfig = mergeConfig({
+      ...previousFileConfig,
+      ...validatedPatch,
     })
 
-    this.resolvedConfig = resolved
-    return resolved
+    const changedFileKeys: PersistedConfigKey[] = PERSISTED_CONFIG_KEYS.filter(
+      (key) => previousFileConfig[key] !== nextFileConfig[key]
+    )
+
+    if (changedFileKeys.length > 0) {
+      writeConfigAtomically(previousState.config.paths.configFile, serializeConfig(nextFileConfig))
+    }
+
+    this.resolvedConfig = null
+    const nextState = this.getState()
+
+    const changedEffectiveKeys: PersistedConfigKey[] = PERSISTED_CONFIG_KEYS.filter(
+      (key) => previousState.config.raw[key] !== nextState.config.raw[key]
+    )
+    const overriddenChangedKeys: PersistedConfigKey[] = changedFileKeys.filter(
+      (key) => nextState.sources[key] === 'env'
+    )
+
+    return {
+      state: nextState,
+      changedFileKeys,
+      changedEffectiveKeys,
+      overriddenChangedKeys,
+    }
   }
 
   resetForTests(): void {

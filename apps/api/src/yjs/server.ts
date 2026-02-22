@@ -277,6 +277,18 @@ export function stopSnapshotTimer(): void {
   }
 }
 
+/**
+ * Re-read current config values and reconfigure runtime timers without restarting the process.
+ */
+export function reloadRuntimeConfig(): void {
+  if (!persistenceInitialized) return
+
+  stopPersistenceFlushLoop()
+  stopSnapshotTimer()
+  startPersistenceFlushLoop()
+  startSnapshotTimer()
+}
+
 export async function getDocumentContent(documentName: string): Promise<string | null> {
   ensurePersistenceInitialized()
 

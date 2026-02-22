@@ -1,14 +1,16 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import TOML from '@iarna/toml'
 import { CONFIG_FILE_NAME, resolveDataDir, resolveDataFile } from '../paths.js'
 import { ConfigManager } from './manager.js'
+import { DEFAULT_PERSISTED_CONFIG } from '@plotline/shared'
 
 function uniqueDataDir(label: string): string {
   return `data-test/${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 describe('ConfigManager', () => {
-  test('merges env over file over defaults and persists canonical TOML', () => {
+  test('merges env over file over defaults while keeping persisted TOML file-scoped', () => {
     const dataDir = uniqueDataDir('config-manager-priority')
     const absoluteDataDir = resolveDataDir(dataDir)
     const configFile = resolveDataFile(dataDir, CONFIG_FILE_NAME)
@@ -16,21 +18,19 @@ describe('ConfigManager', () => {
     rmSync(absoluteDataDir, { recursive: true, force: true })
     mkdirSync(absoluteDataDir, { recursive: true })
 
-    writeFileSync(
-      configFile,
-      [
-        '[server]',
-        'host = "0.0.0.0"',
-        'port = 6000',
-        '',
-        '[ai]',
-        'base_url = "https://api.openai.com/v1"',
-        'model = "gpt-4o-mini"',
-        '',
-        '[yjs]',
-        'persistence_flush_interval_ms = 3333',
-      ].join('\n')
-    )
+    const initialToml = [
+      '[server]',
+      'host = "0.0.0.0"',
+      'port = 6000',
+      '',
+      '[ai]',
+      'base_url = "https://api.openai.com/v1"',
+      'model = "gpt-5"',
+      '',
+      '[yjs]',
+      'persistence_flush_interval_ms = 3333',
+    ].join('\n')
+    writeFileSync(configFile, initialToml)
 
     const manager = new ConfigManager({
       NODE_ENV: 'test',
@@ -51,47 +51,110 @@ describe('ConfigManager', () => {
     expect(config.paths.dataDir).toBe(absoluteDataDir)
 
     expect(config.ai.provider).toBe('anthropic')
-    expect(config.ai.model).toBe('claude-3-5-haiku-latest')
     expect(config.ai.baseURL).toBe('https://api.anthropic.com/v1')
 
     expect(config.yjs.persistenceFlushIntervalMs).toBe(3333)
     expect(config.yjs.versionSnapshotIntervalMs).toBe(9000)
 
-    expect(existsSync(config.paths.configFile)).toBe(true)
     const persisted = readFileSync(config.paths.configFile, 'utf8')
-    expect(persisted).toContain('[server]')
-    expect(persisted).toContain('host = "127.0.0.9"')
-    expect(persisted).toContain('port = 1234')
-    expect(persisted).toContain('[ai]')
-    expect(persisted).toContain('base_url = "https://api.anthropic.com/v1"')
-    expect(persisted).toContain('[yjs]')
-    expect(persisted).toContain('persistence_flush_interval_ms = 3333')
-    expect(persisted).toContain('version_snapshot_interval_ms = 9000')
+    expect(persisted).toBe(initialToml)
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
 
-  test('returns a stable config object across repeated reads', async () => {
-    const dataDir = uniqueDataDir('config-manager-stable')
+  test('creates a default config.toml when missing', () => {
+    const dataDir = uniqueDataDir('config-manager-default-file')
     const absoluteDataDir = resolveDataDir(dataDir)
     rmSync(absoluteDataDir, { recursive: true, force: true })
 
     const manager = new ConfigManager({
       NODE_ENV: 'test',
       PLOTLINE_DATA_DIR: dataDir,
-      PORT: '4242',
     })
 
-    const reads = await Promise.all(
-      Array.from({ length: 20 }, async () => {
-        await Promise.resolve()
-        return manager.getConfig()
-      })
+    const config = manager.getConfig()
+    const persisted = readFileSync(config.paths.configFile, 'utf8')
+    const parsed = TOML.parse(persisted) as {
+      app?: { environment?: string }
+      server?: { host?: string; port?: number }
+    }
+
+    expect(parsed.app?.environment).toBe(DEFAULT_PERSISTED_CONFIG.NODE_ENV)
+    expect(parsed.server?.host).toBe(DEFAULT_PERSISTED_CONFIG.HOST)
+    expect(parsed.server?.port).toBe(DEFAULT_PERSISTED_CONFIG.PORT)
+
+    rmSync(absoluteDataDir, { recursive: true, force: true })
+  })
+
+  test('updates file config and reports env-overridden fields', () => {
+    const dataDir = uniqueDataDir('config-manager-update')
+    const absoluteDataDir = resolveDataDir(dataDir)
+
+    rmSync(absoluteDataDir, { recursive: true, force: true })
+    mkdirSync(absoluteDataDir, { recursive: true })
+
+    const manager = new ConfigManager({
+      NODE_ENV: 'test',
+      PLOTLINE_DATA_DIR: dataDir,
+      AI_MODEL: 'gpt-from-env',
+      YJS_PERSISTENCE_FLUSH_MS: '2500',
+    })
+
+    const result = manager.updateFileConfig({
+      AI_MODEL: 'gpt-from-file',
+      YJS_PERSISTENCE_FLUSH_MS: 7777,
+    })
+
+    expect(result.changedFileKeys.sort()).toEqual(['AI_MODEL', 'YJS_PERSISTENCE_FLUSH_MS'])
+    expect(result.changedEffectiveKeys).toEqual([])
+    expect(result.overriddenChangedKeys.sort()).toEqual(['AI_MODEL', 'YJS_PERSISTENCE_FLUSH_MS'])
+    expect(result.state.config.ai.model).toBe('gpt-from-env')
+    expect(result.state.config.yjs.persistenceFlushIntervalMs).toBe(2500)
+
+    const persisted = readFileSync(result.state.config.paths.configFile, 'utf8')
+    const parsed = TOML.parse(persisted) as {
+      ai?: { model?: string }
+      yjs?: { persistence_flush_interval_ms?: number }
+    }
+    expect(parsed.ai?.model).toBe('gpt-from-file')
+    expect(parsed.yjs?.persistence_flush_interval_ms).toBe(7777)
+
+    rmSync(absoluteDataDir, { recursive: true, force: true })
+  })
+
+  test('ignores invalid file values and keeps source as default', () => {
+    const dataDir = uniqueDataDir('config-manager-invalid-file-values')
+    const absoluteDataDir = resolveDataDir(dataDir)
+    const configFile = resolveDataFile(dataDir, CONFIG_FILE_NAME)
+
+    rmSync(absoluteDataDir, { recursive: true, force: true })
+    mkdirSync(absoluteDataDir, { recursive: true })
+
+    writeFileSync(
+      configFile,
+      ['[server]', 'host = ""', 'port = -1', '', '[yjs]', 'persistence_flush_interval_ms = 0'].join(
+        '\n'
+      )
     )
 
-    expect(reads.every((entry) => entry === reads[0])).toBe(true)
-    expect(reads[0].server.port).toBe(4242)
-    expect(reads[0].paths.configFile).toBe(resolveDataFile(dataDir, CONFIG_FILE_NAME))
+    const manager = new ConfigManager({
+      NODE_ENV: 'test',
+      PLOTLINE_DATA_DIR: dataDir,
+    })
+
+    const state = manager.getState()
+
+    expect(state.config.server.host).toBe(DEFAULT_PERSISTED_CONFIG.HOST)
+    expect(state.config.server.port).toBe(DEFAULT_PERSISTED_CONFIG.PORT)
+    expect(state.config.yjs.persistenceFlushIntervalMs).toBe(
+      DEFAULT_PERSISTED_CONFIG.YJS_PERSISTENCE_FLUSH_MS
+    )
+    expect(state.sources.HOST).toBe('default')
+    expect(state.sources.PORT).toBe('default')
+    expect(state.sources.YJS_PERSISTENCE_FLUSH_MS).toBe('default')
+    expect(state.fileConfig.HOST).toBeUndefined()
+    expect(state.fileConfig.PORT).toBeUndefined()
+    expect(state.fileConfig.YJS_PERSISTENCE_FLUSH_MS).toBeUndefined()
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })

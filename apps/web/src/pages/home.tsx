@@ -24,7 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Trash2, BookOpen } from 'lucide-react'
+import { Plus, Trash2, BookOpen, SlidersHorizontal } from 'lucide-react'
 
 export function HomePage() {
   const navigate = useNavigate()
@@ -61,44 +61,51 @@ export function HomePage() {
             <p className="text-muted-foreground mt-1">Your stories, your way.</p>
           </div>
 
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger
-              render={
-                <Button size="lg">
-                  <Plus data-icon="inline-start" />
-                  New Project
-                </Button>
-              }
-            />
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>New Project</DialogTitle>
-                <DialogDescription>
-                  Give your story a working title; you can change it later.
-                </DialogDescription>
-              </DialogHeader>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  handleCreate()
-                }}
-              >
-                <Input
-                  autoFocus
-                  autoComplete="off"
-                  placeholder="The Great Novel..."
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                />
-                <DialogFooter className="mt-4">
-                  <DialogClose render={<Button variant="outline">Cancel</Button>} />
-                  <Button type="submit" disabled={!newTitle.trim() || createMutation.isPending}>
-                    {createMutation.isPending ? 'Creating...' : 'Create'}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="lg" onClick={() => navigate('/admin/config')}>
+              <SlidersHorizontal data-icon="inline-start" />
+              Settings
+            </Button>
+
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger
+                render={
+                  <Button size="lg">
+                    <Plus data-icon="inline-start" />
+                    New Project
                   </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+                }
+              />
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>New Project</DialogTitle>
+                  <DialogDescription>
+                    Give your story a working title; you can change it later.
+                  </DialogDescription>
+                </DialogHeader>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleCreate()
+                  }}
+                >
+                  <Input
+                    autoFocus
+                    autoComplete="off"
+                    placeholder="The Great Novel..."
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                  />
+                  <DialogFooter className="mt-4">
+                    <DialogClose render={<Button variant="outline">Cancel</Button>} />
+                    <Button type="submit" disabled={!newTitle.trim() || createMutation.isPending}>
+                      {createMutation.isPending ? 'Creating...' : 'Create'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
 
         {projectsQuery.isLoading && <p className="text-muted-foreground">Loading projects...</p>}
