@@ -2,10 +2,21 @@ import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../index.js'
 import { projectsRepo } from '../../db/index.js'
-import { isValidId } from '@plotline/shared'
+import { isValidId, type JsonObject, type JsonValue } from '@plotline/shared'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const titleSchema = z.string().trim().min(1).max(200)
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ])
+)
+const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSchema)
 
 export const projectsRouter = router({
   list: publicProcedure.query(async () => {
@@ -33,20 +44,64 @@ export const projectsRouter = router({
         .object({
           id: idSchema,
           title: titleSchema.optional(),
-          content: z.string().min(1).optional(),
+          metadata: jsonObjectSchema.nullable().optional(),
         })
-        .refine((value) => value.title !== undefined || value.content !== undefined, {
+        .refine((value) => value.title !== undefined || value.metadata !== undefined, {
           message: 'At least one field must be provided',
           path: ['title'],
         })
     )
     .mutation(async ({ input }) => {
       const { id, ...data } = input
+
       const project = await projectsRepo.updateProject(id, data)
       if (!project) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: `Project ${id} not found`,
+        })
+      }
+      return project
+    }),
+
+  versions: publicProcedure.input(z.object({ id: idSchema })).query(async ({ input }) => {
+    const versions = await projectsRepo.getProjectVersions(input.id)
+    if (versions.length === 0) {
+      const exists = await projectsRepo.hasProject(input.id)
+      if (!exists) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Project ${input.id} not found`,
+        })
+      }
+    }
+    return versions
+  }),
+
+  createSnapshot: publicProcedure.input(z.object({ id: idSchema })).mutation(async ({ input }) => {
+    const snapshot = await projectsRepo.createProjectSnapshot(input.id)
+    if (!snapshot) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: `Project ${input.id} not found`,
+      })
+    }
+    return snapshot
+  }),
+
+  restore: publicProcedure
+    .input(
+      z.object({
+        id: idSchema,
+        snapshotId: idSchema,
+      })
+    )
+    .mutation(async ({ input }) => {
+      const project = await projectsRepo.restoreProject(input.id, input.snapshotId)
+      if (!project) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Project ${input.id} or snapshot ${input.snapshotId} not found`,
         })
       }
       return project

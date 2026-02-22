@@ -6,10 +6,11 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 const projectRoot = resolve(__dirname, '..', '..', '..')
-const testDbDir = resolve(projectRoot, 'data-test')
-const sqliteFile = resolve(testDbDir, 'sqlite.db')
 
 export default async function globalSetup() {
-  await rm(sqliteFile, { force: true })
+  const configuredDataDir = process.env.PLOTLINE_DATA_DIR ?? 'data-test'
+  const testDbDir = resolve(projectRoot, configuredDataDir)
+
+  await rm(testDbDir, { recursive: true, force: true })
   await mkdir(testDbDir, { recursive: true })
 }

@@ -2,7 +2,8 @@ import express from 'express'
 import path from 'path'
 import fs from 'fs'
 import { type Express } from 'express'
-import { createServer, type ViteDevServer } from 'vite'
+import { createServer as createHttpServer, type Server as HttpServer } from 'http'
+import { createServer as createViteServer, type ViteDevServer } from 'vite'
 import { createExpressMiddleware } from '@trpc/server/adapters/express'
 import cookieParser from 'cookie-parser'
 import { z } from 'zod/v4'
@@ -16,9 +17,38 @@ import {
   buildPromptPrompt,
 } from './ai/prompts.js'
 import { ResponseParser, type AIMode } from './ai/response-parser.js'
+import { setupYjsWebSocket } from './yjs/websocket-handler.js'
+import {
+  flushAllDocumentStates,
+  startSnapshotTimer,
+  stopPersistenceFlushLoop,
+  stopSnapshotTimer,
+} from './yjs/server.js'
 
 const isProd = process.env.NODE_ENV === 'production'
-const port = process.env.PORT || 5677
+const DEFAULT_PORT = 5677
+const DEFAULT_HOST = '127.0.0.1'
+
+function resolvePort(rawPort: string | undefined): number {
+  const parsed = Number.parseInt(rawPort ?? '', 10)
+  if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65_535) {
+    return parsed
+  }
+  return DEFAULT_PORT
+}
+
+function resolveHost(rawHost: string | undefined): string {
+  const trimmed = rawHost?.trim()
+  return trimmed ? trimmed : DEFAULT_HOST
+}
+
+function displayHostForLog(bindHost: string): string {
+  if (bindHost === '0.0.0.0' || bindHost === '::') return 'localhost'
+  return bindHost.includes(':') ? `[${bindHost}]` : bindHost
+}
+
+const port = resolvePort(process.env.PORT)
+const host = resolveHost(process.env.HOST)
 const WEB_ROOT = path.join(PROJECT_ROOT, 'apps/web')
 
 const MAX_CONTEXT_CHARS = 1_000_000
@@ -344,7 +374,7 @@ function applyHtmlThemeClass(template: string, theme: 'light' | 'dark'): string 
 
 async function setupWebRuntime(app: Express): Promise<ViteDevServer | null> {
   if (!isProd) {
-    const vite = await createServer({
+    const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'custom',
       root: WEB_ROOT,
@@ -400,16 +430,32 @@ function registerSsrRoute(app: Express, vite: ViteDevServer | null): void {
   })
 }
 
-function registerProcessHandlers(server: ReturnType<Express['listen']>): void {
-  process.on('SIGINT', () => {
+function registerProcessHandlers(server: HttpServer): void {
+  let shuttingDown = false
+
+  const shutdown = () => {
+    if (shuttingDown) return
+    shuttingDown = true
+
     console.log('Shutting down...')
-    server.close(() => process.exit(0))
-  })
+    stopSnapshotTimer()
+    stopPersistenceFlushLoop()
+    void flushAllDocumentStates()
+      .catch((error) => {
+        console.error('Failed to flush Yjs documents on shutdown:', error)
+      })
+      .finally(() => {
+        server.close(() => process.exit(0))
+      })
+  }
+
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
 
 async function startServer() {
   const app = express()
-  app.use(express.json())
+  app.use(express.json({ limit: '10mb' }))
   app.use(cookieParser())
 
   registerMetaRoutes(app)
@@ -419,13 +465,17 @@ async function startServer() {
   const vite = await setupWebRuntime(app)
   registerSsrRoute(app, vite)
 
-  const server = app.listen(port, () => {
+  const httpServer = createHttpServer(app)
+  setupYjsWebSocket(httpServer)
+  startSnapshotTimer()
+
+  httpServer.listen(port, host, () => {
     console.log(
-      `Plotline started at http://localhost:${port} [${isProd ? 'production' : 'development'}]`
+      `Plotline started at http://${displayHostForLog(host)}:${port} [${isProd ? 'production' : 'development'}]`
     )
   })
 
-  registerProcessHandlers(server)
+  registerProcessHandlers(httpServer)
 }
 
 startServer()

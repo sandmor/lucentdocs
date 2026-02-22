@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it'
 import { MarkdownParser } from 'prosemirror-markdown'
 import { Fragment, Slice, type Node as ProseMirrorNode } from 'prosemirror-model'
-import { schema } from './schema'
+import { schema } from '@plotline/shared'
 
 const markdownIt = new MarkdownIt('commonmark', {
   html: false,

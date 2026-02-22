@@ -1,17 +1,19 @@
-export const DEFAULT_DOC = { type: 'doc', content: [{ type: 'paragraph' }] }
+import type { JsonObject } from './json.js'
 
-export interface PersistedAIDraft {
+const DEFAULT_DOC = { type: 'doc', content: [{ type: 'paragraph' }] } as const
+
+interface PersistedAIDraft {
   from: number
   to: number
 }
 
-export interface PersistedEditorContent {
-  doc: Record<string, unknown>
+interface PersistedEditorContent {
+  doc: JsonObject
   aiDraft: PersistedAIDraft | null
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+function isRecord(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isPersistedAIDraft(value: unknown): value is PersistedAIDraft {
@@ -46,11 +48,10 @@ export function parseContent(content: string | null | undefined): PersistedEdito
 
     return { doc: DEFAULT_DOC, aiDraft: null }
   } catch {
-    console.error('Failed to parse document content')
     return { doc: DEFAULT_DOC, aiDraft: null }
   }
 }
 
-export function serializeContent(content: PersistedEditorContent): string {
-  return JSON.stringify(content)
+export function createDefaultContent(): string {
+  return JSON.stringify({ doc: DEFAULT_DOC, aiDraft: null })
 }

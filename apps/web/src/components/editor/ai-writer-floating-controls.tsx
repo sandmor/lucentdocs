@@ -1,29 +1,17 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { computePosition, flip, shift, offset, autoUpdate } from '@floating-ui/dom'
 import type { EditorView } from 'prosemirror-view'
-import { aiWriterPluginKey, type AIWriterState } from './ai-writer-plugin'
 import {
-  subscribeChoices,
-  getChoicesSnapshot,
-  subscribeAIState,
-  getAIStateSnapshot,
-  setAIChoices,
-} from './ai-writer-store'
+  aiWriterPluginKey,
+  getPrimaryAIZoneFromState,
+  type AIWriterState,
+} from './ai-writer-plugin'
+import { subscribeAIState, getAIStateSnapshot } from './ai-writer-store'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Check, X, Pen, Loader2 } from 'lucide-react'
-import { schema } from './schema'
-
-// Hooks
-
-function useAIChoices(view: EditorView | null): string[] | null {
-  return useSyncExternalStore(
-    (cb) => (view ? subscribeChoices(view, cb) : () => {}),
-    () => (view ? getChoicesSnapshot(view) : null),
-    () => null
-  )
-}
+import { schema } from '@plotline/shared'
 
 function useAIWriterState(view: EditorView | null): AIWriterState | null {
   return useSyncExternalStore(
@@ -35,8 +23,8 @@ function useAIWriterState(view: EditorView | null): AIWriterState | null {
 
 interface AIWriterFloatingControlsProps {
   view: EditorView | null
-  onAccept: () => void
-  onReject: () => void
+  onAccept: (zoneId?: string) => void
+  onReject: (zoneId?: string) => void
 }
 
 export function AIWriterFloatingControls({
@@ -45,27 +33,56 @@ export function AIWriterFloatingControls({
   onReject,
 }: AIWriterFloatingControlsProps) {
   const state = useAIWriterState(view)
-  const choices = useAIChoices(view)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  const isActive = state?.active ?? false
-  const mode = state?.mode ?? null
-  const from = state?.from ?? null
-  const to = state?.to ?? null
-  const streaming = state?.streaming ?? false
-  const stuck = state?.stuck ?? false
-  const selFrom = state?.originalSelectionFrom ?? null
-  const selTo = state?.originalSelectionTo ?? null
+  const zone = getPrimaryAIZoneFromState(state)
+  const mode = zone?.mode ?? state?.mode ?? null
+  const from = zone?.from ?? state?.from ?? null
+  const to = zone?.to ?? state?.to ?? null
+  const streaming = zone?.streaming ?? state?.streaming ?? false
+  const stuck = (state?.stuck ?? false) && (state?.zoneId === zone?.id || !zone)
+  const choices = mode === 'choices' ? (zone?.choices ?? []) : null
 
-  // Positioning
+  const getZoneAnchorElement = useCallback((): HTMLElement | null => {
+    if (!view || !zone?.id) return null
+
+    const escapedId =
+      typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+        ? CSS.escape(zone.id)
+        : zone.id.replace(/["\\]/g, '\\$&')
+
+    const matches = view.dom.querySelectorAll<HTMLElement>(
+      `.ai-generating-text[data-ai-zone-id="${escapedId}"]`
+    )
+    if (matches.length === 0) return null
+    return matches[matches.length - 1]
+  }, [view, zone?.id])
+
   useEffect(() => {
-    if (!view || !rootRef.current || !isActive) return
+    if (!view || !rootRef.current || from === null || to === null) return
 
     const el = rootRef.current
-    const anchorPos = mode === 'choices' ? (selTo ?? selFrom ?? 0) : (to ?? from ?? 0)
 
     const updatePosition = () => {
-      const coords = view.coordsAtPos(anchorPos)
+      const anchorElement = getZoneAnchorElement()
+
+      if (anchorElement) {
+        computePosition(anchorElement, el, {
+          placement: 'bottom-start',
+          middleware: [
+            offset(8),
+            flip({ fallbackAxisSideDirection: 'end' }),
+            shift({ padding: 8 }),
+          ],
+        }).then(({ x, y }) => {
+          el.style.left = `${Math.round(x)}px`
+          el.style.top = `${Math.round(y)}px`
+        })
+        return
+      }
+
+      const fallbackPos = Math.max(0, Math.min(to, view.state.doc.content.size))
+      const coords = view.coordsAtPos(fallbackPos)
       const virtualEl = {
         getBoundingClientRect: () =>
           new DOMRect(coords.left, coords.top, 0, coords.bottom - coords.top),
@@ -80,26 +97,17 @@ export function AIWriterFloatingControls({
     }
 
     updatePosition()
-    const cleanup = autoUpdate(
-      {
-        getBoundingClientRect: () => {
-          const coords = view.coordsAtPos(anchorPos)
-          return new DOMRect(coords.left, coords.top, 0, coords.bottom - coords.top)
-        },
-      },
-      el,
-      updatePosition
-    )
+    const cleanup = autoUpdate(view.dom as HTMLElement, el, updatePosition, {
+      animationFrame: true,
+    })
 
     return () => {
       cleanup()
     }
-  }, [view, isActive, mode, from, to, selFrom, selTo])
+  }, [view, zone?.id, mode, from, to, choices?.length, streaming, stuck, getZoneAnchorElement])
 
-  // Don't render if no active state or nowhere to anchor
-  if (!isActive || !view) return null
+  if (!view || from === null || to === null || from >= to) return null
 
-  // For choices mode, render choices grid
   if (mode === 'choices') {
     return createPortal(
       <div
@@ -121,7 +129,7 @@ export function AIWriterFloatingControls({
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              onReject()
+              onReject(zone?.id)
             }}
           >
             <X className="size-3" />
@@ -154,7 +162,7 @@ export function AIWriterFloatingControls({
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  selectChoice(view, choice, selFrom, selTo)
+                  selectChoice(view, choice, from, to)
                 }}
               >
                 {choice}
@@ -167,15 +175,11 @@ export function AIWriterFloatingControls({
     )
   }
 
-  // Standard mode: show accept/reject buttons
-  if (from === null || to === null || from >= to) return null
-
   return createPortal(
     <div
       ref={rootRef}
       className="ai-writer-floating-controls fixed z-60 flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
     >
-      {/* Header */}
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
           <Pen className="size-3" />
@@ -197,7 +201,6 @@ export function AIWriterFloatingControls({
         </span>
       </div>
 
-      {/* Actions */}
       <div className="flex items-center gap-1.5 p-1.5">
         <Button
           variant="ghost"
@@ -209,7 +212,7 @@ export function AIWriterFloatingControls({
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            onAccept()
+            onAccept(zone?.id)
           }}
         >
           <Check className="size-3" />
@@ -226,7 +229,7 @@ export function AIWriterFloatingControls({
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            onReject()
+            onReject(zone?.id)
           }}
         >
           <X className="size-3" />
@@ -239,25 +242,22 @@ export function AIWriterFloatingControls({
   )
 }
 
-/* ------------------------------------------------------------------ */
-/*  Choice selection helper                                           */
-/* ------------------------------------------------------------------ */
-
 function selectChoice(
   view: EditorView,
   choice: string,
-  selectionFrom: number | null,
-  selectionTo: number | null
+  selectionFrom: number,
+  selectionTo: number
 ): void {
-  if (selectionFrom === null || selectionTo === null) return
+  if (selectionFrom >= selectionTo) return
 
   const tr = view.state.tr
-
-  if (selectionFrom < selectionTo) tr.delete(selectionFrom, selectionTo)
-
+  const markType = view.state.schema.marks.ai_zone ?? null
+  tr.delete(selectionFrom, selectionTo)
   tr.insert(selectionFrom, schema.text(choice))
+  if (markType) {
+    tr.removeMark(selectionFrom, selectionFrom + choice.length, markType)
+  }
   tr.setMeta(aiWriterPluginKey, { type: 'accept' })
   tr.setMeta('addToHistory', true)
   view.dispatch(tr)
-  setAIChoices(view, null)
 }

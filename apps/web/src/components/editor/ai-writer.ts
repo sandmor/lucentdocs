@@ -1,9 +1,9 @@
+import { Slice, type MarkType } from 'prosemirror-model'
 import { EditorView } from 'prosemirror-view'
 import { toast } from 'sonner'
-import { aiWriterPluginKey, type AIMode } from './ai-writer-plugin'
+import { aiWriterPluginKey, getAIZones, type AIMode, type AIZone } from './ai-writer-plugin'
 import { StuckDetector } from './ai-writer-stuck-detector'
 import { parseMarkdownishToSlice } from './markdownish'
-import { setAIChoices } from './ai-writer-store'
 
 type StreamingHandler = (streaming: boolean) => void
 interface AIWriterControllerOptions {
@@ -11,13 +11,130 @@ interface AIWriterControllerOptions {
   getIncludeAfterContext?: () => boolean
 }
 
+interface AIZoneMarkAttrs {
+  id: string
+  mode: AIMode
+  streaming: boolean
+  choices: string | null
+  deletedSlice: string | null
+}
+
+interface ZoneMarkPatch {
+  mode?: AIMode
+  streaming?: boolean
+  choices?: string[] | null
+  deletedSlice?: string | null
+}
+
 export interface AIWriterController {
   startAIContinuation: (view: EditorView) => void
   startAIPrompt: (view: EditorView, prompt: string) => void
-  acceptAI: (view: EditorView) => void
-  rejectAI: (view: EditorView) => void
-  isAIActive: (view: EditorView) => boolean
+  acceptAI: (view: EditorView, zoneId?: string) => void
+  rejectAI: (view: EditorView, zoneId?: string) => void
   cancelAI: (view?: EditorView) => void
+}
+
+function createZoneId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `zone-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function getAIZoneMarkType(view: EditorView): MarkType | null {
+  return view.state.schema.marks.ai_zone ?? null
+}
+
+function serializeChoices(choices: string[] | null | undefined): string | null {
+  if (!choices || choices.length === 0) return null
+  return JSON.stringify(choices)
+}
+
+function createZoneMarkAttrs(
+  zoneId: string,
+  mode: AIMode,
+  streaming: boolean,
+  choices: string[] | null,
+  deletedSlice: string | null
+): AIZoneMarkAttrs {
+  return {
+    id: zoneId,
+    mode,
+    streaming,
+    choices: serializeChoices(choices),
+    deletedSlice,
+  }
+}
+
+function deserializeDeletedSlice(view: EditorView, value: string | null): Slice | null {
+  if (!value) return null
+
+  try {
+    return Slice.fromJSON(view.state.schema, JSON.parse(value))
+  } catch {
+    return null
+  }
+}
+
+function getTargetZone(view: EditorView, preferredZoneId?: string): AIZone | null {
+  if (preferredZoneId) {
+    const preferred = getAIZones(view).find((zone) => zone.id === preferredZoneId)
+    if (preferred) return preferred
+  }
+
+  const pluginState = aiWriterPluginKey.getState(view.state)
+  if (pluginState?.zoneId) {
+    const localZone = getAIZones(view).find((zone) => zone.id === pluginState.zoneId)
+    if (localZone) return localZone
+  }
+
+  return null
+}
+
+function upsertZoneMark(
+  view: EditorView,
+  from: number,
+  to: number,
+  attrs: AIZoneMarkAttrs,
+  metaType?: string
+): boolean {
+  if (from >= to) return false
+
+  const markType = getAIZoneMarkType(view)
+  if (!markType) return false
+
+  const tr = view.state.tr
+  tr.removeMark(from, to, markType)
+  tr.addMark(from, to, markType.create(attrs))
+
+  if (metaType) {
+    tr.setMeta(aiWriterPluginKey, { type: metaType })
+  }
+
+  tr.setMeta('addToHistory', false)
+  view.dispatch(tr)
+  return true
+}
+
+function updateZoneMark(
+  view: EditorView,
+  zoneId: string,
+  patch: ZoneMarkPatch,
+  metaType?: string
+): boolean {
+  const zone = getAIZones(view).find((entry) => entry.id === zoneId)
+  if (!zone || zone.from >= zone.to) return false
+
+  const attrs = createZoneMarkAttrs(
+    zone.id,
+    patch.mode ?? zone.mode,
+    patch.streaming ?? zone.streaming,
+    patch.choices === undefined ? zone.choices : patch.choices,
+    patch.deletedSlice === undefined ? zone.deletedSlice : patch.deletedSlice
+  )
+
+  return upsertZoneMark(view, zone.from, zone.to, attrs, metaType)
 }
 
 export function createAIWriterController(
@@ -48,8 +165,17 @@ export function createAIWriterController(
     if (!streaming && view) {
       stuckDetector.reset()
       currentView = null
-      const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'streaming_stop' })
-      view.dispatch(tr)
+      const pluginState = aiWriterPluginKey.getState(view.state)
+      const updated =
+        pluginState?.zoneId !== null && pluginState?.zoneId !== undefined
+          ? updateZoneMark(view, pluginState.zoneId, { streaming: false }, 'streaming_stop')
+          : false
+
+      if (!updated) {
+        const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'streaming_stop' })
+        tr.setMeta('addToHistory', false)
+        view.dispatch(tr)
+      }
     }
   }
 
@@ -123,6 +249,13 @@ export function createAIWriterController(
     stuckDetector.reset()
     setStreamingState(true)
 
+    const pluginStateAtStart = aiWriterPluginKey.getState(view.state)
+    const zoneId = pluginStateAtStart?.zoneId
+    if (!zoneId) {
+      handleAIError(view, 'AI zone failed to initialize')
+      return
+    }
+
     let detectedMode: AIMode | null = null
     let insertIndex: number | null = null
     const choices: string[] = []
@@ -178,6 +311,7 @@ export function createAIWriterController(
           mode: detectedMode,
           insertIndex,
         })
+        tr.setMeta('addToHistory', false)
         view.dispatch(tr)
 
         if (detectedMode === 'replace') {
@@ -190,6 +324,7 @@ export function createAIWriterController(
             deletedSlice,
             deletedFrom: deletedSlice ? pos : null,
           })
+          zoneTr.setMeta('addToHistory', false)
           view.dispatch(zoneTr)
         } else if (detectedMode === 'insert') {
           const pluginState = aiWriterPluginKey.getState(view.state)
@@ -208,7 +343,29 @@ export function createAIWriterController(
             deletedSlice: null,
             deletedFrom: null,
           })
+          zoneTr.setMeta('addToHistory', false)
           view.dispatch(zoneTr)
+        } else if (detectedMode === 'choices') {
+          if (payload.selectionFrom < payload.selectionTo) {
+            const attrs = createZoneMarkAttrs(zoneId, 'choices', true, [], null)
+            const zoneSet = upsertZoneMark(
+              view,
+              payload.selectionFrom,
+              payload.selectionTo,
+              attrs,
+              'zone_set'
+            )
+
+            if (!zoneSet) {
+              const zoneTr = view.state.tr.setMeta(aiWriterPluginKey, {
+                type: 'zone_set',
+                from: payload.selectionFrom,
+                to: payload.selectionTo,
+              })
+              zoneTr.setMeta('addToHistory', false)
+              view.dispatch(zoneTr)
+            }
+          }
         }
       }
 
@@ -237,9 +394,9 @@ export function createAIWriterController(
               if (detectedMode === 'replace' || detectedMode === 'insert') {
                 bufferedContent += parsed
                 insertChunk(view, bufferedContent)
-              } else if (detectedMode === 'choices') {
+              } else if (detectedMode === 'choices' && typeof parsed === 'string') {
                 choices.push(parsed)
-                setAIChoices(view, [...choices])
+                updateZoneMark(view, zoneId, { choices: [...choices], streaming: true })
               }
             } catch {
               console.warn('Failed to parse AI stream chunk payload from AI endpoint', { line })
@@ -270,7 +427,14 @@ export function createAIWriterController(
     const pluginState = aiWriterPluginKey.getState(view.state)
     const isEmpty = !pluginState?.active || pluginState.from === pluginState.to
 
-    if (isEmpty) {
+    if (
+      isEmpty &&
+      pluginState?.active &&
+      pluginState.mode === 'replace' &&
+      pluginState.deletedSlice
+    ) {
+      rejectAI(view, pluginState.zoneId ?? undefined)
+    } else if (isEmpty) {
       stopAI(view)
     } else {
       setStreamingState(false, view)
@@ -294,9 +458,10 @@ export function createAIWriterController(
     }
 
     const pos = view.state.selection.from
+    const zoneId = createZoneId()
 
     const tr = view.state.tr
-    tr.setMeta(aiWriterPluginKey, { type: 'start', pos })
+    tr.setMeta(aiWriterPluginKey, { type: 'start', pos, zoneId })
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
     streamedText = ''
@@ -318,11 +483,13 @@ export function createAIWriterController(
 
     const { from, to, empty } = view.state.selection
     const selectedText = empty ? undefined : view.state.doc.textBetween(from, to, '\n\n', '\n')
+    const zoneId = createZoneId()
 
     const tr = view.state.tr
     tr.setMeta(aiWriterPluginKey, {
       type: 'start',
       pos: from,
+      zoneId,
       deletedSlice: null,
       selectionFrom: from,
       selectionTo: empty ? from : to,
@@ -343,104 +510,105 @@ export function createAIWriterController(
     })
   }
 
-  function acceptAI(view: EditorView): void {
+  function acceptAI(view: EditorView, zoneId?: string): void {
     const pluginState = aiWriterPluginKey.getState(view.state)
-    if (!pluginState?.active) return
 
     abortController?.abort()
     abortController = null
     streamedText = ''
     stuckDetector.reset()
     currentView = null
-    setStreamingState(false)
-    setAIChoices(view, null)
+    onStreamingChange?.(false)
 
-    const { from, to, mode, deletedSlice, deletedFrom, originalSelectionFrom, originalSelectionTo } = pluginState
-
-    if (from !== null && to !== null) {
-      const finalSlice = view.state.doc.slice(from, to)
-
-      // 1) Revert to pre-AI state silently
-      const revertTr = view.state.tr
-
-      if (mode === 'replace') {
-        if (from < to) {
-          revertTr.delete(from, to)
-        }
-        if (deletedSlice && deletedFrom !== null) {
-          revertTr.replace(deletedFrom, deletedFrom, deletedSlice)
-        }
-      } else {
-        if (from < to) {
-          revertTr.delete(from, to)
-        }
+    const zone = getTargetZone(view, zoneId)
+    if (zone) {
+      const markType = getAIZoneMarkType(view)
+      const tr = view.state.tr
+      if (markType) {
+        tr.removeMark(zone.from, zone.to, markType)
       }
+      tr.setMeta(aiWriterPluginKey, { type: 'accept' })
+      tr.setMeta('addToHistory', true)
+      view.dispatch(tr)
+      return
+    }
 
-      revertTr.setMeta(aiWriterPluginKey, { type: 'revert_for_accept' })
-      revertTr.setMeta('addToHistory', false)
-      view.dispatch(revertTr)
-
-      // 2) Apply as single undoable history step
-      const applyTr = view.state.tr
-
-      if (mode === 'replace') {
-        const mappedFrom = revertTr.mapping.map(originalSelectionFrom ?? deletedFrom ?? from)
-        const mappedTo = revertTr.mapping.map(originalSelectionTo ?? deletedFrom ?? to)
-        const minPos = Math.min(mappedFrom, mappedTo)
-        const maxPos = Math.max(mappedFrom, mappedTo)
-        applyTr.replace(minPos, maxPos, finalSlice)
-      } else {
-        const mappedFrom = revertTr.mapping.map(from)
-        applyTr.insert(mappedFrom, finalSlice.content)
-      }
-
-      applyTr.setMeta(aiWriterPluginKey, { type: 'accept' })
-      applyTr.setMeta('addToHistory', true)
-      view.dispatch(applyTr)
-    } else {
+    if (pluginState?.active) {
       const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'accept' })
       tr.setMeta('addToHistory', true)
       view.dispatch(tr)
     }
   }
 
-  function rejectAI(view: EditorView): void {
+  function rejectAI(view: EditorView, zoneId?: string): void {
     const pluginState = aiWriterPluginKey.getState(view.state)
-    if (!pluginState?.active) return
 
     abortController?.abort()
     abortController = null
     streamedText = ''
     stuckDetector.reset()
     currentView = null
-    setStreamingState(false)
-    setAIChoices(view, null)
+    onStreamingChange?.(false)
 
-    const { from, to, mode, deletedSlice, deletedFrom } = pluginState
+    const zone = getTargetZone(view, zoneId)
+    if (!zone) {
+      if (pluginState?.active) {
+        const tr = view.state.tr
+
+        if (pluginState.mode === 'replace') {
+          if (
+            pluginState.from !== null &&
+            pluginState.to !== null &&
+            pluginState.from < pluginState.to
+          ) {
+            tr.delete(pluginState.from, pluginState.to)
+          }
+
+          const deletedFrom = pluginState.deletedFrom ?? pluginState.from
+          if (pluginState.deletedSlice && deletedFrom !== null) {
+            tr.replace(deletedFrom, deletedFrom, pluginState.deletedSlice)
+          }
+        } else if (
+          pluginState.from !== null &&
+          pluginState.to !== null &&
+          pluginState.from < pluginState.to
+        ) {
+          tr.delete(pluginState.from, pluginState.to)
+        }
+
+        tr.setMeta(aiWriterPluginKey, { type: 'reject' })
+        tr.setMeta('addToHistory', true)
+        view.dispatch(tr)
+      }
+      return
+    }
 
     const tr = view.state.tr
+    const markType = getAIZoneMarkType(view)
 
-    if (mode === 'replace') {
-      if (from !== null && to !== null && from < to) {
-        tr.delete(from, to)
-      }
-      if (deletedSlice && deletedFrom !== null) {
-        tr.replace(deletedFrom, deletedFrom, deletedSlice)
+    if (zone.mode === 'choices') {
+      if (markType) {
+        tr.removeMark(zone.from, zone.to, markType)
       }
     } else {
-      if (from !== null && to !== null && from < to) {
-        tr.delete(from, to)
+      if (zone.from < zone.to) {
+        tr.delete(zone.from, zone.to)
+      }
+
+      if (zone.mode === 'replace') {
+        const deletedSlice =
+          deserializeDeletedSlice(view, zone.deletedSlice) ??
+          (pluginState?.zoneId === zone.id ? pluginState.deletedSlice : null)
+
+        if (deletedSlice) {
+          tr.replace(zone.from, zone.from, deletedSlice)
+        }
       }
     }
 
     tr.setMeta(aiWriterPluginKey, { type: 'reject' })
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
-  }
-
-  function isAIActive(view: EditorView): boolean {
-    const pluginState = aiWriterPluginKey.getState(view.state)
-    return pluginState?.active ?? false
   }
 
   function cancelAI(view?: EditorView): void {
@@ -450,7 +618,6 @@ export function createAIWriterController(
     stuckDetector.reset()
     currentView = null
     if (view) {
-      setAIChoices(view, null)
       setStreamingState(false, view)
     } else {
       setStreamingState(false)
@@ -462,7 +629,6 @@ export function createAIWriterController(
     startAIPrompt,
     acceptAI,
     rejectAI,
-    isAIActive,
     cancelAI,
   }
 }
@@ -503,6 +669,7 @@ function insertChunk(view: EditorView, generatedText: string): void {
   const pluginState = aiWriterPluginKey.getState(view.state)
   if (
     !pluginState?.active ||
+    !pluginState.zoneId ||
     pluginState.from === null ||
     pluginState.to === null ||
     pluginState.from > pluginState.to
@@ -519,6 +686,26 @@ function insertChunk(view: EditorView, generatedText: string): void {
 
   const tr = view.state.tr
   tr.replaceRange(pluginState.from, pluginState.to, content)
+
+  const markType = getAIZoneMarkType(view)
+  const zoneFrom = tr.mapping.map(pluginState.from, -1)
+  const zoneTo = tr.mapping.map(pluginState.to, 1)
+  if (markType && zoneTo > zoneFrom) {
+    tr.addMark(
+      zoneFrom,
+      zoneTo,
+      markType.create(
+        createZoneMarkAttrs(
+          pluginState.zoneId,
+          pluginState.mode ?? 'insert',
+          true,
+          null,
+          pluginState.deletedSlice ? JSON.stringify(pluginState.deletedSlice.toJSON()) : null
+        )
+      )
+    )
+  }
+
   tr.setMeta(aiWriterPluginKey, { type: 'chunk' })
   tr.setMeta('addToHistory', false)
   view.dispatch(tr)

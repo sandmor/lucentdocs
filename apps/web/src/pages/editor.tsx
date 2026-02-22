@@ -1,111 +1,119 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router'
+import { toast } from 'sonner'
 import { trpc } from '@/lib/trpc'
-import { parseContent, serializeContent } from '@/lib/prosemirror'
 import { Editor, type EditorHandle } from '@/components/editor'
 import { AiPanel } from '@/components/editor/ai-panel'
+import { VersionHistory, type VersionSnapshotInfo } from '@/components/version-history'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
-import { ArrowLeft, Check, Loader2, PanelRightOpen, PanelRightClose } from 'lucide-react'
-
-const AUTOSAVE_DELAY = 2000
+import { ArrowLeft, Loader2, PanelRightOpen, PanelRightClose, Wifi, WifiOff } from 'lucide-react'
+import type { ConnectionStatus } from '@/lib/yjs-provider'
 
 export function EditorPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const editorRef = useRef<EditorHandle>(null)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastSavedContentRef = useRef<string>('')
-  const lastSavedTitleRef = useRef<string>('')
+  const lastSavedTitleRef = useRef<string | null>(null)
+  const activeProjectIdRef = useRef<string | null>(null)
 
-  const [title, setTitle] = useState('')
   const [showAi, setShowAi] = useState(true)
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   const [isGenerating, setIsGenerating] = useState(false)
   const [includeAfterContext, setIncludeAfterContext] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
+  const [titleInput, setTitleInput] = useState('')
+  const [editorSessionKey, setEditorSessionKey] = useState(0)
 
   const projectQuery = trpc.projects.get.useQuery({ id: id! }, { enabled: !!id })
+  const versionsQuery = trpc.projects.versions.useQuery({ id: id! }, { enabled: !!id })
 
   const updateMutation = trpc.projects.update.useMutation()
+  const restoreMutation = trpc.projects.restore.useMutation()
+  const createSnapshotMutation = trpc.projects.createSnapshot.useMutation()
+  const utils = trpc.useUtils()
+
+  const projectTitle = projectQuery.data?.title
 
   useEffect(() => {
-    if (projectQuery.data) {
+    if (!id) return
+    if (activeProjectIdRef.current === id) return
+
+    activeProjectIdRef.current = id
+    lastSavedTitleRef.current = null
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTitleInput('')
+    setConnectionStatus('connecting')
+  }, [id])
+
+  useEffect(() => {
+    if (!id || projectQuery.data?.id !== id) return
+
+    if (projectTitle !== undefined && lastSavedTitleRef.current === null) {
+      lastSavedTitleRef.current = projectTitle
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTitle(projectQuery.data.title)
-      lastSavedContentRef.current = projectQuery.data.content
-      lastSavedTitleRef.current = projectQuery.data.title
+      setTitleInput(projectTitle)
     }
-  }, [projectQuery.data])
-
-  const save = useCallback(() => {
-    if (!id || !editorRef.current || updateMutation.isPending) return
-    const content = serializeContent(editorRef.current.getPersistedContent())
-    if (content === lastSavedContentRef.current && title === lastSavedTitleRef.current) {
-      setSaveStatus('saved')
-      return
-    }
-
-    const nextTitle = title
-    const nextContent = content
-
-    setSaveStatus('saving')
-    updateMutation.mutate(
-      { id, title: nextTitle, content: nextContent },
-      {
-        onSuccess: () => {
-          lastSavedContentRef.current = nextContent
-          lastSavedTitleRef.current = nextTitle
-          setSaveStatus('saved')
-        },
-        onError: () => {
-          setSaveStatus('unsaved')
-        },
-      }
-    )
-  }, [id, title, updateMutation])
-
-  const handleContentChange = useCallback(() => {
-    setSaveStatus('unsaved')
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      save()
-    }, AUTOSAVE_DELAY)
-  }, [save])
+  }, [id, projectQuery.data?.id, projectTitle])
 
   const handleTitleBlur = useCallback(() => {
-    if (id && title.trim() && title !== lastSavedTitleRef.current) {
-      const nextTitle = title.trim()
-      setSaveStatus('saving')
+    const trimmedTitle = titleInput.trim()
+    if (id && trimmedTitle && trimmedTitle !== lastSavedTitleRef.current) {
       updateMutation.mutate(
-        { id, title: nextTitle },
+        { id, title: trimmedTitle },
         {
           onSuccess: () => {
-            lastSavedTitleRef.current = nextTitle
-            setSaveStatus('saved')
-          },
-          onError: () => {
-            setSaveStatus('unsaved')
+            lastSavedTitleRef.current = trimmedTitle
           },
         }
       )
     }
-  }, [id, title, updateMutation])
+  }, [id, titleInput, updateMutation])
 
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    }
-  }, [])
+  const handleRestore = useCallback(
+    (snapshotId: string) => {
+      if (!id) return
+      restoreMutation.mutate(
+        { id, snapshotId },
+        {
+          onSuccess: () => {
+            setEditorSessionKey((value) => value + 1)
+            utils.projects.get.invalidate({ id })
+            utils.projects.versions.invalidate({ id })
+            toast.success('Restored to selected version')
+          },
+          onError: (error) => {
+            toast.error('Failed to restore version', {
+              description: error.message,
+            })
+          },
+        }
+      )
+    },
+    [id, restoreMutation, utils]
+  )
+
+  const handleCreateSnapshot = useCallback(() => {
+    if (!id) return
+    createSnapshotMutation.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          utils.projects.versions.invalidate({ id })
+          toast.success('Snapshot created')
+        },
+        onError: (error) => {
+          toast.error('Failed to create snapshot', {
+            description: error.message,
+          })
+        },
+      }
+    )
+  }, [id, createSnapshotMutation, utils])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault()
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-        save()
-      }
-
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         const activeElement = document.activeElement as HTMLElement | null
         const isEditorFocused = Boolean(activeElement?.closest('.ProseMirror'))
@@ -117,10 +125,14 @@ export function EditorPage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [save])
+  }, [])
 
   const handleStreamingChange = useCallback((streaming: boolean) => {
     setIsGenerating(streaming)
+  }, [])
+
+  const handleConnectionChange = useCallback((status: ConnectionStatus) => {
+    setConnectionStatus(status)
   }, [])
 
   if (projectQuery.isLoading) {
@@ -142,7 +154,8 @@ export function EditorPage() {
     )
   }
 
-  const parsedContent = parseContent(projectQuery.data.content)
+  const documentId = projectQuery.data.documentId
+  const versions: VersionSnapshotInfo[] = versionsQuery.data ?? []
 
   return (
     <div className="flex h-screen flex-col">
@@ -153,28 +166,41 @@ export function EditorPage() {
           </Button>
 
           <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            value={titleInput}
+            onChange={(e) => setTitleInput(e.target.value)}
             onBlur={handleTitleBlur}
             className="max-w-xs border-none bg-transparent text-base font-semibold shadow-none focus-visible:ring-0"
           />
 
           <div className="flex items-center gap-2 ml-auto">
-            <span className="text-muted-foreground flex items-center gap-1 text-xs">
-              {saveStatus === 'saving' && (
+            <Badge variant={connectionStatus === 'disconnected' ? 'destructive' : 'secondary'}>
+              {connectionStatus === 'connected' && (
+                <>
+                  <Wifi className="size-3" />
+                  <span className="hidden sm:inline">Synced</span>
+                </>
+              )}
+              {connectionStatus === 'connecting' && (
                 <>
                   <Loader2 className="size-3 animate-spin" />
-                  Saving...
+                  <span className="hidden sm:inline">Syncing...</span>
                 </>
               )}
-              {saveStatus === 'saved' && (
+              {connectionStatus === 'disconnected' && (
                 <>
-                  <Check className="size-3" />
-                  Saved
+                  <WifiOff className="size-3" />
+                  <span className="hidden sm:inline">Offline</span>
                 </>
               )}
-              {saveStatus === 'unsaved' && 'Unsaved changes'}
-            </span>
+            </Badge>
+
+            <VersionHistory
+              versions={versions}
+              onRestore={handleRestore}
+              onCreateSnapshot={handleCreateSnapshot}
+              isRestoring={restoreMutation.isPending}
+              isCreatingSnapshot={createSnapshotMutation.isPending}
+            />
 
             <Separator orientation="vertical" className="h-6" />
 
@@ -198,10 +224,10 @@ export function EditorPage() {
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl px-8 py-10">
             <Editor
+              key={`${documentId}-${editorSessionKey}`}
               ref={editorRef}
-              initialContent={parsedContent.doc}
-              initialAIDraft={parsedContent.aiDraft}
-              onChange={handleContentChange}
+              documentId={documentId}
+              onConnectionChange={handleConnectionChange}
               onStreamingChange={handleStreamingChange}
               includeAfterContext={includeAfterContext}
               className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"

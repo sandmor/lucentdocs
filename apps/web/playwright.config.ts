@@ -1,5 +1,11 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const TEST_HOST = process.env.HOST ?? '127.0.0.1'
+const TEST_PORT = process.env.PORT ?? '5678'
+const TEST_DATA_DIR = process.env.PLOTLINE_DATA_DIR ?? 'data-test'
+const TEST_URL_HOST = TEST_HOST === '0.0.0.0' || TEST_HOST === '::' ? '127.0.0.1' : TEST_HOST
+const TEST_BASE_URL = `http://${TEST_URL_HOST}:${TEST_PORT}`
+
 export default defineConfig({
   testDir: './tests/e2e',
   globalSetup: './tests/global-setup.ts',
@@ -11,12 +17,12 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:5678',
+    baseURL: TEST_BASE_URL,
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'cd ../.. && PLOTLINE_DATA_DIR=./data-test PORT=5678 bun run dev',
-    url: 'http://127.0.0.1:5678',
+    command: `cd ../.. && PLOTLINE_DATA_DIR=${TEST_DATA_DIR} HOST=${TEST_HOST} PORT=${TEST_PORT} bun run dev`,
+    url: TEST_BASE_URL,
     reuseExistingServer: false,
     timeout: 120_000,
   },
