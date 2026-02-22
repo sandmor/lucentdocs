@@ -1,4 +1,5 @@
 import { Slice, type MarkType } from 'prosemirror-model'
+import { TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { toast } from 'sonner'
 import { aiWriterPluginKey, getAIZones, type AIMode, type AIZone } from './ai-writer-plugin'
@@ -27,7 +28,7 @@ interface ZoneMarkPatch {
 }
 
 export interface AIWriterController {
-  startAIContinuation: (view: EditorView) => void
+  startAIContinuationAtStoryEnd: (view: EditorView) => void
   startAIPromptAtRange: (
     view: EditorView,
     prompt: string,
@@ -151,16 +152,6 @@ function selectionOverlapsAIZone(
 
   for (const zone of getAIZones(view)) {
     if (selectionFrom < zone.to && selectionTo > zone.from) {
-      return true
-    }
-  }
-
-  return false
-}
-
-function caretInsideAIZone(view: EditorView, pos: number): boolean {
-  for (const zone of getAIZones(view)) {
-    if (pos > zone.from && pos < zone.to) {
       return true
     }
   }
@@ -482,16 +473,18 @@ export function createAIWriterController(
     view.dispatch(tr)
   }
 
-  function startAIContinuation(view: EditorView): void {
+  function startAIContinuationAtStoryEnd(view: EditorView): void {
     const pluginState = aiWriterPluginKey.getState(view.state)
     if (pluginState?.active && pluginState.streaming) {
       return
     }
 
-    const pos = view.state.selection.from
-    if (caretInsideAIZone(view, pos)) {
-      toast.error('Move the cursor outside active AI zones before requesting more text')
-      return
+    const pos = view.state.doc.content.size
+    const selection = view.state.selection
+    if (!(selection.empty && selection.from === pos)) {
+      const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, pos))
+      tr.setMeta('addToHistory', false)
+      view.dispatch(tr)
     }
 
     const zoneId = createZoneId()
@@ -502,7 +495,7 @@ export function createAIWriterController(
     view.dispatch(tr)
     streamedText = ''
 
-    const { contextBefore, contextAfter } = getDocumentContext(view, getIncludeAfterContext())
+    const { contextBefore, contextAfter } = getDocumentContext(view, pos, getIncludeAfterContext())
     void streamAI(view, { mode: 'continue', contextBefore, contextAfter })
   }
 
@@ -550,7 +543,7 @@ export function createAIWriterController(
     view.dispatch(tr)
     streamedText = ''
 
-    const { contextBefore, contextAfter } = getDocumentContext(view, getIncludeAfterContext())
+    const { contextBefore, contextAfter } = getDocumentContext(view, from, getIncludeAfterContext())
     void streamAIPrompt(view, {
       mode: 'prompt',
       contextBefore,
@@ -679,7 +672,7 @@ export function createAIWriterController(
   }
 
   return {
-    startAIContinuation,
+    startAIContinuationAtStoryEnd,
     startAIPromptAtRange,
     acceptAI,
     rejectAI,
@@ -689,9 +682,9 @@ export function createAIWriterController(
 
 function getDocumentContext(
   view: EditorView,
+  pos: number,
   includeAfter: boolean
 ): { contextBefore: string; contextAfter?: string } {
-  const pos = view.state.selection.from
   const docEnd = view.state.doc.content.size
 
   const contextBefore = view.state.doc.textBetween(0, pos, '\n\n', '\n')

@@ -177,7 +177,7 @@ export function EditorPage() {
         if (!isEditorFocused) return
 
         e.preventDefault()
-        editorRef.current?.startAIContinuation()
+        editorRef.current?.startAIContinuationAtStoryEnd()
       }
     }
     window.addEventListener('keydown', handler)
