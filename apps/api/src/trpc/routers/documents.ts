@@ -10,6 +10,7 @@ import {
   type JsonObject,
   type JsonValue,
 } from '@plotline/shared'
+import { projectSyncBus } from '../project-sync.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const pathSchema = z.string().trim().min(1).max(400)
@@ -33,6 +34,13 @@ async function assertProjectExists(projectId: string): Promise<void> {
       message: `Project ${projectId} not found`,
     })
   }
+}
+
+async function getProjectDefaultDocumentId(projectId: string): Promise<string | null> {
+  const project = await projectsRepo.getProject(projectId)
+  if (!project?.metadata) return null
+  const value = project.metadata['default_document']
+  return typeof value === 'string' && isValidId(value) ? value : null
 }
 
 function normalizeAndValidatePath(inputPath: string, label: string): string {
@@ -119,6 +127,16 @@ export const documentsRouter = router({
           message: `Document ${input.id} not found in project ${input.projectId}`,
         })
       }
+
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId: input.projectId,
+        reason: 'documents.set-default',
+        changedDocumentIds: [input.id],
+        deletedDocumentIds: [],
+        defaultDocumentId: input.id,
+      })
+
       return { success: true }
     }),
 
@@ -146,6 +164,17 @@ export const documentsRouter = router({
           message: `Cannot create document at ${normalizedTitle} due to a path conflict`,
         })
       }
+
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId: input.projectId,
+        reason: 'documents.create',
+        changedDocumentIds: [doc.id],
+        deletedDocumentIds: [],
+        defaultDocumentId,
+      })
+
       return doc
     }),
 
@@ -187,6 +216,17 @@ export const documentsRouter = router({
           message: `Cannot update document ${id} due to a path conflict`,
         })
       }
+
+      const defaultDocumentId = await getProjectDefaultDocumentId(projectId)
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId,
+        reason: 'documents.update',
+        changedDocumentIds: [doc.id],
+        deletedDocumentIds: [],
+        defaultDocumentId,
+      })
+
       return doc
     }),
 
@@ -219,7 +259,10 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      const snapshot = await documentsRepo.createVersionSnapshotForProject(input.projectId, input.id)
+      const snapshot = await documentsRepo.createVersionSnapshotForProject(
+        input.projectId,
+        input.id
+      )
       if (!snapshot) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -267,7 +310,22 @@ export const documentsRouter = router({
           message: `Document ${input.id} not found in project ${input.projectId}`,
         })
       }
-      return { success: true }
+
+      const nextDefaultDocument = await documentsRepo.openOrCreateDefaultDocumentForProject(
+        input.projectId
+      )
+      const defaultDocumentId = nextDefaultDocument?.id ?? null
+
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId: input.projectId,
+        reason: 'documents.delete',
+        changedDocumentIds: nextDefaultDocument ? [nextDefaultDocument.id] : [],
+        deletedDocumentIds: [input.id],
+        defaultDocumentId,
+      })
+
+      return { success: true, defaultDocumentId }
     }),
 
   move: publicProcedure
@@ -280,7 +338,11 @@ export const documentsRouter = router({
     )
     .mutation(async ({ input }) => {
       const normalizedPath = normalizeAndValidatePath(input.path, 'Destination path')
-      const moved = await documentsRepo.moveDocumentForProject(input.projectId, input.id, normalizedPath)
+      const moved = await documentsRepo.moveDocumentForProject(
+        input.projectId,
+        input.id,
+        normalizedPath
+      )
       if (!moved) {
         const exists = await documentsRepo.getDocumentForProject(input.projectId, input.id)
         if (!exists) {
@@ -295,6 +357,17 @@ export const documentsRouter = router({
           message: `Cannot move document to ${normalizedPath} due to a path conflict`,
         })
       }
+
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId: input.projectId,
+        reason: 'documents.move',
+        changedDocumentIds: [moved.id],
+        deletedDocumentIds: [],
+        defaultDocumentId,
+      })
+
       return moved
     }),
 
@@ -322,6 +395,17 @@ export const documentsRouter = router({
           message: `Cannot create directory at ${normalizedPath} due to a path conflict`,
         })
       }
+
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId: input.projectId,
+        reason: 'documents.create-directory',
+        changedDocumentIds: [created.id],
+        deletedDocumentIds: [],
+        defaultDocumentId,
+      })
+
       return { path: normalizedPath }
     }),
 
@@ -349,7 +433,8 @@ export const documentsRouter = router({
         const existing = await documentsRepo.listDocumentsForProject(input.projectId)
         const normalizedPaths = existing.map((doc) => normalizeDocumentPath(doc.title))
         const hasSourceDirectory = normalizedPaths.some(
-          (path) => path === toDirectorySentinelPath(sourcePath) || path.startsWith(`${sourcePath}/`)
+          (path) =>
+            path === toDirectorySentinelPath(sourcePath) || path.startsWith(`${sourcePath}/`)
         )
         if (!hasSourceDirectory) {
           throw new TRPCError({
@@ -363,6 +448,17 @@ export const documentsRouter = router({
           message: `Cannot move directory ${sourcePath} to ${destinationPath} due to a path conflict`,
         })
       }
+
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId: input.projectId,
+        reason: 'documents.move-directory',
+        changedDocumentIds: moved.movedDocumentIds,
+        deletedDocumentIds: [],
+        defaultDocumentId,
+      })
+
       return moved
     }),
 
@@ -382,6 +478,21 @@ export const documentsRouter = router({
           message: `Directory ${normalizedPath} not found in project ${input.projectId}`,
         })
       }
+
+      const nextDefaultDocument = await documentsRepo.openOrCreateDefaultDocumentForProject(
+        input.projectId
+      )
+      const defaultDocumentId = nextDefaultDocument?.id ?? null
+
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId: input.projectId,
+        reason: 'documents.delete-directory',
+        changedDocumentIds: nextDefaultDocument ? [nextDefaultDocument.id] : [],
+        deletedDocumentIds: deleted.deletedDocumentIds,
+        defaultDocumentId,
+      })
+
       return deleted
     }),
 })

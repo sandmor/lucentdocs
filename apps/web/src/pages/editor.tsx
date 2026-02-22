@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ArrowLeft, Loader2, Wifi, WifiOff } from 'lucide-react'
 import type { ConnectionStatus } from '@/lib/yjs-provider'
+import { parseProjectSyncEvent } from '@/lib/project-sync-events'
 
 export function EditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -28,6 +29,7 @@ export function EditorPage() {
   const activeDocumentIdRef = useRef<string | null>(null)
   const autoOpenAttemptedProjectRef = useRef<string | null>(null)
   const persistedDefaultSignatureRef = useRef<string | null>(null)
+  const lastHandledSyncEventIdRef = useRef<string | null>(null)
 
   const [includeAfterContext, setIncludeAfterContext] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
@@ -360,6 +362,86 @@ export function EditorPage() {
       setSearchParams(next)
     },
     [searchParams, setSearchParams]
+  )
+
+  useEffect(() => {
+    if (!currentDocumentId) return
+    if (searchParams.get('document') === currentDocumentId) return
+
+    const next = new URLSearchParams(searchParams)
+    next.set('document', currentDocumentId)
+    setSearchParams(next, { replace: true })
+  }, [currentDocumentId, searchParams, setSearchParams])
+
+  const handleProjectSyncEvent = useCallback(
+    (event: unknown) => {
+      const parsedEvent = parseProjectSyncEvent(event)
+      if (!parsedEvent) {
+        return
+      }
+
+      if (!id) return
+      if (parsedEvent.projectId !== id) return
+      if (lastHandledSyncEventIdRef.current === parsedEvent.id) return
+      lastHandledSyncEventIdRef.current = parsedEvent.id
+
+      if (parsedEvent.type === 'project.deleted') {
+        toast.info('This project was deleted in another session')
+        navigate('/', { replace: true })
+        return
+      }
+
+      utils.projects.get.invalidate({ id })
+      utils.documents.list.invalidate({ projectId: id })
+
+      const activeId = activeDocumentIdRef.current
+      if (activeId) {
+        utils.documents.get.invalidate({ projectId: id, id: activeId })
+        utils.documents.versions.invalidate({ projectId: id, id: activeId })
+      }
+
+      if (parsedEvent.type !== 'documents.changed' || !activeId) {
+        return
+      }
+
+      if (!parsedEvent.deletedDocumentIds.includes(activeId)) {
+        return
+      }
+
+      const redirectDocumentId = parsedEvent.defaultDocumentId
+      if (redirectDocumentId && redirectDocumentId !== activeId) {
+        const next = new URLSearchParams(searchParams)
+        next.set('document', redirectDocumentId)
+        setSearchParams(next, { replace: true })
+        toast.info('The open document was removed. Switched to the default document.')
+        return
+      }
+
+      if (openOrCreateDefaultDocumentMutation.isPending) {
+        return
+      }
+
+      openOrCreateDefaultDocumentMutation.mutate(
+        { projectId: id },
+        {
+          onSuccess: (document) => {
+            const next = new URLSearchParams(searchParams)
+            next.set('document', document.id)
+            setSearchParams(next, { replace: true })
+            toast.info('The open document was removed. A new default document was opened.')
+          },
+        }
+      )
+    },
+    [id, navigate, openOrCreateDefaultDocumentMutation, searchParams, setSearchParams, utils.documents.get, utils.documents.list, utils.documents.versions, utils.projects.get]
+  )
+
+  trpc.sync.onProjectEvent.useSubscription(
+    { projectId: id! },
+    {
+      enabled: !!id,
+      onData: handleProjectSyncEvent,
+    }
   )
 
   if (projectQuery.isLoading) {

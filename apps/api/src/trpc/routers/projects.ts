@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../index.js'
 import { projectsRepo } from '../../db/index.js'
 import { isValidId, type JsonObject, type JsonValue } from '@plotline/shared'
+import { projectSyncBus } from '../project-sync.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const titleSchema = z.string().trim().min(1).max(200)
@@ -35,7 +36,14 @@ export const projectsRouter = router({
   }),
 
   create: publicProcedure.input(z.object({ title: titleSchema })).mutation(async ({ input }) => {
-    return projectsRepo.createProject(input.title)
+    const project = await projectsRepo.createProject(input.title)
+
+    projectSyncBus.publish({
+      type: 'project.created',
+      projectId: project.id,
+    })
+
+    return project
   }),
 
   update: publicProcedure
@@ -61,6 +69,12 @@ export const projectsRouter = router({
           message: `Project ${id} not found`,
         })
       }
+
+      projectSyncBus.publish({
+        type: 'project.updated',
+        projectId: id,
+      })
+
       return project
     }),
 
@@ -72,6 +86,12 @@ export const projectsRouter = router({
         message: `Project ${input.id} not found`,
       })
     }
+
+    projectSyncBus.publish({
+      type: 'project.deleted',
+      projectId: input.id,
+    })
+
     return { success: true }
   }),
 })

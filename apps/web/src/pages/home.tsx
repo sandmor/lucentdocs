@@ -25,14 +25,23 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Plus, Trash2, BookOpen, SlidersHorizontal, MessagesSquare } from 'lucide-react'
+import { parseProjectsListSyncEvent } from '@/lib/project-sync-events'
 
 export function HomePage() {
   const navigate = useNavigate()
   const [newTitle, setNewTitle] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<{ id: string; title: string } | null>(null)
+  const utils = trpc.useUtils()
 
   const projectsQuery = trpc.projects.list.useQuery()
+  trpc.sync.onProjectsListEvent.useSubscription(undefined, {
+    onData: (event) => {
+      if (!parseProjectsListSyncEvent(event)) return
+      utils.projects.list.invalidate()
+    },
+  })
+
   const createMutation = trpc.projects.create.useMutation({
     onSuccess: (project) => {
       setNewTitle('')
@@ -43,7 +52,7 @@ export function HomePage() {
   const deleteMutation = trpc.projects.delete.useMutation({
     onSuccess: () => {
       setProjectToDelete(null)
-      projectsQuery.refetch()
+      utils.projects.list.invalidate()
     },
   })
 

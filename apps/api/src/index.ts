@@ -20,6 +20,7 @@ import {
   resolveSelectionPrompt,
 } from './ai/prompt-engine.js'
 import { setupYjsWebSocket } from './yjs/websocket-handler.js'
+import { setupTrpcWebSocket, type TrpcWebSocketRuntime } from './trpc/websocket.js'
 import {
   flushAllDocumentStates,
   startSnapshotTimer,
@@ -430,6 +431,7 @@ function registerProcessHandlers(
   options: {
     vite: ViteDevServer | null
     yjsWss: WebSocketServer
+    trpcWs: TrpcWebSocketRuntime
     sockets: Set<Socket>
   }
 ): void {
@@ -468,6 +470,15 @@ function registerProcessHandlers(
         console.error('Failed to flush Yjs documents on shutdown:', error)
       })
       .then(async () => {
+        options.trpcWs.handler.broadcastReconnectNotification()
+        for (const client of options.trpcWs.wss.clients) {
+          client.terminate()
+        }
+
+        await new Promise<void>((resolve) => {
+          options.trpcWs.wss.close(() => resolve())
+        })
+
         for (const client of options.yjsWss.clients) {
           client.terminate()
         }
@@ -532,6 +543,7 @@ async function startServer() {
   })
 
   const yjsWss = setupYjsWebSocket(httpServer)
+  const trpcWs = setupTrpcWebSocket(httpServer)
   startSnapshotTimer()
 
   httpServer.listen(port, host, () => {
@@ -540,7 +552,7 @@ async function startServer() {
     )
   })
 
-  registerProcessHandlers(httpServer, { vite, yjsWss, sockets })
+  registerProcessHandlers(httpServer, { vite, yjsWss, trpcWs, sockets })
 }
 
 startServer()
