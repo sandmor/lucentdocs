@@ -1,5 +1,5 @@
 import { useRef, useEffect, forwardRef, useImperativeHandle, useState, useCallback } from 'react'
-import { EditorState } from 'prosemirror-state'
+import { EditorState, TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { initProseMirrorDoc } from 'y-prosemirror'
 import { toast } from 'sonner'
@@ -7,40 +7,50 @@ import { schema } from '@plotline/shared'
 import { buildPlugins, type ProsemirrorMapping } from './plugins'
 import { createAIWriterController, type AIWriterController } from './ai-writer'
 import { AIWriterFloatingControls } from './ai-writer-floating-controls'
+import { SelectionAIToolbar } from './selection-ai-toolbar'
+import { SelectionFakeOverlay } from './selection-fake-overlay'
+import type { SelectionRange } from './selection-types'
 import { emitAIStateChange } from './ai-writer-store'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { ArrowRight, Loader2 } from 'lucide-react'
 
 export interface EditorHandle {
   startAIContinuation: () => void
-  startAIPrompt: (prompt: string) => void
 }
 
 interface EditorProps {
   documentId: string
   onConnectionChange?: (status: ConnectionStatus) => void
-  onStreamingChange?: (streaming: boolean) => void
   includeAfterContext?: boolean
+  onIncludeAfterContextChange?: (value: boolean) => void
   className?: string
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { documentId, onConnectionChange, onStreamingChange, includeAfterContext, className },
+  {
+    documentId,
+    onConnectionChange,
+    includeAfterContext,
+    onIncludeAfterContextChange,
+    className,
+  },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const onStreamingChangeRef = useRef(onStreamingChange)
   const includeAfterContextRef = useRef(includeAfterContext ?? false)
+  const selectionToolbarInteractingRef = useRef(false)
   const aiControllerRef = useRef<AIWriterController | null>(null)
   const providerRef = useRef<ReturnType<typeof createYjsProvider> | null>(null)
   const hasShownOfflineToastRef = useRef(false)
 
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-
-  useEffect(() => {
-    onStreamingChangeRef.current = onStreamingChange
-  }, [onStreamingChange])
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
+  const [isEditorFocused, setIsEditorFocused] = useState(false)
 
   useEffect(() => {
     includeAfterContextRef.current = includeAfterContext ?? false
@@ -66,7 +76,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
     const aiController = createAIWriterController({
       onStreamingChange(streaming) {
-        onStreamingChangeRef.current?.(streaming)
+        setIsGenerating(streaming)
       },
       getIncludeAfterContext() {
         return includeAfterContextRef.current
@@ -121,11 +131,100 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         const newState = view.state.apply(tr)
         view.updateState(newState)
         emitAIStateChange(view)
+
+        const { from, to, empty } = newState.selection
+        const viewIsFocused = view.hasFocus()
+        const interacting = selectionToolbarInteractingRef.current
+
+        setIsEditorFocused((previous) => (previous === viewIsFocused ? previous : viewIsFocused))
+        setSelectionRange((previous) => {
+          if (!empty) {
+            if (!viewIsFocused && !interacting) {
+              return null
+            }
+
+            if (previous && previous.from === from && previous.to === to) {
+              return previous
+            }
+            return { from, to }
+          }
+
+          if (previous && !tr.docChanged) {
+            return previous
+          }
+
+          if (interacting && previous) {
+            if (!tr.docChanged) {
+              return previous
+            }
+
+            const mappedFrom = tr.mapping.map(previous.from, 1)
+            const mappedTo = tr.mapping.map(previous.to, -1)
+            if (mappedFrom < mappedTo) {
+              if (previous.from === mappedFrom && previous.to === mappedTo) {
+                return previous
+              }
+              return { from: mappedFrom, to: mappedTo }
+            }
+          }
+
+          return null
+        })
       },
     })
 
     viewRef.current = view
     setEditorView(view)
+    setIsEditorFocused(view.hasFocus())
+
+    const syncSelectionFromDOM = () => {
+      if (destroyed) return
+
+      const domSelection = window.getSelection()
+      if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
+        if (view.hasFocus() && !selectionToolbarInteractingRef.current) {
+          setSelectionRange(null)
+        }
+        return
+      }
+
+      const range = domSelection.getRangeAt(0)
+      if (!view.dom.contains(range.commonAncestorContainer)) {
+        if (view.hasFocus() && !selectionToolbarInteractingRef.current) {
+          setSelectionRange(null)
+        }
+        return
+      }
+
+      try {
+        const anchor = view.posAtDOM(range.startContainer, range.startOffset, 1)
+        const head = view.posAtDOM(range.endContainer, range.endOffset, -1)
+        const from = Math.min(anchor, head)
+        const to = Math.max(anchor, head)
+
+        if (from >= to) return
+
+        setSelectionRange((previous) => {
+          if (previous && previous.from === from && previous.to === to) {
+            return previous
+          }
+          return { from, to }
+        })
+      } catch {
+        // Ignore transient DOM ranges that cannot be mapped to ProseMirror positions.
+      }
+    }
+
+    const handleViewFocusIn = () => {
+      setIsEditorFocused(true)
+    }
+    const handleViewFocusOut = () => {
+      setIsEditorFocused(false)
+    }
+    view.dom.addEventListener('focusin', handleViewFocusIn)
+    view.dom.addEventListener('focusout', handleViewFocusOut)
+    document.addEventListener('selectionchange', syncSelectionFromDOM)
+    view.dom.addEventListener('mouseup', syncSelectionFromDOM)
 
     const loadingTimeout = setTimeout(() => {
       if (!provider.isSynced()) {
@@ -145,10 +244,18 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         providerRef.current = null
       }
 
+      view.dom.removeEventListener('focusin', handleViewFocusIn)
+      view.dom.removeEventListener('focusout', handleViewFocusOut)
+      document.removeEventListener('selectionchange', syncSelectionFromDOM)
+      view.dom.removeEventListener('mouseup', syncSelectionFromDOM)
       view.destroy()
       viewRef.current = null
       setEditorView(null)
       setIsLoading(true)
+      setIsGenerating(false)
+      setSelectionRange(null)
+      setIsEditorFocused(false)
+      selectionToolbarInteractingRef.current = false
     }
   }, [documentId, showOfflineToast, dismissOfflineToast, onConnectionChange])
 
@@ -157,14 +264,57 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       if (!viewRef.current) return
       aiControllerRef.current?.startAIContinuation(viewRef.current)
     },
-    startAIPrompt(prompt: string) {
-      if (!viewRef.current) return
-      aiControllerRef.current?.startAIPrompt(viewRef.current, prompt)
-    },
   }))
+
+  const handleToolbarInteractionChange = useCallback((interacting: boolean) => {
+    selectionToolbarInteractingRef.current = interacting
+    if (interacting || !viewRef.current) return
+
+    if (!hasActiveDomSelection(viewRef.current)) {
+      setSelectionRange(null)
+      return
+    }
+
+    const { from, to, empty } = viewRef.current.state.selection
+    setSelectionRange(empty ? null : { from, to })
+  }, [])
 
   return (
     <div className="relative">
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-border/80 bg-card/60 px-3 py-2 backdrop-blur">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            if (!viewRef.current) return
+            aiControllerRef.current?.startAIContinuation(viewRef.current)
+          }}
+          disabled={isGenerating}
+        >
+          {isGenerating ? (
+            <Loader2 className="animate-spin" data-icon="inline-start" />
+          ) : (
+            <ArrowRight data-icon="inline-start" />
+          )}
+          Continue writing
+        </Button>
+
+        <div className="ml-auto flex items-center gap-2">
+          <Switch
+            id="include-after-context"
+            checked={includeAfterContext ?? false}
+            onCheckedChange={(value) => {
+              includeAfterContextRef.current = Boolean(value)
+              onIncludeAfterContextChange?.(Boolean(value))
+            }}
+            disabled={isGenerating}
+          />
+          <label htmlFor="include-after-context" className="text-xs text-muted-foreground">
+            Include text after cursor
+          </label>
+        </div>
+      </div>
+
       <div ref={containerRef} className={className} />
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
@@ -184,6 +334,52 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           if (viewRef.current) aiControllerRef.current?.rejectAI(viewRef.current, zoneId)
         }}
       />
+      <SelectionFakeOverlay
+        view={editorView}
+        selection={selectionRange}
+        visible={Boolean(editorView && selectionRange && !isEditorFocused)}
+      />
+      <SelectionAIToolbar
+        view={editorView}
+        selection={selectionRange}
+        isGenerating={isGenerating}
+        onGenerate={(prompt, selection) => {
+          if (!viewRef.current || !aiControllerRef.current) return false
+          const started = aiControllerRef.current.startAIPromptAtRange(
+            viewRef.current,
+            prompt,
+            selection.from,
+            selection.to
+          )
+          if (!started) return false
+
+          selectionToolbarInteractingRef.current = false
+          setSelectionRange(null)
+
+          const docSize = viewRef.current.state.doc.content.size
+          const collapsePos = Math.max(0, Math.min(selection.to, docSize))
+          const tr = viewRef.current.state.tr.setSelection(
+            TextSelection.create(viewRef.current.state.doc, collapsePos)
+          )
+          tr.setMeta('addToHistory', false)
+          viewRef.current.dispatch(tr)
+
+          return true
+        }}
+        onInteractionChange={handleToolbarInteractionChange}
+      />
     </div>
   )
 })
+
+function hasActiveDomSelection(view: EditorView): boolean {
+  if (typeof window === 'undefined') return false
+
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return false
+  }
+
+  const range = selection.getRangeAt(0)
+  return view.dom.contains(range.commonAncestorContainer)
+}

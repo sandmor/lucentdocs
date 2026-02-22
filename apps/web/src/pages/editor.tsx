@@ -3,13 +3,11 @@ import { useParams, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { trpc } from '@/lib/trpc'
 import { Editor, type EditorHandle } from '@/components/editor'
-import { AiPanel } from '@/components/editor/ai-panel'
 import { VersionHistory, type VersionSnapshotInfo } from '@/components/version-history'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Separator } from '@/components/ui/separator'
-import { ArrowLeft, Loader2, PanelRightOpen, PanelRightClose, Wifi, WifiOff } from 'lucide-react'
+import { ArrowLeft, Loader2, Wifi, WifiOff } from 'lucide-react'
 import type { ConnectionStatus } from '@/lib/yjs-provider'
 
 export function EditorPage() {
@@ -19,8 +17,6 @@ export function EditorPage() {
   const lastSavedTitleRef = useRef<string | null>(null)
   const activeProjectIdRef = useRef<string | null>(null)
 
-  const [showAi, setShowAi] = useState(true)
-  const [isGenerating, setIsGenerating] = useState(false)
   const [includeAfterContext, setIncludeAfterContext] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
   const [titleInput, setTitleInput] = useState('')
@@ -127,10 +123,6 @@ export function EditorPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const handleStreamingChange = useCallback((streaming: boolean) => {
-    setIsGenerating(streaming)
-  }, [])
-
   const handleConnectionChange = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)
   }, [])
@@ -201,55 +193,23 @@ export function EditorPage() {
               isRestoring={restoreMutation.isPending}
               isCreatingSnapshot={createSnapshotMutation.isPending}
             />
-
-            <Separator orientation="vertical" className="h-6" />
-
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setShowAi((v) => !v)}
-              title="Toggle AI panel"
-            >
-              {showAi ? (
-                <PanelRightClose className="size-4" />
-              ) : (
-                <PanelRightOpen className="size-4" />
-              )}
-            </Button>
           </div>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl px-8 py-10">
-            <Editor
-              key={`${documentId}-${editorSessionKey}`}
-              ref={editorRef}
-              documentId={documentId}
-              onConnectionChange={handleConnectionChange}
-              onStreamingChange={handleStreamingChange}
-              includeAfterContext={includeAfterContext}
-              className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
-            />
-          </div>
-        </main>
-
-        {showAi && (
-          <>
-            <Separator orientation="vertical" />
-            <aside className="w-80 shrink-0 overflow-y-auto border-l">
-              <AiPanel
-                onContinue={() => editorRef.current?.startAIContinuation()}
-                onGenerate={(prompt) => editorRef.current?.startAIPrompt(prompt)}
-                isGenerating={isGenerating}
-                includeAfterContext={includeAfterContext}
-                onIncludeAfterContextChange={setIncludeAfterContext}
-              />
-            </aside>
-          </>
-        )}
-      </div>
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl px-8 py-10">
+          <Editor
+            key={`${documentId}-${editorSessionKey}`}
+            ref={editorRef}
+            documentId={documentId}
+            onConnectionChange={handleConnectionChange}
+            includeAfterContext={includeAfterContext}
+            onIncludeAfterContextChange={setIncludeAfterContext}
+            className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
+          />
+        </div>
+      </main>
     </div>
   )
 }

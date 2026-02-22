@@ -28,7 +28,12 @@ interface ZoneMarkPatch {
 
 export interface AIWriterController {
   startAIContinuation: (view: EditorView) => void
-  startAIPrompt: (view: EditorView, prompt: string) => void
+  startAIPromptAtRange: (
+    view: EditorView,
+    prompt: string,
+    selectionFrom: number,
+    selectionTo: number
+  ) => boolean
   acceptAI: (view: EditorView, zoneId?: string) => void
   rejectAI: (view: EditorView, zoneId?: string) => void
   cancelAI: (view?: EditorView) => void
@@ -135,6 +140,28 @@ function updateZoneMark(
   )
 
   return upsertZoneMark(view, zone.from, zone.to, attrs, metaType)
+}
+
+function selectionOverlapsAIZone(view: EditorView, selectionFrom: number, selectionTo: number): boolean {
+  if (selectionFrom >= selectionTo) return false
+
+  for (const zone of getAIZones(view)) {
+    if (selectionFrom < zone.to && selectionTo > zone.from) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function caretInsideAIZone(view: EditorView, pos: number): boolean {
+  for (const zone of getAIZones(view)) {
+    if (pos > zone.from && pos < zone.to) {
+      return true
+    }
+  }
+
+  return false
 }
 
 export function createAIWriterController(
@@ -453,11 +480,16 @@ export function createAIWriterController(
 
   function startAIContinuation(view: EditorView): void {
     const pluginState = aiWriterPluginKey.getState(view.state)
-    if (pluginState?.active) {
+    if (pluginState?.active && pluginState.streaming) {
       return
     }
 
     const pos = view.state.selection.from
+    if (caretInsideAIZone(view, pos)) {
+      toast.error('Move the cursor outside active AI zones before requesting more text')
+      return
+    }
+
     const zoneId = createZoneId()
 
     const tr = view.state.tr
@@ -470,19 +502,35 @@ export function createAIWriterController(
     void streamAI(view, { mode: 'continue', contextBefore, contextAfter })
   }
 
-  function startAIPrompt(view: EditorView, prompt: string): void {
+  function startAIPromptAtRange(
+    view: EditorView,
+    prompt: string,
+    selectionFrom: number,
+    selectionTo: number
+  ): boolean {
     const pluginState = aiWriterPluginKey.getState(view.state)
-    if (pluginState?.active) {
-      return
+    if (pluginState?.active && pluginState.streaming) {
+      toast.error('Finish the current AI generation before starting a new request')
+      return false
     }
 
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt) {
-      return
+      return false
     }
 
-    const { from, to, empty } = view.state.selection
-    const selectedText = empty ? undefined : view.state.doc.textBetween(from, to, '\n\n', '\n')
+    const docSize = view.state.doc.content.size
+    const clampedFrom = Math.max(0, Math.min(selectionFrom, docSize))
+    const clampedTo = Math.max(0, Math.min(selectionTo, docSize))
+    const from = Math.min(clampedFrom, clampedTo)
+    const to = Math.max(clampedFrom, clampedTo)
+
+    if (selectionOverlapsAIZone(view, from, to)) {
+      toast.error('Selection overlaps an active AI zone. Select different text and try again.')
+      return false
+    }
+
+    const selectedText = from < to ? view.state.doc.textBetween(from, to, '\n\n', '\n') : undefined
     const zoneId = createZoneId()
 
     const tr = view.state.tr
@@ -492,7 +540,7 @@ export function createAIWriterController(
       zoneId,
       deletedSlice: null,
       selectionFrom: from,
-      selectionTo: empty ? from : to,
+      selectionTo: to,
     })
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
@@ -506,8 +554,10 @@ export function createAIWriterController(
       prompt: trimmedPrompt,
       selectedText,
       selectionFrom: from,
-      selectionTo: empty ? from : to,
+      selectionTo: to,
     })
+
+    return true
   }
 
   function acceptAI(view: EditorView, zoneId?: string): void {
@@ -626,7 +676,7 @@ export function createAIWriterController(
 
   return {
     startAIContinuation,
-    startAIPrompt,
+    startAIPromptAtRange,
     acceptAI,
     rejectAI,
     cancelAI,
