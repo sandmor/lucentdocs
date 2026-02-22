@@ -46,7 +46,7 @@ const MAX_PROMPT_CHARS = 50_000
 const aiStreamInputSchema = z
   .object({
     mode: z.enum(['continue', 'prompt']),
-    contextBefore: z.string().min(1).max(MAX_CONTEXT_CHARS),
+    contextBefore: z.string().max(MAX_CONTEXT_CHARS),
     contextAfter: z.string().max(MAX_CONTEXT_CHARS).optional(),
     hint: z.string().trim().max(MAX_HINT_CHARS).optional(),
     prompt: z.string().trim().max(MAX_PROMPT_CHARS).optional(),
