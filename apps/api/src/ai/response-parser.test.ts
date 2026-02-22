@@ -37,6 +37,17 @@ This is a test.""")`
         content: 'quietly',
       })
     })
+
+    test('parses ReplaceText with standard quoted string', () => {
+      const input = `def respond() -> ReplaceText | InsertText | PresentChoices:
+    return ReplaceText().with_content("quietly")`
+
+      const result = parseResponse(input)
+      expect(result).toEqual({
+        mode: 'replace',
+        content: 'quietly',
+      })
+    })
   })
 
   describe('InsertText', () => {
@@ -87,6 +98,17 @@ This is a test.""")`
         choices: ['only one'],
       })
     })
+
+    test('parses PresentChoices with single-quoted strings', () => {
+      const input = `def respond() -> ReplaceText | InsertText | PresentChoices:
+    return PresentChoices().with_choices(('one', 'two', 'three'))`
+
+      const result = parseResponse(input)
+      expect(result).toEqual({
+        mode: 'choices',
+        choices: ['one', 'two', 'three'],
+      })
+    })
   })
 
   describe('Streaming', () => {
@@ -99,6 +121,7 @@ This is a test.""")`
 
       expect(result1.mode).toBe('replace')
       expect(result1.isComplete).toBe(false)
+      expect(result1.content).toBe('Hello ')
 
       const chunk2 = `World""")`
       const result2 = parser.feed(chunk2)
@@ -111,6 +134,26 @@ This is a test.""")`
         mode: 'replace',
         content: 'Hello World',
       })
+    })
+
+    test('streams long single-line content before closing quote', () => {
+      const parser = new ResponseParser()
+
+      const chunk1 = `def respond():
+    return ReplaceText().with_content("This sentence is intentionally long so partial streaming emits before the closing quote arrives `
+      const result1 = parser.feed(chunk1)
+
+      expect(result1.mode).toBe('replace')
+      expect(result1.isComplete).toBe(false)
+      expect(result1.content.length).toBeGreaterThan(20)
+
+      const chunk2 = `at the end.")`
+      const result2 = parser.feed(chunk2)
+
+      expect(result2.isComplete).toBe(true)
+      expect(result2.content).toBe(
+        'This sentence is intentionally long so partial streaming emits before the closing quote arrives at the end.'
+      )
     })
 
     test('streams choices incrementally', () => {
@@ -189,6 +232,21 @@ This is a test.""")`
         mode: 'replace',
         content: 'alpha',
       })
+    })
+
+    test('handles split standard quote delimiter across chunk boundaries', () => {
+      const parser = new ResponseParser()
+
+      const chunk1 = `def respond():\n    return ReplaceText().with_content("alpha`
+      const chunk2 = `"\n  )`
+
+      const result1 = parser.feed(chunk1)
+      expect(result1.mode).toBe('replace')
+      expect(result1.isComplete).toBe(false)
+
+      const result2 = parser.feed(chunk2)
+      expect(result2.isComplete).toBe(true)
+      expect(result2.content).toBe('alpha')
     })
 
     test('detects earliest class call when multiple modes appear in output', () => {

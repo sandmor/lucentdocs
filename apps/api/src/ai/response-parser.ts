@@ -1,3 +1,13 @@
+import { createRequire } from 'node:module'
+import {
+  Edit,
+  Language,
+  Parser as TreeSitterParser,
+  type Node as TreeSitterNode,
+  type Point,
+  type Tree,
+} from 'web-tree-sitter'
+
 export type AIMode = 'replace' | 'insert' | 'choices'
 
 export interface ReplaceResponse {
@@ -26,65 +36,455 @@ export interface StreamingParserResult {
   isComplete: boolean
 }
 
-type ParserState =
-  | 'searching_for_class'
-  | 'found_replace'
-  | 'found_insert_waiting_content'
-  | 'found_choices_waiting_tuple'
-  | 'parsing_content_quoted'
-  | 'parsing_choices_tuple'
-  | 'complete'
+interface StringStart {
+  quote: "'" | '"'
+  triple: boolean
+  raw: boolean
+  contentStart: number
+}
+
+interface ModeCandidate {
+  mode: AIMode
+  startIndex: number
+  methodOpenParenIndex: number
+  insertIndex: number | null
+}
+
+interface ContentParseResult {
+  content: string
+  complete: boolean
+}
+
+interface ChoicesParseResult {
+  choices: string[]
+  complete: boolean
+}
+
+const require = createRequire(import.meta.url)
+const PYTHON_LANGUAGE_WASM_PATH = require.resolve('tree-sitter-python/tree-sitter-python.wasm')
+
+async function loadPythonLanguage() {
+  await TreeSitterParser.init()
+  return await Language.load(PYTHON_LANGUAGE_WASM_PATH)
+}
+
+const PYTHON_LANGUAGE = await loadPythonLanguage()
+
+function isPrefixLetter(char: string): boolean {
+  return /^[rRuUbBfF]$/.test(char)
+}
+
+function isEscaped(text: string, position: number): boolean {
+  let slashes = 0
+  for (let i = position - 1; i >= 0; i -= 1) {
+    if (text[i] !== '\\') break
+    slashes += 1
+  }
+  return slashes % 2 === 1
+}
+
+function skipWhitespace(text: string, start: number): number {
+  let i = start
+  while (i < text.length && /\s/.test(text[i])) i += 1
+  return i
+}
+
+function detectStringStartAt(text: string, start: number): StringStart | null {
+  const i = skipWhitespace(text, start)
+
+  let j = i
+  while (j < text.length && isPrefixLetter(text[j])) j += 1
+  if (j >= text.length) return null
+
+  const quote = text[j]
+  if (quote !== "'" && quote !== '"') return null
+
+  const triple = text[j + 1] === quote && text[j + 2] === quote
+  const raw = text.slice(i, j).toLowerCase().includes('r')
+  const contentStart = j + (triple ? 3 : 1)
+
+  return {
+    quote,
+    triple,
+    raw,
+    contentStart,
+  }
+}
+
+function findStringEnd(text: string, start: number, delimiter: string, raw: boolean): number {
+  if (delimiter.length === 1) {
+    for (let i = start; i < text.length; i += 1) {
+      if (text[i] !== delimiter) continue
+      if (!raw && isEscaped(text, i)) continue
+      return i
+    }
+    return -1
+  }
+
+  for (let i = start; i <= text.length - delimiter.length; i += 1) {
+    if (text.slice(i, i + delimiter.length) !== delimiter) continue
+    if (!raw && isEscaped(text, i)) continue
+    return i
+  }
+  return -1
+}
+
+function computeIncompleteContentTail(
+  source: string,
+  contentStart: number,
+  quote: "'" | '"',
+  triple: boolean,
+  raw: boolean
+): number {
+  if (!triple) return 0
+
+  let safeTail = 0
+  const minIndex = Math.max(contentStart, source.length - 2)
+
+  for (let i = source.length - 1; i >= minIndex; i -= 1) {
+    if (source[i] !== quote) continue
+    if (!raw && isEscaped(source, i)) continue
+
+    const tailLength = source.length - i
+    if (tailLength <= 2) {
+      safeTail = Math.max(safeTail, tailLength)
+    }
+  }
+
+  return safeTail
+}
+
+function parseContentArgumentFrom(source: string, methodOpenParenIndex: number): ContentParseResult | null {
+  let i = skipWhitespace(source, methodOpenParenIndex)
+  if (source[i] !== '(') return null
+
+  i += 1
+  const start = detectStringStartAt(source, i)
+  if (!start) return null
+
+  const delimiter = start.triple ? start.quote.repeat(3) : start.quote
+  const endIndex = findStringEnd(source, start.contentStart, delimiter, start.raw)
+  if (endIndex !== -1) {
+    return {
+      content: source.slice(start.contentStart, endIndex),
+      complete: true,
+    }
+  }
+
+  const partial = source.slice(start.contentStart)
+  const safeTail = computeIncompleteContentTail(
+    source,
+    start.contentStart,
+    start.quote,
+    start.triple,
+    start.raw
+  )
+  return {
+    content: safeTail > 0 ? partial.slice(0, -safeTail) : partial,
+    complete: false,
+  }
+}
+
+function parseChoicesArgumentFrom(source: string, methodOpenParenIndex: number): ChoicesParseResult | null {
+  let i = skipWhitespace(source, methodOpenParenIndex)
+  if (source[i] !== '(') return null
+
+  i += 1
+  i = skipWhitespace(source, i)
+  if (source[i] !== '(') return null
+
+  i += 1
+  let tupleOpenParens = 1
+
+  let inString = false
+  let stringQuote: "'" | '"' | null = null
+  let stringTriple = false
+  let stringRaw = false
+  let currentChoice = ''
+
+  const choices: string[] = []
+
+  while (i < source.length && tupleOpenParens > 0) {
+    const char = source[i]
+
+    if (inString) {
+      const quote = stringQuote!
+      const delimiter = stringTriple ? quote.repeat(3) : quote
+
+      if (stringTriple) {
+        if (i + 2 >= source.length) {
+          break
+        }
+        if (source.slice(i, i + 3) === delimiter && (stringRaw || !isEscaped(source, i))) {
+          inString = false
+          stringQuote = null
+          stringTriple = false
+          stringRaw = false
+          choices.push(currentChoice)
+          currentChoice = ''
+          i += 3
+          continue
+        }
+      } else if (char === quote && (stringRaw || !isEscaped(source, i))) {
+        inString = false
+        stringQuote = null
+        choices.push(currentChoice)
+        currentChoice = ''
+        i += 1
+        continue
+      }
+
+      currentChoice += char
+      i += 1
+      continue
+    }
+
+    const start = detectStringStartAt(source, i)
+    if (start) {
+      inString = true
+      stringQuote = start.quote
+      stringTriple = start.triple
+      stringRaw = start.raw
+      i = start.contentStart
+      continue
+    }
+
+    if (char === '(') tupleOpenParens += 1
+    else if (char === ')') tupleOpenParens -= 1
+    i += 1
+  }
+
+  return {
+    choices,
+    complete: tupleOpenParens === 0 && !inString,
+  }
+}
+
+function advancePoint(point: Point, appendedText: string): Point {
+  const lines = appendedText.split('\n')
+  if (lines.length === 1) {
+    return {
+      row: point.row,
+      column: point.column + Buffer.byteLength(appendedText, 'utf8'),
+    }
+  }
+  return {
+    row: point.row + lines.length - 1,
+    column: Buffer.byteLength(lines[lines.length - 1], 'utf8'),
+  }
+}
+
+function parseInsertIndexFromCall(callNode: TreeSitterNode): number | null {
+  const argumentList = callNode.childForFieldName('arguments')
+  if (!argumentList) return null
+  const match = argumentList.text.match(/^\(\s*(-?\d+)\s*\)$/)
+  if (!match) return null
+
+  const value = Number.parseInt(match[1], 10)
+  return Number.isFinite(value) ? value : null
+}
+
+function modeCandidateFromAttribute(attributeNode: TreeSitterNode): ModeCandidate | null {
+  const methodIdentifier = attributeNode.childForFieldName('attribute')
+  const objectNode = attributeNode.childForFieldName('object')
+
+  if (!methodIdentifier || methodIdentifier.type !== 'identifier') return null
+  if (!objectNode || objectNode.type !== 'call') return null
+
+  const constructorIdentifier = objectNode.childForFieldName('function')
+  if (!constructorIdentifier || constructorIdentifier.type !== 'identifier') return null
+
+  const methodName = methodIdentifier.text
+  const constructorName = constructorIdentifier.text
+
+  if (methodName === 'with_content' && constructorName === 'ReplaceText') {
+    return {
+      mode: 'replace',
+      startIndex: objectNode.startIndex,
+      methodOpenParenIndex: attributeNode.endIndex,
+      insertIndex: null,
+    }
+  }
+
+  if (methodName === 'with_content' && constructorName === 'InsertText') {
+    return {
+      mode: 'insert',
+      startIndex: objectNode.startIndex,
+      methodOpenParenIndex: attributeNode.endIndex,
+      insertIndex: parseInsertIndexFromCall(objectNode),
+    }
+  }
+
+  if (methodName === 'with_choices' && constructorName === 'PresentChoices') {
+    return {
+      mode: 'choices',
+      startIndex: objectNode.startIndex,
+      methodOpenParenIndex: attributeNode.endIndex,
+      insertIndex: null,
+    }
+  }
+
+  return null
+}
+
+function extractModeCandidateFromTree(root: TreeSitterNode): ModeCandidate | null {
+  const stack: TreeSitterNode[] = [root]
+  let best: ModeCandidate | null = null
+
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node.type === 'attribute') {
+      const candidate = modeCandidateFromAttribute(node)
+      if (candidate && (!best || candidate.startIndex < best.startIndex)) {
+        best = candidate
+      }
+    }
+
+    const children = node.namedChildren
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      stack.push(children[i])
+    }
+  }
+
+  return best
+}
+
+function extractModeCandidateFromText(source: string): ModeCandidate | null {
+  const replaceMatch = source.match(/ReplaceText\s*\(\s*\)\s*\.with_content\s*\(/)
+  const insertMatch = source.match(/InsertText\s*\(\s*(-?\d+)\s*\)\s*\.with_content\s*\(/)
+  const choicesMatch = source.match(/PresentChoices\s*\(\s*\)\s*\.with_choices\s*\(/)
+
+  const candidates: ModeCandidate[] = []
+
+  if (replaceMatch && replaceMatch.index !== undefined) {
+    candidates.push({
+      mode: 'replace',
+      startIndex: replaceMatch.index,
+      methodOpenParenIndex: replaceMatch.index + replaceMatch[0].length - 1,
+      insertIndex: null,
+    })
+  }
+
+  if (insertMatch && insertMatch.index !== undefined) {
+    candidates.push({
+      mode: 'insert',
+      startIndex: insertMatch.index,
+      methodOpenParenIndex: insertMatch.index + insertMatch[0].length - 1,
+      insertIndex: Number.parseInt(insertMatch[1], 10),
+    })
+  }
+
+  if (choicesMatch && choicesMatch.index !== undefined) {
+    candidates.push({
+      mode: 'choices',
+      startIndex: choicesMatch.index,
+      methodOpenParenIndex: choicesMatch.index + choicesMatch[0].length - 1,
+      insertIndex: null,
+    })
+  }
+
+  if (candidates.length === 0) return null
+  candidates.sort((left, right) => left.startIndex - right.startIndex)
+  return candidates[0]
+}
+
+function pickBestCandidate(current: ModeCandidate | null, next: ModeCandidate | null): ModeCandidate | null {
+  if (!next) return current
+  if (!current) return next
+  if (next.startIndex < current.startIndex) return next
+  if (next.startIndex > current.startIndex) return current
+
+  return {
+    ...current,
+    methodOpenParenIndex: next.methodOpenParenIndex,
+    insertIndex: next.insertIndex ?? current.insertIndex,
+  }
+}
 
 export class ResponseParser {
-  private state: ParserState = 'searching_for_class'
-  private buffer = ''
+  private parser: TreeSitterParser
+  private tree: Tree | null = null
+  private source = ''
+  private sourceBytes = 0
+  private sourceEndPosition: Point = { row: 0, column: 0 }
+
+  private mode: AIMode | null = null
   private insertIndex: number | null = null
   private content = ''
   private choices: string[] = []
-  private mode: AIMode | null = null
-  private contentDelimiter: '"""' | "'''" | null = null
+  private complete = false
 
-  getMode(): AIMode | null {
-    return this.mode
+  private modeCandidate: ModeCandidate | null = null
+
+  constructor() {
+    this.parser = new TreeSitterParser()
+    this.parser.setLanguage(PYTHON_LANGUAGE)
   }
 
-  getInsertIndex(): number | null {
-    return this.insertIndex
+  private parseIncremental(chunk: string): void {
+    const previousEnd = this.sourceEndPosition
+    const previousBytes = this.sourceBytes
+    const chunkBytes = Buffer.byteLength(chunk, 'utf8')
+
+    this.source += chunk
+    this.sourceBytes += chunkBytes
+    this.sourceEndPosition = advancePoint(previousEnd, chunk)
+
+    if (this.tree) {
+      this.tree.edit(new Edit({
+        startIndex: previousBytes,
+        oldEndIndex: previousBytes,
+        newEndIndex: this.sourceBytes,
+        startPosition: previousEnd,
+        oldEndPosition: previousEnd,
+        newEndPosition: this.sourceEndPosition,
+      }))
+    }
+
+    const parsed = this.parser.parse(this.source, this.tree)
+    if (parsed) this.tree = parsed
+  }
+
+  private updateModeCandidate(): void {
+    const treeCandidate = this.tree ? extractModeCandidateFromTree(this.tree.rootNode) : null
+    const textCandidate = extractModeCandidateFromText(this.source)
+
+    let candidate = pickBestCandidate(treeCandidate, textCandidate)
+    candidate = pickBestCandidate(this.modeCandidate, candidate)
+    if (!candidate) return
+
+    this.modeCandidate = candidate
+    this.mode = candidate.mode
+    if (candidate.mode === 'insert' && candidate.insertIndex !== null) {
+      this.insertIndex = candidate.insertIndex
+    }
+  }
+
+  private updateValueState(): void {
+    if (!this.modeCandidate) return
+
+    if (this.modeCandidate.mode === 'replace' || this.modeCandidate.mode === 'insert') {
+      const result = parseContentArgumentFrom(this.source, this.modeCandidate.methodOpenParenIndex)
+      if (!result) return
+      this.content = result.content
+      this.complete = result.complete
+      if (this.modeCandidate.mode === 'insert' && this.insertIndex === null) {
+        this.insertIndex = this.modeCandidate.insertIndex ?? 0
+      }
+      return
+    }
+
+    const choicesResult = parseChoicesArgumentFrom(this.source, this.modeCandidate.methodOpenParenIndex)
+    if (!choicesResult) return
+    this.choices = choicesResult.choices
+    this.complete = choicesResult.complete
   }
 
   feed(chunk: string): StreamingParserResult {
-    this.buffer += chunk
-
-    let iterations = 0
-    const maxIterations = 1000
-
-    while (this.buffer.length > 0 && iterations < maxIterations) {
-      iterations++
-
-      if (this.state === 'complete') {
-        break
-      }
-
-      let consumed = false
-
-      if (this.state === 'searching_for_class') {
-        consumed = this.searchForClass()
-      } else if (
-        this.state === 'found_replace' ||
-        this.state === 'found_insert_waiting_content' ||
-        this.state === 'found_choices_waiting_tuple'
-      ) {
-        consumed = this.searchForContentOrTuple()
-      } else if (this.state === 'parsing_content_quoted') {
-        consumed = this.parseContentQuoted()
-      } else if (this.state === 'parsing_choices_tuple') {
-        consumed = this.parseChoicesTuple()
-      }
-
-      if (!consumed) {
-        this.trimBuffer()
-        break
-      }
+    if (chunk.length > 0) {
+      this.parseIncremental(chunk)
+      this.updateModeCandidate()
+      this.updateValueState()
     }
 
     return {
@@ -92,224 +492,14 @@ export class ResponseParser {
       insertIndex: this.insertIndex,
       content: this.content,
       choices: this.choices,
-      isComplete: this.state === 'complete',
+      isComplete: this.complete,
     }
-  }
-
-  private trimBuffer(): void {
-    if (this.state === 'searching_for_class' && this.buffer.length > 1000) {
-      this.buffer = this.buffer.slice(-120)
-      return
-    }
-
-    if (
-      (this.state === 'found_replace' ||
-        this.state === 'found_insert_waiting_content' ||
-        this.state === 'found_choices_waiting_tuple') &&
-      this.buffer.length > 400
-    ) {
-      this.buffer = this.buffer.slice(-160)
-    }
-  }
-
-  private searchForClass(): boolean {
-    const replaceMatch = this.buffer.match(/ReplaceText\s*\(\s*\)/)
-    const insertMatch = this.buffer.match(/InsertText\s*\(\s*(-?\d+)\s*\)/)
-    const choicesMatch = this.buffer.match(/PresentChoices\s*\(\s*\)/)
-
-    const candidates: Array<{
-      kind: AIMode
-      index: number
-      length: number
-      insertIndex?: number
-    }> = []
-
-    if (replaceMatch && replaceMatch.index !== undefined) {
-      candidates.push({
-        kind: 'replace',
-        index: replaceMatch.index,
-        length: replaceMatch[0].length,
-      })
-    }
-
-    if (insertMatch && insertMatch.index !== undefined) {
-      candidates.push({
-        kind: 'insert',
-        index: insertMatch.index,
-        length: insertMatch[0].length,
-        insertIndex: parseInt(insertMatch[1], 10),
-      })
-    }
-
-    if (choicesMatch && choicesMatch.index !== undefined) {
-      candidates.push({
-        kind: 'choices',
-        index: choicesMatch.index,
-        length: choicesMatch[0].length,
-      })
-    }
-
-    if (candidates.length === 0) {
-      return false
-    }
-
-    candidates.sort((a, b) => a.index - b.index)
-    const first = candidates[0]
-
-    this.buffer = this.buffer.slice(first.index + first.length)
-    this.mode = first.kind
-
-    if (first.kind === 'replace') {
-      this.state = 'found_replace'
-      return true
-    }
-
-    if (first.kind === 'insert') {
-      this.insertIndex = first.insertIndex ?? 0
-      this.state = 'found_insert_waiting_content'
-      return true
-    }
-
-    this.state = 'found_choices_waiting_tuple'
-    return true
-  }
-
-  private searchForContentOrTuple(): boolean {
-    if (this.state === 'found_replace' || this.state === 'found_insert_waiting_content') {
-      const contentMatch = this.buffer.match(/\.with_content\s*\(\s*("""|''')/)
-
-      if (contentMatch && contentMatch.index !== undefined) {
-        this.buffer = this.buffer.slice(contentMatch.index + contentMatch[0].length)
-        this.contentDelimiter = contentMatch[1] as '"""' | "'''"
-        this.state = 'parsing_content_quoted'
-        return true
-      }
-    }
-
-    if (this.state === 'found_choices_waiting_tuple') {
-      const choicesMatch = this.buffer.match(/\.with_choices\s*\(\s*\(/)
-
-      if (choicesMatch && choicesMatch.index !== undefined) {
-        this.buffer = this.buffer.slice(choicesMatch.index + choicesMatch[0].length)
-        this.state = 'parsing_choices_tuple'
-        return true
-      }
-    }
-
-    return false
-  }
-
-  private parseContentQuoted(): boolean {
-    if (!this.contentDelimiter) {
-      return false
-    }
-
-    const delimiter = this.contentDelimiter
-    const endIndex = this.buffer.indexOf(delimiter)
-
-    if (endIndex !== -1) {
-      this.content += this.buffer.slice(0, endIndex)
-      this.buffer = this.buffer.slice(endIndex + delimiter.length)
-      this.state = 'complete'
-      return true
-    }
-
-    const dangerZone = delimiter.length - 1
-    if (this.buffer.length > dangerZone) {
-      this.content += this.buffer.slice(0, -dangerZone)
-      this.buffer = this.buffer.slice(-dangerZone)
-      return true
-    }
-
-    return false
-  }
-
-  private parseChoicesTuple(): boolean {
-    let openParens = 1
-    let i = 0
-    let inString = false
-    let stringEscape = false
-    let currentChoice = ''
-    const newChoices: string[] = []
-
-    while (i < this.buffer.length && openParens > 0) {
-      const char = this.buffer[i]
-
-      if (stringEscape) {
-        if (inString) {
-          currentChoice += char
-        }
-        stringEscape = false
-        i++
-        continue
-      }
-
-      if (char === '\\' && inString) {
-        stringEscape = true
-        i++
-        continue
-      }
-
-      if (char === '"' && !inString) {
-        inString = true
-        i++
-        continue
-      }
-
-      if (char === '"' && inString) {
-        inString = false
-        newChoices.push(currentChoice)
-        currentChoice = ''
-        i++
-        continue
-      }
-
-      if (inString) {
-        currentChoice += char
-        i++
-        continue
-      }
-
-      if (char === '(') {
-        openParens++
-      } else if (char === ')') {
-        openParens--
-      }
-
-      i++
-    }
-
-    if (newChoices.length > 0) {
-      this.choices = [...this.choices, ...newChoices]
-    }
-
-    if (openParens === 0) {
-      this.buffer = this.buffer.slice(i)
-      this.state = 'complete'
-      return true
-    }
-
-    if (newChoices.length > 0) {
-      this.buffer = this.buffer.slice(i)
-      return true
-    }
-
-    return false
   }
 
   finalize(): AIResponse | null {
-    if (!this.mode) {
-      return null
-    }
-
-    if (this.mode === 'replace') {
-      return { mode: 'replace', content: this.content }
-    }
-
-    if (this.mode === 'insert') {
-      return { mode: 'insert', index: this.insertIndex ?? 0, content: this.content }
-    }
-
+    if (!this.mode) return null
+    if (this.mode === 'replace') return { mode: 'replace', content: this.content }
+    if (this.mode === 'insert') return { mode: 'insert', index: this.insertIndex ?? 0, content: this.content }
     return { mode: 'choices', choices: this.choices }
   }
 }

@@ -40,7 +40,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const includeAfterContextRef = useRef(includeAfterContext ?? false)
+  const includeAfterContextRef = useRef(includeAfterContext ?? true)
   const selectionToolbarInteractingRef = useRef(false)
   const aiControllerRef = useRef<AIWriterController | null>(null)
   const providerRef = useRef<ReturnType<typeof createYjsProvider> | null>(null)
@@ -54,7 +54,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [providerSessionKey, setProviderSessionKey] = useState(0)
 
   useEffect(() => {
-    includeAfterContextRef.current = includeAfterContext ?? false
+    includeAfterContextRef.current = includeAfterContext ?? true
   }, [includeAfterContext])
 
   const showOfflineToast = useCallback(() => {
@@ -311,7 +311,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         <div className="ml-auto flex items-center gap-2">
           <Switch
             id="include-after-context"
-            checked={includeAfterContext ?? false}
+            checked={includeAfterContext ?? true}
             onCheckedChange={(value) => {
               includeAfterContextRef.current = Boolean(value)
               onIncludeAfterContextChange?.(Boolean(value))

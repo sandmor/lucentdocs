@@ -1,9 +1,36 @@
-export const SYSTEM_PROMPT = `You are a skilled fiction writing assistant helping an author write a novel. Your role is to:
+import type {
+  PromptDefinition,
+  PromptEditable,
+  PromptMode,
+  PromptSystemSlot,
+  PythonEditProtocol,
+  ResponseProtocol,
+} from '@plotline/shared'
+
+export const SYSTEM_CONTINUE_PROMPT_ID = 'system.continue.default'
+export const SYSTEM_SELECTION_PROMPT_ID = 'system.selection-edit.default'
+
+export const WRITING_GAP_MARKER = '<plotline_writing_gap_v1 />'
+export const ESCAPED_WRITING_GAP_MARKER = '<plotline_writing_gap_escaped_v1 />'
+
+export const DEFAULT_PYTHON_EDIT_PROTOCOL: PythonEditProtocol = {
+  type: 'python-edit-v1',
+}
+
+const TEMPLATE_IDENTIFIER_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]*$/
+const TEMPLATE_REFERENCE_PATTERN = /{{\s*([^{}]+?)\s*}}/g
+
+const MODE_TEMPLATE_VARIABLES: Record<PromptMode, readonly string[]> = {
+  continue: ['contextBefore', 'gapMarker', 'contextAfter', 'instruction', 'authorHintSection'],
+  prompt: ['contextBefore', 'gapMarker', 'contextAfter', 'selectedText', 'modeGuidance', 'prompt'],
+}
+
+const SYSTEM_PROMPT_CONTINUE = `You are a skilled fiction writing assistant helping an author write a novel. Your role is to:
 - Write in a style consistent with the existing text
 - Maintain narrative voice, tone, and pacing
 - Continue the story naturally when asked
 - Provide creative suggestions that fit the story's direction
-- Write only prose — no meta-commentary, no explanations, no markdown formatting
+- Write only prose - no meta-commentary, no explanations, no markdown formatting
 - Never break character or acknowledge that you are an AI
 
 OUTPUT RULES:
@@ -19,7 +46,7 @@ Bad output: "John walked into the room. He froze... The door slammed behind him.
 When continuing text, seamlessly pick up from where the author left off.
 When given a prompt about what to write, produce the requested prose in a style matching the existing text.`
 
-export const SYSTEM_PROMPT_STRUCTURED = `You are a skilled fiction writing assistant helping an author edit their novel. Your role is to:
+const SYSTEM_PROMPT_STRUCTURED = `You are a skilled fiction writing assistant helping an author edit their novel. Your role is to:
 - Write in a style consistent with the existing text
 - Maintain narrative voice, tone, and pacing
 - Provide creative suggestions that fit the story's direction
@@ -77,57 +104,225 @@ WHEN TO USE EACH:
 - Use InsertText when the user wants to add content before, after, or within the selection
 - Use PresentChoices when the user asks for alternatives, options, or suggestions to choose from`
 
-const WRITING_GAP_MARKER = '<plotline_writing_gap_v1 />'
-const ESCAPED_WRITING_GAP_MARKER = '<plotline_writing_gap_escaped_v1 />'
+const CONTINUE_USER_TEMPLATE = `Story context:
+
+<context_before>
+{{contextBefore}}
+</context_before>
+
+{{gapMarker}}
+
+<context_after>
+{{contextAfter}}
+</context_after>
+
+Task:
+{{instruction}}
+
+{{authorHintSection}}`
+
+const PROMPT_USER_TEMPLATE = `Story context:
+
+<context_before>
+{{contextBefore}}
+</context_before>
+
+{{gapMarker}}
+
+<context_after>
+{{contextAfter}}
+</context_after>
+
+<selected_text>
+{{selectedText}}
+</selected_text>
+
+{{modeGuidance}}
+
+The author requests:
+{{prompt}}
+
+Respond with the appropriate Python function.`
 
 function sanitizeContext(context: string): string {
   return context.replaceAll(WRITING_GAP_MARKER, ESCAPED_WRITING_GAP_MARKER)
 }
 
-export function buildContinuePrompt(
+function createPromptDefinition(
+  nowIso: string,
+  id: string,
+  editable: PromptEditable,
+  isSystem = false
+): PromptDefinition {
+  return {
+    id,
+    ...editable,
+    isSystem,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  }
+}
+
+export function createDefaultPromptDefinitions(nowIso: string): PromptDefinition[] {
+  return [
+    createPromptDefinition(
+      nowIso,
+      SYSTEM_CONTINUE_PROMPT_ID,
+      {
+        mode: 'continue',
+        name: 'Default Continue',
+        description: 'Continuation prompt used for Ctrl/Cmd+Enter drafting.',
+        systemTemplate: SYSTEM_PROMPT_CONTINUE,
+        userTemplate: CONTINUE_USER_TEMPLATE,
+        protocol: {
+          type: 'plain-text-v1',
+        },
+        defaults: {
+          temperature: 0.85,
+        },
+      },
+      true
+    ),
+    createPromptDefinition(
+      nowIso,
+      SYSTEM_SELECTION_PROMPT_ID,
+      {
+        mode: 'prompt',
+        name: 'Default Selection Edit',
+        description: 'Selection toolbar prompt that returns replace/insert/choices output.',
+        systemTemplate: SYSTEM_PROMPT_STRUCTURED,
+        userTemplate: PROMPT_USER_TEMPLATE,
+        protocol: DEFAULT_PYTHON_EDIT_PROTOCOL,
+        defaults: {
+          temperature: 0.85,
+        },
+      },
+      true
+    ),
+  ]
+}
+
+export function createDefaultPromptBindings() {
+  return {
+    continuePromptId: SYSTEM_CONTINUE_PROMPT_ID,
+    selectionEditPromptId: SYSTEM_SELECTION_PROMPT_ID,
+  }
+}
+
+export function slotForMode(mode: PromptMode): PromptSystemSlot {
+  return mode === 'continue' ? 'continue' : 'selection-edit'
+}
+
+export function modeForSlot(slot: PromptSystemSlot): PromptMode {
+  return slot === 'continue' ? 'continue' : 'prompt'
+}
+
+export function getTemplateVariablesForMode(mode: PromptMode): readonly string[] {
+  return MODE_TEMPLATE_VARIABLES[mode]
+}
+
+export function validateTemplateReferencesForMode(
+  mode: PromptMode,
+  templateName: string,
+  template: string
+): void {
+  const allowed = new Set(getTemplateVariablesForMode(mode))
+
+  for (const match of template.matchAll(TEMPLATE_REFERENCE_PATTERN)) {
+    const variableName = match[1].trim()
+    if (!TEMPLATE_IDENTIFIER_PATTERN.test(variableName)) {
+      throw new Error(
+        `Invalid template variable "${variableName}" in ${templateName}. Variable names must match ${TEMPLATE_IDENTIFIER_PATTERN.source}.`
+      )
+    }
+    if (!allowed.has(variableName)) {
+      const allowedList = getTemplateVariablesForMode(mode).join(', ')
+      throw new Error(
+        `Unknown template variable "${variableName}" in ${templateName} for mode "${mode}". Allowed variables: ${allowedList}.`
+      )
+    }
+  }
+}
+
+export function validatePromptTemplatesForMode(
+  mode: PromptMode,
+  systemTemplate: string,
+  userTemplate: string
+): void {
+  validateTemplateReferencesForMode(mode, 'systemTemplate', systemTemplate)
+  validateTemplateReferencesForMode(mode, 'userTemplate', userTemplate)
+}
+
+export function buildContinueVariables(
   contextBefore: string,
   contextAfter: string | null,
   hint?: string
-): string {
+): Record<string, string> {
   const safeContextBefore = sanitizeContext(contextBefore)
-  const safeContextAfter = contextAfter ? sanitizeContext(contextAfter) : null
-
-  const context = safeContextAfter
-    ? `${safeContextBefore}\n\n${WRITING_GAP_MARKER}\n\n${safeContextAfter}`
-    : safeContextBefore
-
+  const safeContextAfter = sanitizeContext(contextAfter ?? '')
   const instruction = safeContextAfter
-    ? `Write at the ${WRITING_GAP_MARKER} marker, bridging naturally to what follows.`
+    ? `Write at the ${WRITING_GAP_MARKER} marker, bridging naturally into the provided right-side context.`
     : 'Continue writing the next part of the story naturally.'
 
-  return hint
-    ? `Here is the story context:\n\n${context}\n\n${instruction} The author wants you to: ${hint}`
-    : `Here is the story context:\n\n${context}\n\n${instruction}`
+  return {
+    contextBefore: safeContextBefore,
+    gapMarker: WRITING_GAP_MARKER,
+    contextAfter: safeContextAfter,
+    instruction,
+    authorHintSection: hint?.trim()
+      ? `Author hint:\n${hint.trim()}`
+      : 'Author hint:\n(no additional hint provided)',
+  }
 }
 
-export function buildPromptPrompt(
+export function buildPromptVariables(
   contextBefore: string,
   contextAfter: string | null,
   prompt: string,
   selectedText: string | null = null
-): string {
+): Record<string, string> {
   const safeContextBefore = sanitizeContext(contextBefore)
-  const safeContextAfter = contextAfter ? sanitizeContext(contextAfter) : null
-
-  const context = safeContextAfter
-    ? `${safeContextBefore}\n\n${WRITING_GAP_MARKER}\n\n${safeContextAfter}`
-    : safeContextBefore
-
-  const selectionBlock = selectedText
-    ? `\n\n<selected_text>\n${selectedText}\n</selected_text>`
-    : ''
-
+  const safeContextAfter = sanitizeContext(contextAfter ?? '')
+  const safeSelectedText = selectedText ?? ''
   const modeGuidance = selectedText
-    ? `\n\nMODE GUIDANCE:
-- If the request asks to replace, rewrite, or improve the selection → use ReplaceText
-- If the request asks to add content before/after/within the selection → use InsertText
-- If the request asks for alternatives, options, or suggestions → use PresentChoices`
-    : ''
+    ? `MODE GUIDANCE:
+- If the request asks to replace, rewrite, or improve the selection -> use ReplaceText
+- If the request asks to add content before/after/within the selection -> use InsertText
+- If the request asks for alternatives, options, or suggestions -> use PresentChoices`
+    : `MODE GUIDANCE:
+- Use InsertText when adding text relative to the current cursor location
+- Use PresentChoices when user asks for alternatives`
 
-  return `Here is the story context:\n\n${context}${selectionBlock}${modeGuidance}\n\nThe author requests: ${prompt}\n\nRespond with the appropriate Python function.`
+  return {
+    contextBefore: safeContextBefore,
+    gapMarker: WRITING_GAP_MARKER,
+    contextAfter: safeContextAfter,
+    selectedText: safeSelectedText,
+    modeGuidance,
+    prompt,
+  }
+}
+
+export function renderTemplate(template: string, variables: Record<string, string>): string {
+  const availableVariables = new Set(Object.keys(variables))
+  return template.replace(TEMPLATE_REFERENCE_PATTERN, (_full, rawName: string) => {
+    const variableName = rawName.trim()
+    if (!TEMPLATE_IDENTIFIER_PATTERN.test(variableName)) {
+      throw new Error(
+        `Invalid template variable "${variableName}". Variable names must match ${TEMPLATE_IDENTIFIER_PATTERN.source}.`
+      )
+    }
+    if (!availableVariables.has(variableName)) {
+      throw new Error(`Missing template variable: ${variableName}`)
+    }
+    const value = variables[variableName]
+    if (value === undefined) {
+      throw new Error(`Missing template variable: ${variableName}`)
+    }
+    return value
+  })
+}
+
+export function isPythonEditProtocol(protocol: ResponseProtocol): protocol is PythonEditProtocol {
+  return protocol.type === 'python-edit-v1'
 }

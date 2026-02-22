@@ -24,7 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Trash2, BookOpen, SlidersHorizontal } from 'lucide-react'
+import { Plus, Trash2, BookOpen, SlidersHorizontal, MessagesSquare } from 'lucide-react'
 
 export function HomePage() {
   const navigate = useNavigate()
@@ -65,6 +65,10 @@ export function HomePage() {
             <Button variant="outline" size="lg" onClick={() => navigate('/admin/config')}>
               <SlidersHorizontal data-icon="inline-start" />
               Settings
+            </Button>
+            <Button variant="outline" size="lg" onClick={() => navigate('/admin/prompts')}>
+              <MessagesSquare data-icon="inline-start" />
+              Prompts
             </Button>
 
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

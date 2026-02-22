@@ -13,13 +13,12 @@ import { appRouter } from './trpc/router.js'
 import { PROJECT_ROOT } from './paths.js'
 import { configManager } from './config/manager.js'
 import { generate, generateStream, createStreamCleaner, cleanText } from './ai/index.js'
-import {
-  SYSTEM_PROMPT,
-  SYSTEM_PROMPT_STRUCTURED,
-  buildContinuePrompt,
-  buildPromptPrompt,
-} from './ai/prompts.js'
 import { ResponseParser, type AIMode } from './ai/response-parser.js'
+import {
+  assertPromptProtocolMode,
+  resolveContinuePrompt,
+  resolveSelectionPrompt,
+} from './ai/prompt-engine.js'
 import { setupYjsWebSocket } from './yjs/websocket-handler.js'
 import {
   flushAllDocumentStates,
@@ -116,6 +115,7 @@ async function handleGenericStream(
     systemPrompt: string
     userPrompt: string
     maxOutputTokens?: number
+    temperature?: number
     onDelta: (
       text: string,
       hasWrittenHeaders: boolean,
@@ -173,8 +173,8 @@ async function handleGenericStream(
     const result = await generateStream({
       systemPrompt: options.systemPrompt,
       userPrompt: options.userPrompt,
-      maxOutputTokens: options.maxOutputTokens ?? 512,
-      temperature: 0.85,
+      maxOutputTokens: options.maxOutputTokens,
+      temperature: options.temperature ?? 0.85,
       abortSignal: abortController.signal,
     })
 
@@ -237,27 +237,31 @@ async function handleContinueStream(
   input: z.infer<typeof aiStreamInputSchema> & { mode: 'continue' },
   contextAfter: string | null
 ): Promise<void> {
-  const userPrompt = buildContinuePrompt(input.contextBefore, contextAfter, input.hint)
+  const rendered = resolveContinuePrompt(input.contextBefore, contextAfter, input.hint)
+  assertPromptProtocolMode(rendered.definition, 'continue')
+
   const cleaner = createStreamCleaner(input.contextBefore, contextAfter)
 
   await handleGenericStream(req, res, {
-    systemPrompt: SYSTEM_PROMPT,
-    userPrompt,
-    maxOutputTokens: input.maxOutputTokens,
+    systemPrompt: rendered.systemPrompt,
+    userPrompt: rendered.userPrompt,
+    maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+    temperature: rendered.definition.defaults.temperature,
     onDelta: (text, _hasWrittenHeaders, writeHeaders, writeContent) => {
       writeHeaders()
-      const cleaned = cleaner.process(text)
-      if (cleaned) writeContent(cleaned)
+      const content = cleaner.process(text)
+      if (content) writeContent(content)
     },
     generateFallback: async (signal) => {
       const fallback = await generate({
-        systemPrompt: SYSTEM_PROMPT,
-        userPrompt,
-        maxOutputTokens: input.maxOutputTokens ?? 512,
-        temperature: 0.85,
+        systemPrompt: rendered.systemPrompt,
+        userPrompt: rendered.userPrompt,
+        maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+        temperature: rendered.definition.defaults.temperature,
         abortSignal: signal,
       })
-      return fallback ? cleanText(fallback, input.contextBefore, contextAfter) : null
+      if (!fallback) return null
+      return cleanText(fallback, input.contextBefore, contextAfter)
     },
     onFallbackDone: (fallbackText, writeHeaders, writeContent) => {
       writeHeaders()
@@ -275,12 +279,13 @@ async function handlePromptStream(
   contextAfter: string | null,
   selectedText: string | null
 ): Promise<void> {
-  const userPrompt = buildPromptPrompt(
+  const rendered = resolveSelectionPrompt(
     input.contextBefore,
     contextAfter,
     input.prompt!.trim(),
     selectedText
   )
+  assertPromptProtocolMode(rendered.definition, 'prompt')
 
   const cleaner = createStreamCleaner(input.contextBefore, contextAfter)
   const parser = new ResponseParser()
@@ -288,9 +293,10 @@ async function handlePromptStream(
   let lastSentChoicesCount = 0
 
   await handleGenericStream(req, res, {
-    systemPrompt: SYSTEM_PROMPT_STRUCTURED,
-    userPrompt,
-    maxOutputTokens: input.maxOutputTokens,
+    systemPrompt: rendered.systemPrompt,
+    userPrompt: rendered.userPrompt,
+    maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+    temperature: rendered.definition.defaults.temperature,
     onDelta: (text, hasWrittenHeaders, writeHeaders, writeContent, writeChoice) => {
       const parseResult = parser.feed(text)
       if (parseResult.mode && !hasWrittenHeaders)
@@ -298,8 +304,8 @@ async function handlePromptStream(
       if (parseResult.mode === 'replace' || parseResult.mode === 'insert') {
         const newContent = parseResult.content.slice(lastSentContentLength)
         if (newContent) {
-          const cleaned = cleaner.process(newContent)
-          if (cleaned) writeContent(cleaned)
+          const content = cleaner.process(newContent)
+          if (content) writeContent(content)
           lastSentContentLength = parseResult.content.length
         }
       } else if (parseResult.mode === 'choices') {
@@ -310,10 +316,10 @@ async function handlePromptStream(
     },
     generateFallback: async (signal) => {
       return await generate({
-        systemPrompt: SYSTEM_PROMPT_STRUCTURED,
-        userPrompt,
-        maxOutputTokens: input.maxOutputTokens ?? 512,
-        temperature: 0.85,
+        systemPrompt: rendered.systemPrompt,
+        userPrompt: rendered.userPrompt,
+        maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+        temperature: rendered.definition.defaults.temperature,
         abortSignal: signal,
       })
     },
@@ -325,8 +331,8 @@ async function handlePromptStream(
         const insertIndex = fallbackResponse.mode === 'insert' ? fallbackResponse.index : undefined
         writeHeaders(fallbackResponse.mode, insertIndex)
         if (fallbackResponse.mode === 'replace' || fallbackResponse.mode === 'insert') {
-          const cleaned = cleanText(fallbackResponse.content, input.contextBefore, contextAfter)
-          if (cleaned) writeContent(cleaned)
+          const content = cleanText(fallbackResponse.content, input.contextBefore, contextAfter)
+          if (content) writeContent(content)
         } else if (fallbackResponse.mode === 'choices') {
           for (const choice of fallbackResponse.choices) writeChoice(choice)
         }

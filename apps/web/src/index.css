@@ -225,6 +225,42 @@
   background: oklch(0.6 0.12 260 / 0.25);
 }
 
+/* CodeMirror JSON editor theme bridge */
+.cm-app-theme {
+  background: color-mix(in oklch, var(--input) 30%, transparent);
+}
+
+.cm-app-theme .cm-editor {
+  background: transparent;
+  color: var(--foreground);
+  transition: background-color 150ms ease, color 150ms ease, outline-color 150ms ease;
+}
+
+.cm-app-theme .cm-gutters {
+  background: transparent;
+  color: var(--muted-foreground);
+  border-right: 1px solid color-mix(in oklch, var(--border) 85%, transparent);
+}
+
+.cm-app-theme .cm-activeLine,
+.cm-app-theme .cm-activeLineGutter {
+  background: color-mix(in oklch, var(--accent) 55%, transparent);
+}
+
+.cm-app-theme .cm-cursor {
+  border-left-color: var(--foreground);
+}
+
+.cm-app-theme .cm-selectionBackground,
+.cm-app-theme .cm-content ::selection {
+  background: color-mix(in oklch, var(--ring) 24%, transparent);
+}
+
+.cm-app-theme .cm-editor.cm-focused {
+  outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent);
+  outline-offset: -1px;
+}
+
 /* AI Writer Floating Controls */
 @keyframes ai-fc-pulse {
   0%,

@@ -17,7 +17,7 @@ export function EditorPage() {
   const lastSavedTitleRef = useRef<string | null>(null)
   const activeProjectIdRef = useRef<string | null>(null)
 
-  const [includeAfterContext, setIncludeAfterContext] = useState(false)
+  const [includeAfterContext, setIncludeAfterContext] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
   const [titleInput, setTitleInput] = useState('')
   const [editorSessionKey, setEditorSessionKey] = useState(0)

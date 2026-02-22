@@ -83,7 +83,7 @@ export async function generate(options: GenerateOptions): Promise<string> {
     model,
     system: options.systemPrompt,
     prompt: options.userPrompt,
-    maxOutputTokens: options.maxOutputTokens ?? 1024,
+    maxOutputTokens: options.maxOutputTokens,
     temperature: options.temperature ?? 0.8,
     abortSignal: options.abortSignal,
   })
@@ -101,7 +101,7 @@ export async function generateStream(options: GenerateOptions) {
     model,
     system: options.systemPrompt,
     prompt: options.userPrompt,
-    maxOutputTokens: options.maxOutputTokens ?? 1024,
+    maxOutputTokens: options.maxOutputTokens,
     temperature: options.temperature ?? 0.8,
     abortSignal: options.abortSignal,
   })
