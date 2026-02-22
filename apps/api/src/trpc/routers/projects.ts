@@ -64,49 +64,6 @@ export const projectsRouter = router({
       return project
     }),
 
-  versions: publicProcedure.input(z.object({ id: idSchema })).query(async ({ input }) => {
-    const versions = await projectsRepo.getProjectVersions(input.id)
-    if (versions.length === 0) {
-      const exists = await projectsRepo.hasProject(input.id)
-      if (!exists) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: `Project ${input.id} not found`,
-        })
-      }
-    }
-    return versions
-  }),
-
-  createSnapshot: publicProcedure.input(z.object({ id: idSchema })).mutation(async ({ input }) => {
-    const snapshot = await projectsRepo.createProjectSnapshot(input.id)
-    if (!snapshot) {
-      throw new TRPCError({
-        code: 'NOT_FOUND',
-        message: `Project ${input.id} not found`,
-      })
-    }
-    return snapshot
-  }),
-
-  restore: publicProcedure
-    .input(
-      z.object({
-        id: idSchema,
-        snapshotId: idSchema,
-      })
-    )
-    .mutation(async ({ input }) => {
-      const project = await projectsRepo.restoreProject(input.id, input.snapshotId)
-      if (!project) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: `Project ${input.id} or snapshot ${input.snapshotId} not found`,
-        })
-      }
-      return project
-    }),
-
   delete: publicProcedure.input(z.object({ id: idSchema })).mutation(async ({ input }) => {
     const deleted = await projectsRepo.deleteProject(input.id)
     if (!deleted) {

@@ -15,41 +15,35 @@ export async function insert(row: ProjectDocumentRow): Promise<void> {
   )
 }
 
-export async function findDocumentByProjectId(
-  projectId: string
-): Promise<ProjectDocumentRow | undefined> {
+export async function findSoleDocumentIdsByProjectId(projectId: string): Promise<string[]> {
   const db = await getDb()
-  return db.get<ProjectDocumentRow>(
-    `SELECT *
-       FROM project_documents
-      WHERE projectId = ?
-      ORDER BY addedAt DESC
-      LIMIT 1`,
-    [projectId]
+  const rows = await db.all<Array<{ documentId: string }>>(
+    `SELECT pd.documentId
+       FROM project_documents pd
+      WHERE pd.projectId = ?
+        AND NOT EXISTS (
+          SELECT 1
+            FROM project_documents other
+           WHERE other.documentId = pd.documentId
+             AND other.projectId <> ?
+        )
+      GROUP BY pd.documentId
+      ORDER BY MAX(pd.addedAt) DESC`,
+    [projectId, projectId]
   )
+  return rows.map((row) => row.documentId)
 }
 
-export async function findLatestDocumentsByProjectIds(
-  projectIds: string[]
-): Promise<ProjectDocumentRow[]> {
-  if (projectIds.length === 0) return []
-
+export async function findSoleProjectIdByDocumentId(documentId: string): Promise<string | undefined> {
   const db = await getDb()
-  const placeholders = projectIds.map(() => '?').join(',')
-  const rows = await db.all<ProjectDocumentRow[]>(
-    `SELECT projectId, documentId, addedAt
+  const row = await db.get<{ projectId: string }>(
+    `SELECT MIN(projectId) AS projectId
        FROM project_documents
-      WHERE projectId IN (${placeholders})
-      ORDER BY projectId ASC, addedAt DESC`,
-    projectIds
+      WHERE documentId = ?
+      GROUP BY documentId
+      HAVING COUNT(DISTINCT projectId) = 1`,
+    [documentId]
   )
 
-  const latestByProject = new Map<string, ProjectDocumentRow>()
-  for (const row of rows) {
-    if (!latestByProject.has(row.projectId)) {
-      latestByProject.set(row.projectId, row)
-    }
-  }
-
-  return [...latestByProject.values()]
+  return row?.projectId
 }

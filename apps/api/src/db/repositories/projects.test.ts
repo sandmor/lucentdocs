@@ -1,55 +1,58 @@
 import { describe, expect, test } from 'bun:test'
+import { createProject, deleteProject, hasProject, updateProject } from './projects.js'
 import {
-  createProject,
-  createProjectSnapshot,
-  getProjectVersions,
-  restoreProject,
-  updateProject,
-} from './projects.js'
-import { replaceDocument } from '../../yjs/server.js'
-
-const makeDoc = (text: string) => ({
-  type: 'doc',
-  content: [
-    {
-      type: 'paragraph',
-      content: [{ type: 'text', text }],
-    },
-  ],
-})
+  createDocument,
+  createDocumentForProject,
+  getDocument,
+  listDocumentsForProject,
+} from './documents.js'
+import * as dalProjectDocs from '../dal/projectDocuments.js'
 
 describe('projects repository', () => {
-  test('returns updated metadata consistently when setting and clearing', async () => {
+  test('creates projects without attaching a default document', async () => {
+    const project = await createProject('project-empty')
+    const docs = await listDocumentsForProject(project.id)
+
+    expect(project.title).toBe('project-empty')
+    expect(docs).toHaveLength(0)
+  })
+
+  test('updates project metadata and title without mutating project documents', async () => {
     const project = await createProject('project-metadata')
+    const doc = await createDocumentForProject(project.id, 'stories/chapter-1.md')
+
+    expect(doc).not.toBeNull()
 
     const withMetadata = await updateProject(project.id, { metadata: { theme: 'mystery' } })
-    const cleared = await updateProject(project.id, { metadata: null })
+    const renamed = await updateProject(project.id, { title: 'renamed-project' })
 
     expect(withMetadata).not.toBeNull()
     expect(withMetadata!.metadata).toEqual({ theme: 'mystery' })
-    expect(cleared).not.toBeNull()
-    expect(cleared!.metadata).toBeNull()
+    expect(renamed).not.toBeNull()
+    expect(renamed!.title).toBe('renamed-project')
+
+    const persistedDoc = await getDocument(doc!.id)
+    expect(persistedDoc).not.toBeNull()
+    expect(persistedDoc!.title).toBe('stories/chapter-1.md')
   })
 
-  test('restore rolls back content and prunes newer project snapshots', async () => {
-    const project = await createProject('project-restore')
+  test('deleting a project deletes only documents solely associated with it', async () => {
+    const projectA = await createProject('project-delete-a')
+    const projectB = await createProject('project-delete-b')
 
-    await replaceDocument(project.documentId, makeDoc('v1'))
-    const snapshot1 = await createProjectSnapshot(project.id)
-    expect(snapshot1).not.toBeNull()
+    const exclusive = await createDocumentForProject(projectA.id, 'stories/exclusive.md')
+    const shared = await createDocument('stories/shared.md')
+    const now = Date.now()
 
-    await replaceDocument(project.documentId, makeDoc('v2'))
-    const snapshot2 = await createProjectSnapshot(project.id)
-    expect(snapshot2).not.toBeNull()
+    await dalProjectDocs.insert({ projectId: projectA.id, documentId: shared.id, addedAt: now })
+    await dalProjectDocs.insert({ projectId: projectB.id, documentId: shared.id, addedAt: now + 1 })
 
-    const restored = await restoreProject(project.id, snapshot1!.id)
-    expect(restored).not.toBeNull()
-    expect(restored!.content).toContain('v1')
-    expect(restored!.content).not.toContain('v2')
+    const deleted = await deleteProject(projectA.id)
+    expect(deleted).toBe(true)
+    expect(await hasProject(projectA.id)).toBe(false)
+    expect(await hasProject(projectB.id)).toBe(true)
 
-    const versions = await getProjectVersions(project.id)
-    const versionIds = new Set(versions.map((version) => version.id))
-    expect(versionIds.has(snapshot1!.id)).toBe(true)
-    expect(versionIds.has(snapshot2!.id)).toBe(false)
+    expect(await getDocument(exclusive!.id)).toBeNull()
+    expect(await getDocument(shared.id)).not.toBeNull()
   })
 })

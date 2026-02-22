@@ -5,6 +5,16 @@ export { isJsonObject } from './json.js'
 export { isValidId } from './validators.js'
 export { schema } from './schema.js'
 export { parseContent, createDefaultContent } from './content.js'
+export {
+  DIRECTORY_SENTINEL_NAME,
+  normalizeDocumentPath,
+  pathSegments,
+  pathHasSentinelSegment,
+  isDirectorySentinelPath,
+  directoryPathFromSentinel,
+  toDirectorySentinelPath,
+  isPathInsideDirectory,
+} from './document-path.js'
 export type {
   PersistedAppConfig,
   PersistedConfigKey,
