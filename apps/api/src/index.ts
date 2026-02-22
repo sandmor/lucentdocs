@@ -3,10 +3,12 @@ import path from 'path'
 import fs from 'fs'
 import { type Express } from 'express'
 import { createServer as createHttpServer, type Server as HttpServer } from 'http'
+import { type Socket } from 'net'
 import { createServer as createViteServer, type ViteDevServer } from 'vite'
 import { createExpressMiddleware } from '@trpc/server/adapters/express'
 import cookieParser from 'cookie-parser'
 import { z } from 'zod/v4'
+import { type WebSocketServer } from 'ws'
 import { appRouter } from './trpc/router.js'
 import { PROJECT_ROOT } from './paths.js'
 import { generate, generateStream, createStreamCleaner, cleanText } from './ai/index.js'
@@ -430,22 +432,84 @@ function registerSsrRoute(app: Express, vite: ViteDevServer | null): void {
   })
 }
 
-function registerProcessHandlers(server: HttpServer): void {
+function registerProcessHandlers(
+  server: HttpServer,
+  options: {
+    vite: ViteDevServer | null
+    yjsWss: WebSocketServer
+    sockets: Set<Socket>
+  }
+): void {
   let shuttingDown = false
 
+  const forceExit = (exitCode: number) => {
+    for (const socket of options.sockets) {
+      socket.destroy()
+    }
+    process.exit(exitCode)
+  }
+
   const shutdown = () => {
-    if (shuttingDown) return
+    if (shuttingDown) {
+      console.warn('Shutdown already in progress, forcing exit.')
+      forceExit(1)
+      return
+    }
+
     shuttingDown = true
 
     console.log('Shutting down...')
     stopSnapshotTimer()
     stopPersistenceFlushLoop()
+
+    const forceShutdownTimer = setTimeout(() => {
+      console.error('Graceful shutdown timed out, forcing exit.')
+      forceExit(1)
+    }, 5000)
+    if (typeof forceShutdownTimer.unref === 'function') {
+      forceShutdownTimer.unref()
+    }
+
     void flushAllDocumentStates()
       .catch((error) => {
         console.error('Failed to flush Yjs documents on shutdown:', error)
       })
-      .finally(() => {
-        server.close(() => process.exit(0))
+      .then(async () => {
+        for (const client of options.yjsWss.clients) {
+          client.terminate()
+        }
+
+        await new Promise<void>((resolve) => {
+          options.yjsWss.close(() => resolve())
+        })
+
+        if (options.vite) {
+          await options.vite.close()
+        }
+
+        await new Promise<void>((resolve) => {
+          server.close((error) => {
+            if (error) {
+              console.error('Failed to close HTTP server:', error)
+            }
+            resolve()
+          })
+
+          const serverWithHelpers = server as HttpServer & {
+            closeAllConnections?: () => void
+            closeIdleConnections?: () => void
+          }
+          serverWithHelpers.closeIdleConnections?.()
+          serverWithHelpers.closeAllConnections?.()
+        })
+
+        clearTimeout(forceShutdownTimer)
+        process.exit(0)
+      })
+      .catch((error) => {
+        clearTimeout(forceShutdownTimer)
+        console.error('Failed to shut down cleanly:', error)
+        forceExit(1)
       })
   }
 
@@ -466,7 +530,15 @@ async function startServer() {
   registerSsrRoute(app, vite)
 
   const httpServer = createHttpServer(app)
-  setupYjsWebSocket(httpServer)
+  const sockets = new Set<Socket>()
+  httpServer.on('connection', (socket) => {
+    sockets.add(socket)
+    socket.on('close', () => {
+      sockets.delete(socket)
+    })
+  })
+
+  const yjsWss = setupYjsWebSocket(httpServer)
   startSnapshotTimer()
 
   httpServer.listen(port, host, () => {
@@ -475,7 +547,7 @@ async function startServer() {
     )
   })
 
-  registerProcessHandlers(httpServer)
+  registerProcessHandlers(httpServer, { vite, yjsWss, sockets })
 }
 
 startServer()
