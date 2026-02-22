@@ -173,7 +173,10 @@ export function AdminPromptsPage() {
     [continueOptions]
   )
   const selectionBindingOptions = useMemo<BindingOption[]>(
-    () => [{ id: null, name: 'Unbound' }, ...selectionOptions.map(({ id, name }) => ({ id, name }))],
+    () => [
+      { id: null, name: 'Unbound' },
+      ...selectionOptions.map(({ id, name }) => ({ id, name })),
+    ],
     [selectionOptions]
   )
   const selectedContinueBinding =
@@ -396,11 +399,21 @@ export function AdminPromptsPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="lg" disabled={isBusy} onClick={() => startCreate('continue')}>
+            <Button
+              variant="outline"
+              size="lg"
+              disabled={isBusy}
+              onClick={() => startCreate('continue')}
+            >
               <FilePlus2 data-icon="inline-start" />
               New Continue
             </Button>
-            <Button variant="outline" size="lg" disabled={isBusy} onClick={() => startCreate('prompt')}>
+            <Button
+              variant="outline"
+              size="lg"
+              disabled={isBusy}
+              onClick={() => startCreate('prompt')}
+            >
               <FilePlus2 data-icon="inline-start" />
               New Selection
             </Button>
@@ -412,7 +425,10 @@ export function AdminPromptsPage() {
               variant="outline"
               size="lg"
               disabled={
-                isBusy || creatingMode !== null || !selectedPromptId || selectedSummary?.isSystem === true
+                isBusy ||
+                creatingMode !== null ||
+                !selectedPromptId ||
+                selectedSummary?.isSystem === true
               }
               onClick={deletePrompt}
             >

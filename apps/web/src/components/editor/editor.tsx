@@ -29,13 +29,7 @@ interface EditorProps {
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  {
-    documentId,
-    onConnectionChange,
-    includeAfterContext,
-    onIncludeAfterContextChange,
-    className,
-  },
+  { documentId, onConnectionChange, includeAfterContext, onIncludeAfterContextChange, className },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null)

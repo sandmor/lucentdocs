@@ -12,13 +12,7 @@ import { AlertTriangle, ArrowLeft, Eye, EyeOff, RotateCcw, Save } from 'lucide-r
 import { trpc } from '@/lib/trpc'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
@@ -32,7 +26,10 @@ type ConfigFormValues = EditableConfigInput
 
 type FieldSource = 'env' | 'file' | 'default'
 
-function sourceBadge(source: FieldSource): { label: string; variant: 'outline' | 'secondary' | 'ghost' } {
+function sourceBadge(source: FieldSource): {
+  label: string
+  variant: 'outline' | 'secondary' | 'ghost'
+} {
   if (source === 'env') return { label: 'Env Override', variant: 'outline' }
   if (source === 'file') return { label: 'Config File', variant: 'secondary' }
   return { label: 'Default', variant: 'ghost' }
@@ -83,7 +80,10 @@ export function AdminConfigPage() {
     defaultValues: toFormValues(configQuery.data ?? undefined),
   })
 
-  const queryValues = useMemo(() => toFormValues(configQuery.data ?? undefined), [configQuery.data, toFormValues])
+  const queryValues = useMemo(
+    () => toFormValues(configQuery.data ?? undefined),
+    [configQuery.data, toFormValues]
+  )
 
   useEffect(() => {
     if (!configQuery.data) return
@@ -160,12 +160,7 @@ export function AdminConfigPage() {
       <div className="mx-auto max-w-4xl px-6 py-12">
         <div className="mb-10 flex items-end justify-between">
           <div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ml-2 mb-3"
-              onClick={() => navigate('/')}
-            >
+            <Button variant="ghost" size="sm" className="-ml-2 mb-3" onClick={() => navigate('/')}>
               <ArrowLeft data-icon="inline-start" />
               Projects
             </Button>

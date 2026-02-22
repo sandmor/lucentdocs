@@ -1,11 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { nanoid } from 'nanoid'
 import {
@@ -115,7 +108,9 @@ function parseLegacyPromptEntry(entry: unknown, nowIso: string): PromptDefinitio
   if (!id || !mode || !name || !systemTemplate || !userTemplate || !protocol) return null
 
   const defaultsRaw =
-    typeof record.defaults === 'object' && record.defaults !== null && !Array.isArray(record.defaults)
+    typeof record.defaults === 'object' &&
+    record.defaults !== null &&
+    !Array.isArray(record.defaults)
       ? (record.defaults as Record<string, unknown>)
       : {}
   const temperature =
@@ -177,15 +172,15 @@ function migrateStore(raw: Record<string, unknown>): PromptStore | null {
     continuePromptId:
       typeof bindingsRaw.continuePromptId === 'string'
         ? bindingsRaw.continuePromptId
-        : parsedPrompts.find((prompt) => prompt.id === defaults.continuePromptId)?.id ??
+        : (parsedPrompts.find((prompt) => prompt.id === defaults.continuePromptId)?.id ??
           parsedPrompts.find((prompt) => prompt.mode === 'continue')?.id ??
-          null,
+          null),
     selectionEditPromptId:
       typeof bindingsRaw.selectionEditPromptId === 'string'
         ? bindingsRaw.selectionEditPromptId
-        : parsedPrompts.find((prompt) => prompt.id === defaults.selectionEditPromptId)?.id ??
+        : (parsedPrompts.find((prompt) => prompt.id === defaults.selectionEditPromptId)?.id ??
           parsedPrompts.find((prompt) => prompt.mode === 'prompt')?.id ??
-          null,
+          null),
   })
   if (!parsedBindings.success) return null
 
@@ -260,7 +255,10 @@ function clonePrompt(prompt: PromptDefinition): PromptDefinition {
 
 function ensureProtocolCompatible(editable: PromptEditable): void {
   if (editable.mode === 'continue' && editable.protocol.type !== 'plain-text-v1') {
-    throw new PromptManagerError('BAD_REQUEST', 'Continue prompts must use the plain-text-v1 protocol.')
+    throw new PromptManagerError(
+      'BAD_REQUEST',
+      'Continue prompts must use the plain-text-v1 protocol.'
+    )
   }
   if (editable.mode === 'prompt' && editable.protocol.type !== 'python-edit-v1') {
     throw new PromptManagerError(
@@ -465,7 +463,8 @@ class PromptManager {
 
     const continueFallback =
       this.store.prompts.find((prompt) => prompt.mode === 'continue')?.id ?? null
-    const selectionFallback = this.store.prompts.find((prompt) => prompt.mode === 'prompt')?.id ?? null
+    const selectionFallback =
+      this.store.prompts.find((prompt) => prompt.mode === 'prompt')?.id ?? null
 
     if (this.store.bindings.continuePromptId === id) {
       this.store.bindings.continuePromptId = continueFallback

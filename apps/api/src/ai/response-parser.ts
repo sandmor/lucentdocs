@@ -154,7 +154,10 @@ function computeIncompleteContentTail(
   return safeTail
 }
 
-function parseContentArgumentFrom(source: string, methodOpenParenIndex: number): ContentParseResult | null {
+function parseContentArgumentFrom(
+  source: string,
+  methodOpenParenIndex: number
+): ContentParseResult | null {
   let i = skipWhitespace(source, methodOpenParenIndex)
   if (source[i] !== '(') return null
 
@@ -185,7 +188,10 @@ function parseContentArgumentFrom(source: string, methodOpenParenIndex: number):
   }
 }
 
-function parseChoicesArgumentFrom(source: string, methodOpenParenIndex: number): ChoicesParseResult | null {
+function parseChoicesArgumentFrom(
+  source: string,
+  methodOpenParenIndex: number
+): ChoicesParseResult | null {
   let i = skipWhitespace(source, methodOpenParenIndex)
   if (source[i] !== '(') return null
 
@@ -388,7 +394,10 @@ function extractModeCandidateFromText(source: string): ModeCandidate | null {
   return candidates[0]
 }
 
-function pickBestCandidate(current: ModeCandidate | null, next: ModeCandidate | null): ModeCandidate | null {
+function pickBestCandidate(
+  current: ModeCandidate | null,
+  next: ModeCandidate | null
+): ModeCandidate | null {
   if (!next) return current
   if (!current) return next
   if (next.startIndex < current.startIndex) return next
@@ -431,14 +440,16 @@ export class ResponseParser {
     this.sourceEndPosition = advancePoint(previousEnd, chunk)
 
     if (this.tree) {
-      this.tree.edit(new Edit({
-        startIndex: previousBytes,
-        oldEndIndex: previousBytes,
-        newEndIndex: this.sourceBytes,
-        startPosition: previousEnd,
-        oldEndPosition: previousEnd,
-        newEndPosition: this.sourceEndPosition,
-      }))
+      this.tree.edit(
+        new Edit({
+          startIndex: previousBytes,
+          oldEndIndex: previousBytes,
+          newEndIndex: this.sourceBytes,
+          startPosition: previousEnd,
+          oldEndPosition: previousEnd,
+          newEndPosition: this.sourceEndPosition,
+        })
+      )
     }
 
     const parsed = this.parser.parse(this.source, this.tree)
@@ -474,7 +485,10 @@ export class ResponseParser {
       return
     }
 
-    const choicesResult = parseChoicesArgumentFrom(this.source, this.modeCandidate.methodOpenParenIndex)
+    const choicesResult = parseChoicesArgumentFrom(
+      this.source,
+      this.modeCandidate.methodOpenParenIndex
+    )
     if (!choicesResult) return
     this.choices = choicesResult.choices
     this.complete = choicesResult.complete
@@ -499,7 +513,8 @@ export class ResponseParser {
   finalize(): AIResponse | null {
     if (!this.mode) return null
     if (this.mode === 'replace') return { mode: 'replace', content: this.content }
-    if (this.mode === 'insert') return { mode: 'insert', index: this.insertIndex ?? 0, content: this.content }
+    if (this.mode === 'insert')
+      return { mode: 'insert', index: this.insertIndex ?? 0, content: this.content }
     return { mode: 'choices', choices: this.choices }
   }
 }

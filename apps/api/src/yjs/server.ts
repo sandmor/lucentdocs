@@ -328,7 +328,10 @@ interface EvictLiveDocumentOptions {
   closeReason?: string
 }
 
-export function evictLiveDocument(documentName: string, options: EvictLiveDocumentOptions = {}): void {
+export function evictLiveDocument(
+  documentName: string,
+  options: EvictLiveDocumentOptions = {}
+): void {
   const liveDoc = docs.get(documentName)
   if (!liveDoc) return
 

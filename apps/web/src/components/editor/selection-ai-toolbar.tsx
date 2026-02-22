@@ -256,7 +256,11 @@ export function SelectionAIToolbar({
       onFocusCapture={() => setInteracting(true)}
       onBlurCapture={(event) => {
         const nextTarget = event.relatedTarget
-        if (!nextTarget || !(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+        if (
+          !nextTarget ||
+          !(nextTarget instanceof Node) ||
+          !event.currentTarget.contains(nextTarget)
+        ) {
           setInteracting(false)
         }
       }}

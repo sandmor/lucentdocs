@@ -142,7 +142,11 @@ function updateZoneMark(
   return upsertZoneMark(view, zone.from, zone.to, attrs, metaType)
 }
 
-function selectionOverlapsAIZone(view: EditorView, selectionFrom: number, selectionTo: number): boolean {
+function selectionOverlapsAIZone(
+  view: EditorView,
+  selectionFrom: number,
+  selectionTo: number
+): boolean {
   if (selectionFrom >= selectionTo) return false
 
   for (const zone of getAIZones(view)) {

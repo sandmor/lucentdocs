@@ -106,7 +106,9 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
 ] as const
 
-export const PERSISTED_CONFIG_KEYS = CONFIG_FIELD_DEFINITIONS.map((field) => field.key) as PersistedConfigKey[]
+export const PERSISTED_CONFIG_KEYS = CONFIG_FIELD_DEFINITIONS.map(
+  (field) => field.key
+) as PersistedConfigKey[]
 
 export const CONFIG_FIELD_BY_KEY: Readonly<Record<PersistedConfigKey, ConfigFieldDefinition>> =
   Object.freeze(

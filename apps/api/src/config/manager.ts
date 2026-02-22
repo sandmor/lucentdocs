@@ -362,9 +362,7 @@ function resolveConfigSources(
 
 const editableConfigKeySet = new Set<PersistedConfigKey>(EDITABLE_CONFIG_KEYS)
 
-function sanitizeEditablePatch(
-  patch: Partial<PersistedAppConfig>
-): Partial<PersistedAppConfig> {
+function sanitizeEditablePatch(patch: Partial<PersistedAppConfig>): Partial<PersistedAppConfig> {
   const sanitized: Partial<PersistedAppConfig> = {}
   const sanitizedRecord = sanitized as Record<
     PersistedConfigKey,

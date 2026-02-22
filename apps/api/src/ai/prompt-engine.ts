@@ -13,7 +13,10 @@ export interface RenderedPrompt {
   userPrompt: string
 }
 
-function renderPrompt(definition: PromptDefinition, variables: Record<string, string>): RenderedPrompt {
+function renderPrompt(
+  definition: PromptDefinition,
+  variables: Record<string, string>
+): RenderedPrompt {
   return {
     definition,
     systemPrompt: renderTemplate(definition.systemTemplate, variables),
@@ -53,9 +56,7 @@ export function assertPromptProtocolMode(
   }
 
   if (expectedMode === 'continue' && definition.protocol.type !== 'plain-text-v1') {
-    throw new Error(
-      `Prompt "${definition.id}" must use plain-text-v1 protocol for continue mode`
-    )
+    throw new Error(`Prompt "${definition.id}" must use plain-text-v1 protocol for continue mode`)
   }
 
   if (expectedMode === 'prompt' && !isPythonEditProtocol(definition.protocol)) {

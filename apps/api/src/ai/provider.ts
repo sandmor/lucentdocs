@@ -22,7 +22,9 @@ async function getProvider(): Promise<ResolvedProvider> {
     const config = getConfig()
 
     if (!config.apiKey) {
-      throw new Error(`Missing API key: set AI_API_KEY in env or ${configManager.getConfig().paths.configFile}`)
+      throw new Error(
+        `Missing API key: set AI_API_KEY in env or ${configManager.getConfig().paths.configFile}`
+      )
     }
 
     providerPromise = Promise.resolve(

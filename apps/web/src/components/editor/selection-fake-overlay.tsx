@@ -83,7 +83,9 @@ export function SelectionFakeOverlay({ view, selection, visible }: SelectionFake
   }
 
   const visibleRects =
-    snapshot && snapshot.from === selection.from && snapshot.to === selection.to ? snapshot.rects : []
+    snapshot && snapshot.from === selection.from && snapshot.to === selection.to
+      ? snapshot.rects
+      : []
 
   if (visibleRects.length === 0) {
     return null

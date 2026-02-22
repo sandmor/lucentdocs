@@ -44,40 +44,43 @@ export async function selectEditorText(page: PWPage, needle: string, occurrence 
     throw new Error(`selectEditorText occurrence must be >= 0, received ${occurrence}`)
   }
 
-  const found = await page.evaluate(({ query, occurrenceIndex }) => {
-    const root = document.querySelector('.ProseMirror')
-    if (!root) return false
+  const found = await page.evaluate(
+    ({ query, occurrenceIndex }) => {
+      const root = document.querySelector('.ProseMirror')
+      if (!root) return false
 
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    let seen = 0
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let seen = 0
 
-    while (walker.nextNode()) {
-      const node = walker.currentNode
-      const text = node.textContent ?? ''
-      let start = 0
+      while (walker.nextNode()) {
+        const node = walker.currentNode
+        const text = node.textContent ?? ''
+        let start = 0
 
-      while (start <= text.length) {
-        const index = text.indexOf(query, start)
-        if (index === -1) break
+        while (start <= text.length) {
+          const index = text.indexOf(query, start)
+          if (index === -1) break
 
-        if (seen === occurrenceIndex) {
-          const selection = window.getSelection()
-          if (!selection) return false
+          if (seen === occurrenceIndex) {
+            const selection = window.getSelection()
+            if (!selection) return false
 
-          const range = document.createRange()
-          range.setStart(node, index)
-          range.setEnd(node, index + query.length)
-          selection.removeAllRanges()
-          selection.addRange(range)
-          return true
+            const range = document.createRange()
+            range.setStart(node, index)
+            range.setEnd(node, index + query.length)
+            selection.removeAllRanges()
+            selection.addRange(range)
+            return true
+          }
+
+          seen += 1
+          start = index + Math.max(query.length, 1)
         }
-
-        seen += 1
-        start = index + Math.max(query.length, 1)
       }
-    }
-    return false
-  }, { query: needle, occurrenceIndex: occurrence })
+      return false
+    },
+    { query: needle, occurrenceIndex: occurrence }
+  )
 
   expect(found).toBeTruthy()
 }
