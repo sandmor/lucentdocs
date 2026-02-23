@@ -1,6 +1,7 @@
 import type { PromptDefinition, PromptMode } from '@plotline/shared'
 import { promptManager } from './prompt-manager.js'
 import {
+  buildChatVariables,
   buildContinueVariables,
   buildPromptVariables,
   isPythonEditProtocol,
@@ -45,6 +46,16 @@ export function resolveSelectionPrompt(
   return renderPrompt(definition, variables)
 }
 
+export function resolveChatPrompt(
+  currentFilePath: string,
+  currentFileContent: string,
+  conversation: string
+): RenderedPrompt {
+  const definition = promptManager.resolvePromptForMode('chat')
+  const variables = buildChatVariables(currentFilePath, currentFileContent, conversation)
+  return renderPrompt(definition, variables)
+}
+
 export function assertPromptProtocolMode(
   definition: PromptDefinition,
   expectedMode: PromptMode
@@ -63,5 +74,9 @@ export function assertPromptProtocolMode(
     throw new Error(
       `Prompt "${definition.id}" must use python-edit-v1 protocol for structured prompt mode`
     )
+  }
+
+  if (expectedMode === 'chat' && definition.protocol.type !== 'plain-text-v1') {
+    throw new Error(`Prompt "${definition.id}" must use plain-text-v1 protocol for chat mode`)
   }
 }

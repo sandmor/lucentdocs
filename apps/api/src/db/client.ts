@@ -86,7 +86,22 @@ async function initializeDb(): Promise<Database> {
       FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
     );
 
-    CREATE INDEX IF NOT EXISTS idx_version_snapshots_document ON version_snapshots(documentId)
+    CREATE INDEX IF NOT EXISTS idx_version_snapshots_document ON version_snapshots(documentId);
+
+    CREATE TABLE IF NOT EXISTS chat_threads (
+      id TEXT PRIMARY KEY,
+      projectId TEXT NOT NULL,
+      documentId TEXT NOT NULL,
+      title TEXT NOT NULL,
+      messages TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chat_threads_document_updated
+      ON chat_threads(projectId, documentId, updatedAt DESC);
   `)
   return db
 }

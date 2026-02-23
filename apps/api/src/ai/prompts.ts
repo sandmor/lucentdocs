@@ -9,6 +9,7 @@ import type {
 
 export const SYSTEM_CONTINUE_PROMPT_ID = 'system.continue.default'
 export const SYSTEM_SELECTION_PROMPT_ID = 'system.selection-edit.default'
+export const SYSTEM_CHAT_PROMPT_ID = 'system.chat.default'
 
 export const WRITING_GAP_MARKER = '<plotline_writing_gap_v1 />'
 export const ESCAPED_WRITING_GAP_MARKER = '<plotline_writing_gap_escaped_v1 />'
@@ -23,6 +24,7 @@ const TEMPLATE_REFERENCE_PATTERN = /{{\s*([^{}]+?)\s*}}/g
 const MODE_TEMPLATE_VARIABLES: Record<PromptMode, readonly string[]> = {
   continue: ['contextBefore', 'gapMarker', 'contextAfter', 'instruction', 'authorHintSection'],
   prompt: ['contextBefore', 'gapMarker', 'contextAfter', 'selectedText', 'modeGuidance', 'prompt'],
+  chat: ['currentFilePath', 'currentFileContent', 'chatInstruction', 'conversation'],
 }
 
 const SYSTEM_PROMPT_CONTINUE = `You are a skilled fiction writing assistant helping an author write a novel. Your role is to:
@@ -104,6 +106,24 @@ WHEN TO USE EACH:
 - Use InsertText when the user wants to add content before, after, or within the selection
 - Use PresentChoices when the user asks for alternatives, options, or suggestions to choose from`
 
+const SYSTEM_PROMPT_CHAT = `You are Plotline's sidebar AI assistant for software projects.
+
+You can inspect project files via tools and should use them when needed.
+
+Core behavior:
+- Be accurate and concrete.
+- If you cite documents, mention exact file paths.
+- Prefer short, directly actionable answers unless the user asks for depth.
+- Never invent file contents. If needed, call tools first.
+- Do not claim access to other projects files; only this project documents are available through tools.
+
+When tool output is incomplete, state what is missing and what to inspect next.
+
+CONTEXT MARKERS:
+The active file content may contain special markers indicating the user's cursor context:
+- <selection>text</selection> — the text currently selected by the user
+- <caret /> — the cursor position when no text is selected`
+
 const CONTINUE_USER_TEMPLATE = `Story context:
 
 <context_before>
@@ -143,6 +163,18 @@ The author requests:
 {{prompt}}
 
 Respond with the appropriate Python function.`
+
+const CHAT_USER_TEMPLATE = `Active file path:
+{{currentFilePath}}
+
+Active file content:
+{{currentFileContent}}
+
+Guidance:
+{{chatInstruction}}
+
+Conversation so far:
+{{conversation}}`
 
 function sanitizeContext(context: string): string {
   return context.replaceAll(WRITING_GAP_MARKER, ESCAPED_WRITING_GAP_MARKER)
@@ -199,6 +231,25 @@ export function createDefaultPromptDefinitions(nowIso: string): PromptDefinition
       },
       true
     ),
+    createPromptDefinition(
+      nowIso,
+      SYSTEM_CHAT_PROMPT_ID,
+      {
+        mode: 'chat',
+        name: 'Default Chat',
+        description: 'Sidebar chat prompt with project-file tool usage guidance.',
+        systemTemplate: SYSTEM_PROMPT_CHAT,
+        userTemplate: CHAT_USER_TEMPLATE,
+        protocol: {
+          type: 'plain-text-v1',
+        },
+        defaults: {
+          temperature: 0.5,
+          maxOutputTokens: 2048,
+        },
+      },
+      true
+    ),
   ]
 }
 
@@ -206,15 +257,20 @@ export function createDefaultPromptBindings() {
   return {
     continuePromptId: SYSTEM_CONTINUE_PROMPT_ID,
     selectionEditPromptId: SYSTEM_SELECTION_PROMPT_ID,
+    chatPromptId: SYSTEM_CHAT_PROMPT_ID,
   }
 }
 
 export function slotForMode(mode: PromptMode): PromptSystemSlot {
-  return mode === 'continue' ? 'continue' : 'selection-edit'
+  if (mode === 'continue') return 'continue'
+  if (mode === 'prompt') return 'selection-edit'
+  return 'chat'
 }
 
 export function modeForSlot(slot: PromptSystemSlot): PromptMode {
-  return slot === 'continue' ? 'continue' : 'prompt'
+  if (slot === 'continue') return 'continue'
+  if (slot === 'selection-edit') return 'prompt'
+  return 'chat'
 }
 
 export function getTemplateVariablesForMode(mode: PromptMode): readonly string[] {
@@ -300,6 +356,20 @@ export function buildPromptVariables(
     selectedText: safeSelectedText,
     modeGuidance,
     prompt,
+  }
+}
+
+export function buildChatVariables(
+  currentFilePath: string,
+  currentFileContent: string,
+  conversation: string
+): Record<string, string> {
+  return {
+    currentFilePath: currentFilePath.trim() || '(untitled)',
+    currentFileContent: sanitizeContext(currentFileContent),
+    chatInstruction:
+      'Use project tools when you need to inspect files. Keep answers grounded in available project documents.',
+    conversation: conversation.trim() || '(no prior messages)',
   }
 }
 

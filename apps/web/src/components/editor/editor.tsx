@@ -23,13 +23,23 @@ export interface EditorHandle {
 interface EditorProps {
   documentId: string
   onConnectionChange?: (status: ConnectionStatus) => void
+  onEditorViewReady?: (view: EditorView | null) => void
+  onEditorSelectionChange?: (selection: { from: number; to: number } | null) => void
   includeAfterContext?: boolean
   onIncludeAfterContextChange?: (value: boolean) => void
   className?: string
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { documentId, onConnectionChange, includeAfterContext, onIncludeAfterContextChange, className },
+  {
+    documentId,
+    onConnectionChange,
+    onEditorViewReady,
+    onEditorSelectionChange,
+    includeAfterContext,
+    onIncludeAfterContextChange,
+    className,
+  },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -134,6 +144,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         const newState = view.state.apply(tr)
         view.updateState(newState)
         emitAIStateChange(view)
+        onEditorSelectionChange?.({
+          from: newState.selection.from,
+          to: newState.selection.to,
+        })
 
         const { from, to, empty } = newState.selection
         const viewIsFocused = view.hasFocus()
@@ -178,6 +192,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
     viewRef.current = view
     setEditorView(view)
+    onEditorViewReady?.(view)
+    onEditorSelectionChange?.({
+      from: view.state.selection.from,
+      to: view.state.selection.to,
+    })
     setIsEditorFocused(view.hasFocus())
 
     const syncSelectionFromDOM = () => {
@@ -254,13 +273,23 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       view.destroy()
       viewRef.current = null
       setEditorView(null)
+      onEditorViewReady?.(null)
+      onEditorSelectionChange?.(null)
       setIsLoading(true)
       setIsGenerating(false)
       setSelectionRange(null)
       setIsEditorFocused(false)
       selectionToolbarInteractingRef.current = false
     }
-  }, [documentId, providerSessionKey, showOfflineToast, dismissOfflineToast, onConnectionChange])
+  }, [
+    documentId,
+    providerSessionKey,
+    showOfflineToast,
+    dismissOfflineToast,
+    onConnectionChange,
+    onEditorSelectionChange,
+    onEditorViewReady,
+  ])
 
   useImperativeHandle(ref, () => ({
     startAIContinuationAtStoryEnd() {

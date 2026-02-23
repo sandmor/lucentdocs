@@ -22,6 +22,16 @@ describe('prompt template validation', () => {
     ).toThrow('Unknown template variable "instruction"')
   })
 
+  test('accepts allowed chat variables', () => {
+    expect(() =>
+      validateTemplateReferencesForMode(
+        'chat',
+        'userTemplate',
+        'File {{currentFilePath}} {{currentFileContent}} {{chatInstruction}} {{conversation}}'
+      )
+    ).not.toThrow()
+  })
+
   test('rejects invalid variable names', () => {
     expect(() =>
       validateTemplateReferencesForMode('continue', 'userTemplate', 'Bad {{bad-var}}')

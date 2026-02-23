@@ -9,11 +9,13 @@ export {
   DIRECTORY_SENTINEL_NAME,
   normalizeDocumentPath,
   pathSegments,
+  parentDocumentPath,
   pathHasSentinelSegment,
   isDirectorySentinelPath,
   directoryPathFromSentinel,
   toDirectorySentinelPath,
   isPathInsideDirectory,
+  remapPathInsideDirectory,
 } from './document-path.js'
 export type {
   PersistedAppConfig,

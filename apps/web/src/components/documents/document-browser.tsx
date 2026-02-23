@@ -15,7 +15,7 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
       collisionDetection={closestCenter}
       onDragEnd={browser.handleDragEnd}
     >
-      <section className="bg-muted/15 flex h-full w-full flex-col border-b md:w-[360px] md:shrink-0 md:border-r md:border-b-0">
+      <section className="bg-muted/15 flex h-full w-full flex-col">
         <BrowserHeader
           breadcrumbs={browser.breadcrumbs}
           onGoToCrumb={browser.goToCrumb}

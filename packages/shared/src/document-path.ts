@@ -13,6 +13,12 @@ export function pathSegments(path: string): string[] {
   return normalized ? normalized.split('/') : []
 }
 
+export function parentDocumentPath(path: string): string {
+  const parts = pathSegments(path)
+  if (parts.length <= 1) return ''
+  return parts.slice(0, -1).join('/')
+}
+
 export function pathHasSentinelSegment(path: string): boolean {
   return pathSegments(path).some((part) => part === DIRECTORY_SENTINEL_NAME)
 }
@@ -43,4 +49,21 @@ export function isPathInsideDirectory(path: string, directoryPath: string): bool
   if (!normalizedPath || !normalizedDirectory) return false
   if (normalizedPath === normalizedDirectory) return true
   return normalizedPath.startsWith(`${normalizedDirectory}/`)
+}
+
+export function remapPathInsideDirectory(
+  path: string,
+  sourceDirectory: string,
+  destinationDirectory: string
+): string {
+  const normalizedPath = normalizeDocumentPath(path)
+  const normalizedSource = normalizeDocumentPath(sourceDirectory)
+  const normalizedDestination = normalizeDocumentPath(destinationDirectory)
+
+  if (!normalizedPath || !normalizedSource) return normalizedPath
+  if (normalizedPath === normalizedSource) return normalizedDestination
+  if (!isPathInsideDirectory(normalizedPath, normalizedSource)) return normalizedPath
+
+  const suffix = normalizedPath.slice(normalizedSource.length + 1)
+  return normalizedDestination ? `${normalizedDestination}/${suffix}` : suffix
 }

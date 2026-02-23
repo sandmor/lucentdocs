@@ -37,11 +37,20 @@ const documentsChangedEventSchema = eventBaseSchema.extend({
   ]),
 })
 
+const chatsChangedEventSchema = eventBaseSchema.extend({
+  type: z.literal('chats.changed'),
+  documentId: idSchema,
+  changedChatIds: z.array(idSchema),
+  deletedChatIds: z.array(idSchema),
+  reason: z.enum(['chats.create', 'chats.update', 'chats.delete']),
+})
+
 const projectSyncEventSchema = z.discriminatedUnion('type', [
   projectCreatedEventSchema,
   projectUpdatedEventSchema,
   projectDeletedEventSchema,
   documentsChangedEventSchema,
+  chatsChangedEventSchema,
 ])
 
 const projectsListSyncEventSchema = z.discriminatedUnion('type', [

@@ -2,10 +2,10 @@ import { z } from 'zod/v4'
 
 const ENTITY_ID_PATTERN = /^[A-Za-z0-9._-]{3,120}$/
 
-export const promptModeSchema = z.enum(['continue', 'prompt'])
+export const promptModeSchema = z.enum(['continue', 'prompt', 'chat'])
 export type PromptMode = z.infer<typeof promptModeSchema>
 
-export const promptSystemSlotSchema = z.enum(['continue', 'selection-edit'])
+export const promptSystemSlotSchema = z.enum(['continue', 'selection-edit', 'chat'])
 export type PromptSystemSlot = z.infer<typeof promptSystemSlotSchema>
 
 export const plainTextProtocolSchema = z.object({
@@ -52,6 +52,7 @@ export type PromptDefinition = z.infer<typeof promptDefinitionSchema>
 export const promptBindingsSchema = z.object({
   continuePromptId: z.string().regex(ENTITY_ID_PATTERN).nullable(),
   selectionEditPromptId: z.string().regex(ENTITY_ID_PATTERN).nullable(),
+  chatPromptId: z.string().regex(ENTITY_ID_PATTERN).nullable(),
 })
 export type PromptBindings = z.infer<typeof promptBindingsSchema>
 

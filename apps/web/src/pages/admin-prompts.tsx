@@ -57,14 +57,21 @@ interface BindingOption {
 }
 
 function createDefaultProtocol(mode: PromptMode): ResponseProtocol {
-  if (mode === 'continue') return { type: 'plain-text-v1' }
+  if (mode === 'continue' || mode === 'chat') return { type: 'plain-text-v1' }
   return { type: 'python-edit-v1' }
 }
 
 function createEmptyForm(mode: PromptMode): PromptFormState {
+  const defaultName =
+    mode === 'continue'
+      ? 'New Continue Prompt'
+      : mode === 'prompt'
+        ? 'New Selection Prompt'
+        : 'New Chat Prompt'
+
   return {
     mode,
-    name: mode === 'continue' ? 'New Continue Prompt' : 'New Selection Prompt',
+    name: defaultName,
     description: '',
     systemTemplate: '',
     userTemplate: '',
@@ -121,12 +128,17 @@ function formatProtocol(raw: string): { value: ResponseProtocol; json: string } 
 
 function isSystemTag(
   summary: PromptSummary,
-  bindings: { continuePromptId: string | null; selectionEditPromptId: string | null }
+  bindings: {
+    continuePromptId: string | null
+    selectionEditPromptId: string | null
+    chatPromptId: string | null
+  }
 ): string[] {
   const tags: string[] = []
   if (summary.isSystem) tags.push('system')
   if (bindings.continuePromptId === summary.id) tags.push('continue default')
   if (bindings.selectionEditPromptId === summary.id) tags.push('selection-edit default')
+  if (bindings.chatPromptId === summary.id) tags.push('chat default')
   return tags
 }
 
@@ -157,6 +169,7 @@ export function AdminPromptsPage() {
       listData?.bindings ?? {
         continuePromptId: null,
         selectionEditPromptId: null,
+        chatPromptId: null,
       },
     [listData?.bindings]
   )
@@ -166,8 +179,10 @@ export function AdminPromptsPage() {
 
   const continueOptions = summaries.filter((summary) => summary.mode === 'continue')
   const selectionOptions = summaries.filter((summary) => summary.mode === 'prompt')
+  const chatOptions = summaries.filter((summary) => summary.mode === 'chat')
   const continueAnchor = useRef<HTMLButtonElement | null>(null)
   const selectionAnchor = useRef<HTMLButtonElement | null>(null)
+  const chatAnchor = useRef<HTMLButtonElement | null>(null)
   const continueBindingOptions = useMemo<BindingOption[]>(
     () => [{ id: null, name: 'Unbound' }, ...continueOptions.map(({ id, name }) => ({ id, name }))],
     [continueOptions]
@@ -179,12 +194,18 @@ export function AdminPromptsPage() {
     ],
     [selectionOptions]
   )
+  const chatBindingOptions = useMemo<BindingOption[]>(
+    () => [{ id: null, name: 'Unbound' }, ...chatOptions.map(({ id, name }) => ({ id, name }))],
+    [chatOptions]
+  )
   const selectedContinueBinding =
     continueBindingOptions.find((option) => option.id === bindings.continuePromptId) ??
     continueBindingOptions[0]
   const selectedSelectionBinding =
     selectionBindingOptions.find((option) => option.id === bindings.selectionEditPromptId) ??
     selectionBindingOptions[0]
+  const selectedChatBinding =
+    chatBindingOptions.find((option) => option.id === bindings.chatPromptId) ?? chatBindingOptions[0]
 
   useEffect(() => {
     if (creatingMode !== null) return
@@ -346,7 +367,7 @@ export function AdminPromptsPage() {
     )
   }
 
-  const updateBinding = (slot: 'continue' | 'selection-edit', rawValue: string | null) => {
+  const updateBinding = (slot: 'continue' | 'selection-edit' | 'chat', rawValue: string | null) => {
     const promptId = rawValue === null || rawValue === NONE_VALUE ? null : rawValue
     setBindingMutation.mutate(
       { slot, promptId },
@@ -416,6 +437,15 @@ export function AdminPromptsPage() {
             >
               <FilePlus2 data-icon="inline-start" />
               New Selection
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              disabled={isBusy}
+              onClick={() => startCreate('chat')}
+            >
+              <FilePlus2 data-icon="inline-start" />
+              New Chat
             </Button>
             <Button size="lg" disabled={isBusy} onClick={savePrompt}>
               <Save data-icon="inline-start" />
@@ -507,6 +537,37 @@ export function AdminPromptsPage() {
                     </ComboboxContent>
                   </Combobox>
                 </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="chat-binding">Chat</FieldLabel>
+                  <Combobox
+                    items={chatBindingOptions}
+                    itemToStringLabel={(item) => item.name}
+                    itemToStringValue={(item) => item.id ?? NONE_VALUE}
+                    isItemEqualToValue={(item, value) => item.id === value.id}
+                    value={selectedChatBinding}
+                    onValueChange={(value) => updateBinding('chat', value?.id ?? null)}
+                  >
+                    <ComboboxTrigger
+                      ref={chatAnchor}
+                      id="chat-binding"
+                      render={<Button variant="outline" className="w-full justify-between" />}
+                    >
+                      {selectedChatBinding?.name ?? 'Unbound'}
+                    </ComboboxTrigger>
+                    <ComboboxContent anchor={chatAnchor}>
+                      <ComboboxInput placeholder="Search chat prompts" showClear />
+                      <ComboboxEmpty>No prompts found.</ComboboxEmpty>
+                      <ComboboxList>
+                        {(item: BindingOption) => (
+                          <ComboboxItem key={item.id ?? NONE_VALUE} value={item}>
+                            {item.name}
+                          </ComboboxItem>
+                        )}
+                      </ComboboxList>
+                    </ComboboxContent>
+                  </Combobox>
+                </Field>
               </CardContent>
             </Card>
 
@@ -568,7 +629,8 @@ export function AdminPromptsPage() {
                     disabled={creatingMode === null}
                     onValueChange={(value) =>
                       setForm((prev) => {
-                        const mode = value === 'prompt' ? 'prompt' : 'continue'
+                        const mode =
+                          value === 'prompt' ? 'prompt' : value === 'chat' ? 'chat' : 'continue'
                         return {
                           ...prev,
                           mode,
@@ -583,6 +645,7 @@ export function AdminPromptsPage() {
                     <SelectContent>
                       <SelectItem value="continue">continue</SelectItem>
                       <SelectItem value="prompt">prompt</SelectItem>
+                      <SelectItem value="chat">chat</SelectItem>
                     </SelectContent>
                   </Select>
                   <FieldDescription>

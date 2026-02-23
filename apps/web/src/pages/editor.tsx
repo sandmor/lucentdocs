@@ -13,12 +13,21 @@ import { trpc } from '@/lib/trpc'
 import { Editor, type EditorHandle } from '@/components/editor'
 import { VersionHistory, type VersionSnapshotInfo } from '@/components/version-history'
 import { DocumentBrowser } from '@/components/documents/document-browser'
+import { ChatPanel } from '@/components/editor/chat-panel'
+import { SidebarIconBar, type SidebarPanel } from '@/components/editor/sidebar-icon-bar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ArrowLeft, Loader2, Wifi, WifiOff } from 'lucide-react'
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from '@/components/ui/resizable'
+import { ArrowLeft, Loader2, Wifi, WifiOff, PanelLeftClose, PanelLeft, Menu, X } from 'lucide-react'
 import type { ConnectionStatus } from '@/lib/yjs-provider'
 import { parseProjectSyncEvent } from '@/lib/project-sync-events'
+import type { PanelImperativeHandle } from 'react-resizable-panels'
+import { cn } from '@/lib/utils'
 
 export function EditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -35,6 +44,18 @@ export function EditorPage() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
   const [titleInput, setTitleInput] = useState('')
   const [editorSessionKey, setEditorSessionKey] = useState(0)
+  const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>('explorer')
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return window.matchMedia('(min-width: 768px)').matches
+  })
+  const [editorSelectionForChat, setEditorSelectionForChat] = useState<{
+    from: number
+    to: number
+  } | null>(null)
+  const sidebarPanelRef = useRef<PanelImperativeHandle | null>(null)
 
   const projectQuery = trpc.projects.get.useQuery({ id: id! }, { enabled: !!id })
   const documentsQuery = trpc.documents.list.useQuery({ projectId: id! }, { enabled: !!id })
@@ -193,28 +214,50 @@ export function EditorPage() {
 
     activeDocumentIdRef.current = currentDocumentId
     lastSavedPathRef.current = null
-    setTitleInput('')
-    setConnectionStatus('connecting')
+
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setTitleInput('')
+      setConnectionStatus('connecting')
+    })
+
+    return () => {
+      cancelled = true
+    }
   }, [currentDocumentId])
 
   useEffect(() => {
     if (!currentDocumentId || documentQuery.data?.id !== currentDocumentId) return
     if (!documentPath) return
 
+    let nextTitle: string | null = null
+
     if (lastSavedPathRef.current === null) {
       lastSavedPathRef.current = documentPath
-      setTitleInput(documentBaseName)
-      return
+      nextTitle = documentBaseName
+    } else {
+      const lastSavedBaseName = (() => {
+        const parts = pathSegments(lastSavedPathRef.current)
+        return parts.at(-1) ?? ''
+      })()
+
+      if (documentPath !== lastSavedPathRef.current && titleInput === lastSavedBaseName) {
+        lastSavedPathRef.current = documentPath
+        nextTitle = documentBaseName
+      }
     }
 
-    const lastSavedBaseName = (() => {
-      const parts = pathSegments(lastSavedPathRef.current)
-      return parts.at(-1) ?? ''
-    })()
+    if (nextTitle === null) return
 
-    if (documentPath !== lastSavedPathRef.current && titleInput === lastSavedBaseName) {
-      lastSavedPathRef.current = documentPath
-      setTitleInput(documentBaseName)
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setTitleInput(nextTitle)
+    })
+
+    return () => {
+      cancelled = true
     }
   }, [currentDocumentId, documentBaseName, documentPath, documentQuery.data?.id, titleInput])
 
@@ -354,6 +397,19 @@ export function EditorPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mediaQuery = window.matchMedia('(min-width: 768px)')
+    const sync = () => {
+      setIsDesktop(mediaQuery.matches)
+    }
+
+    sync()
+    mediaQuery.addEventListener('change', sync)
+    return () => mediaQuery.removeEventListener('change', sync)
+  }, [])
+
   const handleConnectionChange = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)
   }, [])
@@ -394,10 +450,19 @@ export function EditorPage() {
         return
       }
 
+      const activeId = activeDocumentIdRef.current
+
+      if (parsedEvent.type === 'chats.changed') {
+        utils.chat.listByDocument.invalidate({
+          projectId: id,
+          documentId: parsedEvent.documentId,
+        })
+        return
+      }
+
       utils.projects.get.invalidate({ id })
       utils.documents.list.invalidate({ projectId: id })
 
-      const activeId = activeDocumentIdRef.current
       if (activeId) {
         utils.documents.get.invalidate({ projectId: id, id: activeId })
         utils.documents.versions.invalidate({ projectId: id, id: activeId })
@@ -445,6 +510,7 @@ export function EditorPage() {
       utils.documents.get,
       utils.documents.list,
       utils.documents.versions,
+      utils.chat.listByDocument,
       utils.projects.get,
     ]
   )
@@ -455,6 +521,30 @@ export function EditorPage() {
       enabled: !!id,
       onData: handleProjectSyncEvent,
     }
+  )
+
+  const toggleSidebar = useCallback(() => {
+    const panel = sidebarPanelRef.current
+    if (!panel) return
+    const { asPercentage } = panel.getSize()
+    if (asPercentage <= 1) {
+      panel.expand()
+      setIsSidebarOpen(true)
+    } else {
+      panel.collapse()
+      setIsSidebarOpen(false)
+    }
+  }, [])
+
+  const handleMobileOpenDocument = useCallback(
+    (documentId: string) => {
+      handleOpenDocument(documentId)
+      // Close mobile drawer if open
+      if (isMobileMenuOpen) {
+        setIsMobileMenuOpen(false)
+      }
+    },
+    [handleOpenDocument, isMobileMenuOpen]
   )
 
   if (projectQuery.isLoading) {
@@ -479,15 +569,118 @@ export function EditorPage() {
   const versions: VersionSnapshotInfo[] = versionsQuery.data ?? []
   const hasDocuments = visibleDocuments.length > 0
 
+  const sidebarContent = (
+    <>
+      {sidebarPanel === 'explorer' && (
+        <DocumentBrowser
+          projectId={id}
+          documents={documentsQuery.data ?? []}
+          isLoading={documentsQuery.isLoading || openOrCreateDefaultDocumentMutation.isPending}
+          activeDocumentId={currentDocumentId ?? ''}
+          onOpenDocument={handleMobileOpenDocument}
+        />
+      )}
+      {sidebarPanel === 'chat' && (
+        <ChatPanel
+          editorSelection={editorSelectionForChat}
+          projectId={id}
+          documentId={currentDocumentId}
+        />
+      )}
+    </>
+  )
+
+  const mainContent = (
+    <main className="flex-1 overflow-y-auto h-full">
+      {!hasDocuments &&
+        !documentsQuery.isLoading &&
+        !openOrCreateDefaultDocumentMutation.isPending && (
+          <div className="text-muted-foreground flex h-full items-center justify-center px-6 text-sm">
+            Create a document from the sidebar to start writing.
+          </div>
+        )}
+
+      {(documentsQuery.isLoading || openOrCreateDefaultDocumentMutation.isPending) && (
+        <div className="flex h-full items-center justify-center">
+          <Loader2 className="text-muted-foreground size-8 animate-spin" />
+        </div>
+      )}
+
+      {hasDocuments && documentQuery.isLoading && (
+        <div className="flex h-full items-center justify-center">
+          <Loader2 className="text-muted-foreground size-8 animate-spin" />
+        </div>
+      )}
+
+      {hasDocuments &&
+        (documentQuery.error || !documentQuery.data) &&
+        !documentQuery.isLoading && (
+          <div className="flex h-full flex-col items-center justify-center gap-4">
+            <p className="text-destructive">
+              {documentQuery.error?.message ?? 'Document not found'}
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (fallbackDocumentId) handleOpenDocument(fallbackDocumentId)
+              }}
+            >
+              Open default document
+            </Button>
+          </div>
+        )}
+
+      {hasDocuments && documentQuery.data && !documentQuery.isLoading && currentDocumentId && (
+        <div className="mx-auto max-w-3xl px-4 sm:px-8 py-6 sm:py-10">
+          <Editor
+            key={`${currentDocumentId}-${editorSessionKey}`}
+            ref={editorRef}
+            documentId={currentDocumentId}
+            onConnectionChange={handleConnectionChange}
+            onEditorSelectionChange={setEditorSelectionForChat}
+            includeAfterContext={includeAfterContext}
+            onIncludeAfterContextChange={setIncludeAfterContext}
+            className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
+          />
+        </div>
+      )}
+    </main>
+  )
+
   return (
     <div className="flex h-screen flex-col">
-      <header className="border-b px-4 py-2">
-        <div className="flex items-center gap-3">
+      {/* Header */}
+      <header className="border-b px-3 sm:px-4 py-2 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3">
           <Button variant="ghost" size="icon-sm" onClick={() => navigate('/')}>
             <ArrowLeft className="size-4" />
           </Button>
 
-          <div className="min-w-0 max-w-sm">
+          {/* Mobile menu toggle */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="md:hidden"
+            onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+          >
+            {isMobileMenuOpen ? <X className="size-4" /> : <Menu className="size-4" />}
+          </Button>
+
+          {/* Desktop sidebar toggle */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hidden md:inline-flex"
+            onClick={toggleSidebar}
+          >
+            {isSidebarOpen ? (
+              <PanelLeftClose className="size-4" />
+            ) : (
+              <PanelLeft className="size-4" />
+            )}
+          </Button>
+
+          <div className="min-w-0 flex-1 sm:flex-initial sm:max-w-sm">
             <Input
               value={titleInput}
               onChange={(e) => setTitleInput(e.target.value)}
@@ -495,15 +688,15 @@ export function EditorPage() {
               onKeyDown={handleTitleKeyDown}
               autoComplete="off"
               disabled={!currentDocumentId || documentQuery.isLoading || !!documentQuery.error}
-              className="max-w-xs border-none bg-transparent text-base font-semibold shadow-none focus-visible:ring-0"
+              className="max-w-xs border-none bg-transparent text-sm sm:text-base font-semibold shadow-none focus-visible:ring-0"
             />
           </div>
 
-          <span className="text-muted-foreground hidden text-sm md:inline">
+          <span className="text-muted-foreground hidden text-sm lg:inline">
             {projectQuery.data.title}
           </span>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
             <Badge variant={connectionStatus === 'disconnected' ? 'destructive' : 'secondary'}>
               {connectionStatus === 'connected' && (
                 <>
@@ -536,68 +729,87 @@ export function EditorPage() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <DocumentBrowser
-          projectId={id}
-          documents={documentsQuery.data ?? []}
-          isLoading={documentsQuery.isLoading || openOrCreateDefaultDocumentMutation.isPending}
-          activeDocumentId={currentDocumentId ?? ''}
-          onOpenDocument={handleOpenDocument}
-        />
+      {/* Main content area */}
+      <div className="flex min-h-0 flex-1">
+        {isDesktop ? (
+          <div className="flex flex-1 min-h-0">
+            {/* Icon bar — always visible */}
+            <SidebarIconBar
+              activePanel={sidebarPanel}
+              onPanelChange={setSidebarPanel}
+              isSidebarOpen={isSidebarOpen}
+              onToggleSidebar={toggleSidebar}
+            />
 
-        <main className="flex-1 overflow-y-auto">
-          {!hasDocuments &&
-            !documentsQuery.isLoading &&
-            !openOrCreateDefaultDocumentMutation.isPending && (
-              <div className="text-muted-foreground flex h-full items-center justify-center px-6 text-sm">
-                Create a document from the left panel to start writing.
-              </div>
-            )}
-
-          {(documentsQuery.isLoading || openOrCreateDefaultDocumentMutation.isPending) && (
-            <div className="flex h-full items-center justify-center">
-              <Loader2 className="text-muted-foreground size-8 animate-spin" />
-            </div>
-          )}
-
-          {hasDocuments && documentQuery.isLoading && (
-            <div className="flex h-full items-center justify-center">
-              <Loader2 className="text-muted-foreground size-8 animate-spin" />
-            </div>
-          )}
-
-          {hasDocuments &&
-            (documentQuery.error || !documentQuery.data) &&
-            !documentQuery.isLoading && (
-              <div className="flex h-full flex-col items-center justify-center gap-4">
-                <p className="text-destructive">
-                  {documentQuery.error?.message ?? 'Document not found'}
-                </p>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (fallbackDocumentId) handleOpenDocument(fallbackDocumentId)
-                  }}
+            {/* Resizable panel group */}
+            <ResizablePanelGroup orientation="horizontal" className="flex-1">
+              {/* Sidebar panel — collapsible */}
+              <ResizablePanel
+                panelRef={sidebarPanelRef}
+                defaultSize={300}
+                minSize={15}
+                maxSize={450}
+                collapsible
+                collapsedSize={0}
+                onResize={(size) => {
+                  setIsSidebarOpen(size.asPercentage > 1)
+                }}
+                className="transition-[flex-basis] duration-300 ease-in-out"
+              >
+                <div
+                  className={cn(
+                    'h-full overflow-hidden border-r transition-opacity duration-300 ease-in-out',
+                    isSidebarOpen ? 'opacity-100 delay-150' : 'opacity-0'
+                  )}
                 >
-                  Open default document
-                </Button>
-              </div>
-            )}
+                  {sidebarContent}
+                </div>
+              </ResizablePanel>
+              <ResizableHandle withHandle />
 
-          {hasDocuments && documentQuery.data && !documentQuery.isLoading && currentDocumentId && (
-            <div className="mx-auto max-w-3xl px-8 py-10">
-              <Editor
-                key={`${currentDocumentId}-${editorSessionKey}`}
-                ref={editorRef}
-                documentId={currentDocumentId}
-                onConnectionChange={handleConnectionChange}
-                includeAfterContext={includeAfterContext}
-                onIncludeAfterContextChange={setIncludeAfterContext}
-                className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
+              {/* Editor panel */}
+              <ResizablePanel defaultSize={75}>{mainContent}</ResizablePanel>
+            </ResizablePanelGroup>
+          </div>
+        ) : (
+          <div className="flex flex-col flex-1 min-h-0 relative">
+            {/* Mobile sidebar overlay */}
+            <div
+              className={cn(
+                'absolute inset-0 z-40 transition-all duration-300 ease-out',
+                isMobileMenuOpen ? 'pointer-events-auto' : 'pointer-events-none'
+              )}
+            >
+              {/* Backdrop */}
+              <div
+                className={cn(
+                  'absolute inset-0 bg-black/40 transition-opacity duration-300',
+                  isMobileMenuOpen ? 'opacity-100' : 'opacity-0'
+                )}
+                onClick={() => setIsMobileMenuOpen(false)}
               />
+
+              {/* Sidebar drawer */}
+              <div
+                className={cn(
+                  'absolute inset-y-0 left-0 flex w-[85%] max-w-sm bg-background transition-transform duration-300 ease-out',
+                  isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+                )}
+              >
+                <SidebarIconBar
+                  activePanel={sidebarPanel}
+                  onPanelChange={setSidebarPanel}
+                  isSidebarOpen={true}
+                  onToggleSidebar={() => setIsMobileMenuOpen(false)}
+                />
+                <div className="flex-1 bg-background overflow-hidden">{sidebarContent}</div>
+              </div>
             </div>
-          )}
-        </main>
+
+            {/* Mobile main content */}
+            {mainContent}
+          </div>
+        )}
       </div>
     </div>
   )

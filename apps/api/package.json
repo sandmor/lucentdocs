@@ -21,6 +21,8 @@
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
     "nanoid": "^5.1.6",
+    "prosemirror-model": "^1.25.4",
+    "prosemirror-markdown": "^1.13.2",
     "sirv": "^3.0.2",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",

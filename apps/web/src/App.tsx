@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from 'next-themes'
 import { trpc, createTRPCClient } from '@/lib/trpc'
 import { Toaster } from '@/components/ui/sonner'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 interface AppProps {
   router: ReturnType<typeof createBrowserRouter>
@@ -36,7 +37,9 @@ export function App({ router }: AppProps) {
           enableSystem={false}
           disableTransitionOnChange
         >
-          <RouterProvider router={router} />
+          <TooltipProvider>
+            <RouterProvider router={router} />
+          </TooltipProvider>
           <Toaster />
         </ThemeProvider>
       </QueryClientProvider>

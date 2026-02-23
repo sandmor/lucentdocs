@@ -1,0 +1,285 @@
+import { nanoid } from 'nanoid'
+import type { UIMessage } from 'ai'
+import { chatsRepo, documentsRepo } from '../db/index.js'
+import { projectSyncBus } from '../trpc/project-sync.js'
+import { GenerationEngine, type ChatScope } from './generation-engine.js'
+import {
+  buildThreadFromState,
+  ChatRuntimeError,
+  createObserveState,
+  createUserMessage,
+  normalizeMessages,
+  toChatKey,
+  toPersistedThread,
+  type PersistedChatThread,
+} from './utils.js'
+
+export interface StartChatGenerationInput extends ChatScope {
+  message: string
+  selectionFrom?: number
+  selectionTo?: number
+}
+
+export interface ChatObserveState {
+  projectId: string
+  documentId: string
+  chatId: string
+  deleted: boolean
+  generating: boolean
+  generationId: string | null
+  thread: PersistedChatThread | null
+}
+
+type ChatStateListener = (state: ChatObserveState) => void
+
+interface ActiveGeneration {
+  id: string
+  controller: AbortController
+}
+
+class ChatRuntime {
+  private listeners = new Map<string, Set<ChatStateListener>>()
+  private liveStates = new Map<string, ChatObserveState>()
+  private activeGenerations = new Map<string, ActiveGeneration>()
+  private generationEngine = new GenerationEngine()
+
+  private shouldRetainState(key: string): boolean {
+    return this.activeGenerations.has(key) || (this.listeners.get(key)?.size ?? 0) > 0
+  }
+
+  private emit(state: ChatObserveState): void {
+    const key = toChatKey(state)
+    if (this.shouldRetainState(key)) {
+      this.liveStates.set(key, state)
+    } else {
+      this.liveStates.delete(key)
+    }
+
+    const listeners = this.listeners.get(key)
+    if (!listeners) return
+
+    for (const listener of listeners) {
+      try {
+        listener(state)
+      } catch (error) {
+        console.error('Chat observe listener failed', error)
+      }
+    }
+  }
+
+  private getGenerationState(scope: ChatScope): {
+    generating: boolean
+    generationId: string | null
+  } {
+    const active = this.activeGenerations.get(toChatKey(scope))
+    return {
+      generating: Boolean(active),
+      generationId: active?.id ?? null,
+    }
+  }
+
+  private async loadPersistedState(scope: ChatScope): Promise<ChatObserveState> {
+    const thread = await chatsRepo.getDocumentChatById(
+      scope.projectId,
+      scope.documentId,
+      scope.chatId
+    )
+    const persistedThread = toPersistedThread(thread)
+    const generationState = this.getGenerationState(scope)
+
+    return createObserveState(scope, {
+      thread: persistedThread,
+      generating: generationState.generating,
+      generationId: generationState.generationId,
+    })
+  }
+
+  async subscribe(scope: ChatScope, listener: ChatStateListener): Promise<() => void> {
+    const key = toChatKey(scope)
+    let listeners = this.listeners.get(key)
+    if (!listeners) {
+      listeners = new Set<ChatStateListener>()
+      this.listeners.set(key, listeners)
+    }
+
+    listeners.add(listener)
+
+    try {
+      const cachedState = this.liveStates.get(key)
+      if (cachedState) {
+        listener(cachedState)
+      } else {
+        const state = await this.loadPersistedState(scope)
+        this.emit(state)
+      }
+    } catch (error) {
+      listeners.delete(listener)
+      if (listeners.size === 0) {
+        this.listeners.delete(key)
+      }
+      throw error
+    }
+
+    return () => {
+      const current = this.listeners.get(key)
+      if (!current) return
+
+      current.delete(listener)
+      if (current.size === 0) {
+        this.listeners.delete(key)
+        if (!this.activeGenerations.has(key)) {
+          this.liveStates.delete(key)
+        }
+      }
+    }
+  }
+
+  async publishPersistedState(scope: ChatScope): Promise<void> {
+    const state = await this.loadPersistedState(scope)
+    this.emit(state)
+  }
+
+  isGenerating(scope: ChatScope): boolean {
+    return this.activeGenerations.has(toChatKey(scope))
+  }
+
+  cancelGeneration(scope: ChatScope): boolean {
+    const active = this.activeGenerations.get(toChatKey(scope))
+    if (!active) return false
+    active.controller.abort()
+    return true
+  }
+
+  markDeleted(scope: ChatScope): void {
+    this.cancelGeneration(scope)
+    this.activeGenerations.delete(toChatKey(scope))
+
+    this.emit(
+      createObserveState(scope, {
+        thread: null,
+        generating: false,
+        generationId: null,
+      })
+    )
+  }
+
+  async startGeneration(input: StartChatGenerationInput): Promise<{ generationId: string }> {
+    const key = toChatKey(input)
+    if (this.activeGenerations.has(key)) {
+      throw new ChatRuntimeError('CONFLICT', 'Chat generation is already in progress.')
+    }
+
+    const promptText = input.message.trim()
+    if (!promptText) {
+      throw new ChatRuntimeError('BAD_REQUEST', 'Message is required to start generation.')
+    }
+
+    const generationId = nanoid()
+    const controller = new AbortController()
+    this.activeGenerations.set(key, { id: generationId, controller })
+
+    try {
+      const document = await documentsRepo.getDocumentForProject(input.projectId, input.documentId)
+      if (!document) {
+        throw new ChatRuntimeError(
+          'NOT_FOUND',
+          `Document ${input.documentId} not found in project ${input.projectId}`
+        )
+      }
+
+      const existingThread = await chatsRepo.getDocumentChatById(
+        input.projectId,
+        input.documentId,
+        input.chatId
+      )
+      if (!existingThread) {
+        throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${input.chatId} not found`)
+      }
+
+      const persistedMessages = await normalizeMessages(existingThread.messages)
+      const userMessage = createUserMessage(promptText)
+      const baseMessages: UIMessage[] = [...persistedMessages, userMessage]
+
+      const savedWithUser = await chatsRepo.saveDocumentChat(
+        input.projectId,
+        input.documentId,
+        input.chatId,
+        baseMessages
+      )
+      if (!savedWithUser) {
+        throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${input.chatId} not found`)
+      }
+
+      projectSyncBus.publish({
+        type: 'chats.changed',
+        projectId: input.projectId,
+        documentId: input.documentId,
+        reason: 'chats.update',
+        changedChatIds: [savedWithUser.id],
+        deletedChatIds: [],
+      })
+
+      const liveThread = buildThreadFromState(
+        toPersistedThread(savedWithUser)!,
+        baseMessages,
+        Date.now()
+      )
+
+      this.emit(
+        createObserveState(input, {
+          thread: liveThread,
+          generating: true,
+          generationId,
+        })
+      )
+
+      void this.generationEngine.runGeneration(
+        {
+          scope: input,
+          baseThread: liveThread,
+          baseMessages,
+          selectionFrom: input.selectionFrom,
+          selectionTo: input.selectionTo,
+          generationId,
+          abortController: controller,
+        },
+        {
+          onProgress: (state) => {
+            this.emit(
+              createObserveState(input, {
+                thread: state.thread,
+                generating: true,
+                generationId: state.generationId,
+              })
+            )
+          },
+          onComplete: (result) => {
+            const active = this.activeGenerations.get(key)
+            if (active?.id === generationId) {
+              this.activeGenerations.delete(key)
+            }
+
+            this.emit(
+              createObserveState(input, {
+                thread: result.thread,
+                generating: false,
+                generationId: null,
+              })
+            )
+          },
+          createRuntimeError: (code, message) => new ChatRuntimeError(code, message),
+        }
+      )
+
+      return { generationId }
+    } catch (error) {
+      const active = this.activeGenerations.get(key)
+      if (active?.id === generationId) {
+        this.activeGenerations.delete(key)
+      }
+      throw error
+    }
+  }
+}
+
+export const chatRuntime = new ChatRuntime()

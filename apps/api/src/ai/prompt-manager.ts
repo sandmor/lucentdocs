@@ -14,6 +14,7 @@ import {
 } from '@plotline/shared'
 import { configManager } from '../config/manager.js'
 import {
+  SYSTEM_CHAT_PROMPT_ID,
   SYSTEM_CONTINUE_PROMPT_ID,
   SYSTEM_SELECTION_PROMPT_ID,
   createDefaultPromptBindings,
@@ -24,10 +25,10 @@ import {
 } from './prompts.js'
 
 const PROMPTS_FILE_NAME = 'prompts.json'
-const STORE_VERSION = 3
+const STORE_VERSION = 1
 
 interface PromptStore {
-  version: 3
+  version: 1
   prompts: PromptDefinition[]
   bindings: PromptBindings
 }
@@ -100,7 +101,10 @@ function parseLegacyPromptEntry(entry: unknown, nowIso: string): PromptDefinitio
   const record = entry as Record<string, unknown>
 
   const id = typeof record.id === 'string' ? record.id : null
-  const mode = record.mode === 'continue' || record.mode === 'prompt' ? record.mode : null
+  const mode =
+    record.mode === 'continue' || record.mode === 'prompt' || record.mode === 'chat'
+      ? record.mode
+      : null
   const name = typeof record.name === 'string' ? record.name : null
   const systemTemplate = typeof record.systemTemplate === 'string' ? record.systemTemplate : null
   const userTemplate = typeof record.userTemplate === 'string' ? record.userTemplate : null
@@ -142,7 +146,8 @@ function parseLegacyPromptEntry(entry: unknown, nowIso: string): PromptDefinitio
     isSystem:
       record.isSystem === true ||
       id === SYSTEM_CONTINUE_PROMPT_ID ||
-      id === SYSTEM_SELECTION_PROMPT_ID,
+      id === SYSTEM_SELECTION_PROMPT_ID ||
+      id === SYSTEM_CHAT_PROMPT_ID,
     createdAt: typeof record.createdAt === 'string' ? record.createdAt : nowIso,
     updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : nowIso,
   })
@@ -181,13 +186,66 @@ function migrateStore(raw: Record<string, unknown>): PromptStore | null {
         : (parsedPrompts.find((prompt) => prompt.id === defaults.selectionEditPromptId)?.id ??
           parsedPrompts.find((prompt) => prompt.mode === 'prompt')?.id ??
           null),
+    chatPromptId:
+      typeof bindingsRaw.chatPromptId === 'string'
+        ? bindingsRaw.chatPromptId
+        : (parsedPrompts.find((prompt) => prompt.id === defaults.chatPromptId)?.id ??
+          parsedPrompts.find((prompt) => prompt.mode === 'chat')?.id ??
+          null),
   })
   if (!parsedBindings.success) return null
 
-  return normalizeStore({
+  return ensureDefaultPromptsAndBindings({
     version: STORE_VERSION,
     prompts: parsedPrompts,
     bindings: parsedBindings.data,
+  })
+}
+
+function ensureDefaultPromptsAndBindings(store: PromptStore): PromptStore {
+  const defaults = createDefaultPromptBindings()
+  const prompts = [...store.prompts]
+
+  for (const systemPrompt of createDefaultPromptDefinitions(new Date().toISOString())) {
+    if (!prompts.some((prompt) => prompt.id === systemPrompt.id)) {
+      prompts.push(systemPrompt)
+    }
+  }
+
+  const resolveBinding = (
+    mode: PromptMode,
+    currentId: string | null,
+    defaultId: string | null
+  ): string | null => {
+    if (currentId) {
+      const current = prompts.find((prompt) => prompt.id === currentId)
+      if (current && current.mode === mode) return currentId
+    }
+
+    if (defaultId) {
+      const defaultPrompt = prompts.find((prompt) => prompt.id === defaultId)
+      if (defaultPrompt && defaultPrompt.mode === mode) return defaultPrompt.id
+    }
+
+    return prompts.find((prompt) => prompt.mode === mode)?.id ?? null
+  }
+
+  return normalizeStore({
+    version: STORE_VERSION,
+    prompts,
+    bindings: {
+      continuePromptId: resolveBinding(
+        'continue',
+        store.bindings.continuePromptId,
+        defaults.continuePromptId
+      ),
+      selectionEditPromptId: resolveBinding(
+        'prompt',
+        store.bindings.selectionEditPromptId,
+        defaults.selectionEditPromptId
+      ),
+      chatPromptId: resolveBinding('chat', store.bindings.chatPromptId, defaults.chatPromptId),
+    },
   })
 }
 
@@ -212,7 +270,7 @@ function parseStoreFile(contents: string): PromptStore | null {
       const bindings = promptBindingsSchema.safeParse(bindingsRaw)
       if (!bindings.success) return null
 
-      return normalizeStore({
+      return ensureDefaultPromptsAndBindings({
         version: STORE_VERSION,
         prompts,
         bindings: bindings.data,
@@ -266,6 +324,9 @@ function ensureProtocolCompatible(editable: PromptEditable): void {
       'Selection-edit prompts must use the python-edit-v1 protocol.'
     )
   }
+  if (editable.mode === 'chat' && editable.protocol.type !== 'plain-text-v1') {
+    throw new PromptManagerError('BAD_REQUEST', 'Chat prompts must use the plain-text-v1 protocol.')
+  }
 }
 
 function validateEditableTemplates(editable: PromptEditable): void {
@@ -281,6 +342,7 @@ function toSummarySet(prompts: PromptDefinition[], bindings: PromptBindings): Pr
   const boundIds = new Set<string>()
   if (bindings.continuePromptId) boundIds.add(bindings.continuePromptId)
   if (bindings.selectionEditPromptId) boundIds.add(bindings.selectionEditPromptId)
+  if (bindings.chatPromptId) boundIds.add(bindings.chatPromptId)
 
   return prompts
     .map((prompt) => ({
@@ -328,6 +390,7 @@ class PromptManager {
     bindings: {
       continuePromptId: null,
       selectionEditPromptId: null,
+      chatPromptId: null,
     },
   }
 
@@ -339,7 +402,7 @@ class PromptManager {
     const parsed = existing ? parseStoreFile(existing) : null
 
     if (parsed) {
-      this.store = normalizeStore(parsed)
+      this.store = ensureDefaultPromptsAndBindings(parsed)
       this.loaded = true
       this.persist()
       return
@@ -428,8 +491,10 @@ class PromptManager {
       const slot = slotForMode(current.mode)
       if (slot === 'continue') {
         this.store.bindings.continuePromptId = cloned.id
-      } else {
+      } else if (slot === 'selection-edit') {
         this.store.bindings.selectionEditPromptId = cloned.id
+      } else {
+        this.store.bindings.chatPromptId = cloned.id
       }
       this.persist()
       return { prompt: clonePrompt(cloned), changed: true, clonedFromSystem: true }
@@ -465,12 +530,16 @@ class PromptManager {
       this.store.prompts.find((prompt) => prompt.mode === 'continue')?.id ?? null
     const selectionFallback =
       this.store.prompts.find((prompt) => prompt.mode === 'prompt')?.id ?? null
+    const chatFallback = this.store.prompts.find((prompt) => prompt.mode === 'chat')?.id ?? null
 
     if (this.store.bindings.continuePromptId === id) {
       this.store.bindings.continuePromptId = continueFallback
     }
     if (this.store.bindings.selectionEditPromptId === id) {
       this.store.bindings.selectionEditPromptId = selectionFallback
+    }
+    if (this.store.bindings.chatPromptId === id) {
+      this.store.bindings.chatPromptId = chatFallback
     }
 
     this.persist()
@@ -500,13 +569,16 @@ class PromptManager {
     const current =
       slot === 'continue'
         ? this.store.bindings.continuePromptId
-        : this.store.bindings.selectionEditPromptId
+        : slot === 'selection-edit'
+          ? this.store.bindings.selectionEditPromptId
+          : this.store.bindings.chatPromptId
     if (current === promptId) {
       return { bindings: { ...this.store.bindings }, changed: false }
     }
 
     if (slot === 'continue') this.store.bindings.continuePromptId = promptId
-    else this.store.bindings.selectionEditPromptId = promptId
+    else if (slot === 'selection-edit') this.store.bindings.selectionEditPromptId = promptId
+    else this.store.bindings.chatPromptId = promptId
     this.persist()
 
     return { bindings: { ...this.store.bindings }, changed: true }
@@ -518,7 +590,9 @@ class PromptManager {
     const boundId =
       slot === 'continue'
         ? this.store.bindings.continuePromptId
-        : this.store.bindings.selectionEditPromptId
+        : slot === 'selection-edit'
+          ? this.store.bindings.selectionEditPromptId
+          : this.store.bindings.chatPromptId
 
     if (boundId) {
       const boundPrompt = this.store.prompts.find((prompt) => prompt.id === boundId)

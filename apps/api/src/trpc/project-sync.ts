@@ -29,6 +29,14 @@ export type ProjectSyncPayload =
         | 'documents.delete-directory'
         | 'documents.set-default'
     }
+  | {
+      projectId: string
+      type: 'chats.changed'
+      documentId: string
+      changedChatIds: string[]
+      deletedChatIds: string[]
+      reason: 'chats.create' | 'chats.update' | 'chats.delete'
+    }
 
 export type ProjectSyncEvent =
   | {
@@ -66,6 +74,16 @@ export type ProjectSyncEvent =
         | 'documents.move-directory'
         | 'documents.delete-directory'
         | 'documents.set-default'
+    }
+  | {
+      id: string
+      projectId: string
+      createdAt: number
+      type: 'chats.changed'
+      documentId: string
+      changedChatIds: string[]
+      deletedChatIds: string[]
+      reason: 'chats.create' | 'chats.update' | 'chats.delete'
     }
 
 type ProjectSyncListener = (event: ProjectSyncEvent) => void

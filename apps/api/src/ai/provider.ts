@@ -57,6 +57,11 @@ async function getProvider(): Promise<ResolvedProvider> {
   return providerPromise
 }
 
+export async function getLanguageModel(): Promise<LanguageModel> {
+  const { model } = await getProvider()
+  return model
+}
+
 /** Invalidate the client so the next call picks up updated config values. */
 export function resetClient(): void {
   providerPromise = null
