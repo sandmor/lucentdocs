@@ -6,7 +6,7 @@ import { chatsRepo, documentsRepo } from '../../db/index.js'
 import { projectSyncBus } from '../project-sync.js'
 import { publicProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'
-import { ChatObserveState, chatRuntime } from '../../chat/runtime.js'
+import { chatRuntime, type ChatObserveState } from '../../chat/runtime.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const generateMessageSchema = z.string().trim().min(1).max(20_000)

@@ -8,7 +8,7 @@ const __dirname = dirname(__filename)
 const projectRoot = resolve(__dirname, '..', '..', '..')
 
 export default async function globalSetup() {
-  const configuredDataDir = process.env.PLOTLINE_DATA_DIR ?? 'data-test'
+  const configuredDataDir = process.env.PLOTLINE_TEST_DATA_DIR ?? 'data-test'
   const testDbDir = resolve(projectRoot, configuredDataDir)
 
   await rm(testDbDir, { recursive: true, force: true })

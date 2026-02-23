@@ -23,6 +23,10 @@ const DEFAULT_AI_MODEL = 'gpt-5'
 const DEFAULT_ANTHROPIC_MODEL = 'claude-3-5-haiku-latest'
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1'
+const DEFAULT_TEST_DATA_DIR = 'data-test'
+const TEST_MODE_ENV_VAR = 'PLOTLINE_TEST_MODE'
+const TEST_DATA_DIR_ENV_VAR = 'PLOTLINE_TEST_DATA_DIR'
+const ALLOW_UNSAFE_TEST_DB_ENV_VAR = 'PLOTLINE_ALLOW_UNSAFE_TEST_DB'
 
 export type ConfigValueSource = 'env' | 'file' | 'default'
 
@@ -98,6 +102,37 @@ function readEnvInt(env: NodeJS.ProcessEnv, key: string): number | undefined {
 function normalizeDataDir(value: string | undefined): string {
   const trimmed = value?.trim()
   return trimmed ? trimmed : DEFAULT_DATA_DIR
+}
+
+function isTruthyEnvValue(value: string | undefined): boolean {
+  if (!value) return false
+  const normalized = value.trim().toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
+}
+
+function isTestRuntime(env: NodeJS.ProcessEnv): boolean {
+  return env.NODE_ENV?.trim() === 'test' || isTruthyEnvValue(env[TEST_MODE_ENV_VAR])
+}
+
+function isMainDataDir(dataDir: string): boolean {
+  return path.resolve(resolveDataDir(dataDir)) === path.resolve(resolveDataDir(DEFAULT_DATA_DIR))
+}
+
+function resolveConfiguredDataDir(env: NodeJS.ProcessEnv): string {
+  const configuredDataDir = normalizeDataDir(readEnvString(env, 'PLOTLINE_DATA_DIR'))
+  const configuredTestDataDir = readEnvString(env, TEST_DATA_DIR_ENV_VAR)
+  const desiredDataDir = normalizeDataDir(configuredTestDataDir ?? configuredDataDir)
+
+  if (!isTestRuntime(env) || isTruthyEnvValue(env[ALLOW_UNSAFE_TEST_DB_ENV_VAR])) {
+    return desiredDataDir
+  }
+
+  if (!isMainDataDir(desiredDataDir)) return desiredDataDir
+
+  console.warn(
+    `[plotline:test-safety] Blocking unsafe test database path "${desiredDataDir}". Using "${DEFAULT_TEST_DATA_DIR}" instead.`
+  )
+  return DEFAULT_TEST_DATA_DIR
 }
 
 function normalizeConfigValue(
@@ -398,7 +433,7 @@ export class ConfigManager {
   }
 
   private loadState(): ConfigStateSnapshot {
-    const configuredDataDir = normalizeDataDir(readEnvString(this.env, 'PLOTLINE_DATA_DIR'))
+    const configuredDataDir = resolveConfiguredDataDir(this.env)
     const configFilePath = resolveDataFile(configuredDataDir, CONFIG_FILE_NAME)
 
     mkdirSync(resolveDataDir(configuredDataDir), { recursive: true })

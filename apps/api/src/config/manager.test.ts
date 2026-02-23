@@ -158,4 +158,56 @@ describe('ConfigManager', () => {
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
+
+  test('uses test-scoped data directory instead of inherited app data directory', () => {
+    const safeDataDir = uniqueDataDir('config-manager-test-safety')
+    const absoluteSafeDataDir = resolveDataDir(safeDataDir)
+
+    rmSync(absoluteSafeDataDir, { recursive: true, force: true })
+
+    const manager = new ConfigManager({
+      NODE_ENV: 'test',
+      PLOTLINE_DATA_DIR: './data',
+      PLOTLINE_TEST_DATA_DIR: safeDataDir,
+    })
+
+    const config = manager.getConfig()
+
+    expect(config.paths.dataDir).toBe(absoluteSafeDataDir)
+    expect(config.paths.dataDir).not.toBe(resolveDataDir('./data'))
+
+    rmSync(absoluteSafeDataDir, { recursive: true, force: true })
+  })
+
+  test('falls back to data-test when test runtime points to main data directory', () => {
+    const manager = new ConfigManager({
+      NODE_ENV: 'test',
+      PLOTLINE_DATA_DIR: './data',
+    })
+
+    const config = manager.getConfig()
+    expect(config.paths.dataDir).toBe(resolveDataDir('data-test'))
+    expect(config.paths.dataDir).not.toBe(resolveDataDir('./data'))
+
+    rmSync(resolveDataDir('data-test'), { recursive: true, force: true })
+  })
+
+  test('treats explicit test mode as test runtime even when NODE_ENV is not test', () => {
+    const safeDataDir = uniqueDataDir('config-manager-explicit-test-mode')
+    const absoluteSafeDataDir = resolveDataDir(safeDataDir)
+    rmSync(absoluteSafeDataDir, { recursive: true, force: true })
+
+    const manager = new ConfigManager({
+      NODE_ENV: 'development',
+      PLOTLINE_TEST_MODE: '1',
+      PLOTLINE_DATA_DIR: './data',
+      PLOTLINE_TEST_DATA_DIR: safeDataDir,
+    })
+
+    const config = manager.getConfig()
+    expect(config.paths.dataDir).toBe(absoluteSafeDataDir)
+    expect(config.paths.dataDir).not.toBe(resolveDataDir('./data'))
+
+    rmSync(absoluteSafeDataDir, { recursive: true, force: true })
+  })
 })

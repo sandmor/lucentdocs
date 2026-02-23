@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type UIMessage } from 'ai'
 import {
-  Sparkles,
   User,
   StopCircle,
   Trash2,
@@ -334,23 +333,6 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       void handleSend()
     }
   }
-
-  const emptyMessage = useMemo(() => {
-    if (!queryEnabled) return 'Open a document to start chatting.'
-    if (threadsQuery.isLoading || (activeThreadId && activeThreadQuery.isLoading)) {
-      return 'Loading chat thread...'
-    }
-    if (threads.length === 0) return 'No chat threads yet.'
-    if (isGenerating) return 'Generating response...'
-    return 'Start a conversation'
-  }, [
-    activeThreadId,
-    activeThreadQuery.isLoading,
-    isGenerating,
-    queryEnabled,
-    threads.length,
-    threadsQuery.isLoading,
-  ])
 
   return (
     <div className={cn('relative flex h-full flex-col', className)}>

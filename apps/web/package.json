@@ -8,8 +8,8 @@
     "build": "vite build --outDir dist/client && vite build --ssr src/entry-server.tsx --outDir dist/server",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test": "bun test src/",
-    "test:e2e": "playwright test"
+    "test": "PLOTLINE_TEST_MODE=1 PLOTLINE_DATA_DIR=${PLOTLINE_TEST_DATA_DIR:-data-test} bun test src/",
+    "test:e2e": "PLOTLINE_TEST_MODE=1 PLOTLINE_TEST_DATA_DIR=${PLOTLINE_TEST_DATA_DIR:-data-test} NODE_ENV=test playwright test"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",
