@@ -20,18 +20,42 @@ export interface ChoicesResponse {
 
 export type AIResponse = ReplaceResponse | InsertResponse | ChoicesResponse
 
-export const selectionEditOutputSchema = z.object({
-  mode: z.enum(['replace', 'insert', 'choices']),
-  insertIndex: z.number().int().nullable(),
-  content: z.string().nullable(),
-  choices: z.array(z.string()).nullable(),
+const replaceOutputSchema = z.object({
+  mode: z.literal('replace'),
+  insertIndex: z.number().int().nullable().optional(),
+  index: z.number().int().nullable().optional(),
+  content: z.string(),
+  choices: z.array(z.string()).nullable().optional(),
 })
+
+const insertOutputSchema = z.object({
+  mode: z.literal('insert'),
+  insertIndex: z.number().int().nullable().optional(),
+  index: z.number().int().nullable().optional(),
+  content: z.string(),
+  choices: z.array(z.string()).nullable().optional(),
+})
+
+const choicesOutputSchema = z.object({
+  mode: z.literal('choices'),
+  insertIndex: z.number().int().nullable().optional(),
+  index: z.number().int().nullable().optional(),
+  content: z.string().nullable().optional(),
+  choices: z.array(z.string()),
+})
+
+export const selectionEditOutputSchema = z.discriminatedUnion('mode', [
+  replaceOutputSchema,
+  insertOutputSchema,
+  choicesOutputSchema,
+])
 
 export type SelectionEditOutput = z.infer<typeof selectionEditOutputSchema>
 
 export interface SelectionEditPartialOutput {
   mode?: AIMode | null
   insertIndex?: number | null
+  index?: number | null
   content?: string | null
   choices?: Array<string | null | undefined> | null
 }
@@ -49,7 +73,15 @@ function parseMode(value: unknown): AIMode | null {
   return null
 }
 
+function parseInsertIndex(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null
+  return value
+}
+
 function toResponse(output: SelectionEditOutput): AIResponse {
+  const normalizedInsertIndex =
+    parseInsertIndex(output.insertIndex) ?? parseInsertIndex(output.index) ?? 0
+
   if (output.mode === 'replace') {
     return {
       mode: 'replace',
@@ -60,7 +92,7 @@ function toResponse(output: SelectionEditOutput): AIResponse {
   if (output.mode === 'insert') {
     return {
       mode: 'insert',
-      index: output.insertIndex ?? 0,
+      index: normalizedInsertIndex,
       content: output.content ?? '',
     }
   }
@@ -96,23 +128,17 @@ export class ResponseParser {
       this.mode = nextMode
     }
 
-    const parsedInsertIndex = partial.insertIndex
-    if (
-      this.mode === 'insert' &&
-      typeof parsedInsertIndex === 'number' &&
-      Number.isInteger(parsedInsertIndex)
-    ) {
+    const parsedInsertIndex =
+      parseInsertIndex(partial.insertIndex) ?? parseInsertIndex(partial.index)
+    if (typeof parsedInsertIndex === 'number') {
       this.insertIndex = parsedInsertIndex
     }
 
-    if (
-      (this.mode === 'replace' || this.mode === 'insert') &&
-      typeof partial.content === 'string'
-    ) {
+    if (typeof partial.content === 'string') {
       this.content = partial.content
     }
 
-    if (this.mode === 'choices' && Array.isArray(partial.choices)) {
+    if (Array.isArray(partial.choices)) {
       this.choices = partial.choices.filter((entry): entry is string => typeof entry === 'string')
     }
 

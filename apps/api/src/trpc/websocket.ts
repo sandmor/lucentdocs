@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'http'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import { appRouter } from './router.js'
+import type { AppContext } from './index.js'
 
 type TrpcWsHandler = ReturnType<typeof applyWSSHandler<typeof appRouter>>
 
@@ -10,12 +11,16 @@ export interface TrpcWebSocketRuntime {
   handler: TrpcWsHandler
 }
 
-export function setupTrpcWebSocket(server: HttpServer): TrpcWebSocketRuntime {
+export function setupTrpcWebSocket(
+  server: HttpServer,
+  createContext: () => AppContext
+): TrpcWebSocketRuntime {
   const wss = new WebSocketServer({ noServer: true })
 
   const handler = applyWSSHandler({
     wss,
     router: appRouter,
+    createContext,
   })
 
   server.on('upgrade', (req, socket, head) => {

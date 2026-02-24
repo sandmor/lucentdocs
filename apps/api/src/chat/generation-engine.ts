@@ -10,7 +10,7 @@ import { z } from 'zod/v4'
 import { isPathInsideDirectory, normalizeDocumentPath, parentDocumentPath } from '@plotline/shared'
 import { getLanguageModel } from '../ai/index.js'
 import { assertPromptProtocolMode, resolveChatPrompt } from '../ai/prompt-engine.js'
-import { documentsRepo } from '../db/index.js'
+import type { ServiceSet } from '../core/services/types.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
 import {
   buildCurrentFileContext,
@@ -57,6 +57,12 @@ export interface GenerationCallbacks {
 }
 
 export class GenerationEngine {
+  #services: ServiceSet
+
+  constructor(services: ServiceSet) {
+    this.#services = services
+  }
+
   async runGeneration(options: GenerationOptions, callbacks: GenerationCallbacks): Promise<void> {
     const {
       scope,
@@ -72,7 +78,7 @@ export class GenerationEngine {
     let finalMessages = baseMessages
 
     try {
-      const currentDocument = await documentsRepo.getDocumentForProject(
+      const currentDocument = await this.#services.documents.getForProject(
         scope.projectId,
         scope.documentId
       )
@@ -154,8 +160,7 @@ export class GenerationEngine {
       }
     } finally {
       try {
-        const { chatsRepo } = await import('../db/index.js')
-        const saved = await chatsRepo.saveDocumentChat(
+        const saved = await this.#services.chats.save(
           scope.projectId,
           scope.documentId,
           scope.chatId,
@@ -217,7 +222,7 @@ export class GenerationEngine {
         execute: async ({ path, recursive = false }) => {
           const index = await buildProjectFileIndex(
             scope.projectId,
-            documentsRepo.listDocumentsForProject
+            this.#services.documents.listForProject.bind(this.#services.documents)
           )
           const normalizedPath = normalizeProjectPath(path)
 
@@ -275,7 +280,7 @@ export class GenerationEngine {
         execute: async ({ path, start_line, end_line }) => {
           const index = await buildProjectFileIndex(
             scope.projectId,
-            documentsRepo.listDocumentsForProject
+            this.#services.documents.listForProject.bind(this.#services.documents)
           )
           const normalizedPath = normalizeProjectPath(path)
           const documentId = index.files.get(normalizedPath)
@@ -287,7 +292,7 @@ export class GenerationEngine {
             throw new Error(`File "${path}" was not found in this project.`)
           }
 
-          const document = await documentsRepo.getDocumentForProject(scope.projectId, documentId)
+          const document = await this.#services.documents.getForProject(scope.projectId, documentId)
           if (!document) {
             throw new Error(`File "${path}" is no longer available in this project.`)
           }

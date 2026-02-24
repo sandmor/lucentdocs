@@ -88,6 +88,73 @@ describe('ResponseParser', () => {
     })
   })
 
+  test('parses complete insert response with legacy index field', () => {
+    const result = parseResponse({
+      mode: 'insert',
+      index: 7,
+      insertIndex: null,
+      content: 'mid-sentence',
+      choices: null,
+    })
+
+    expect(result).toEqual({
+      mode: 'insert',
+      index: 7,
+      content: 'mid-sentence',
+    })
+  })
+
+  test('parses insert response when unrelated fields are omitted', () => {
+    const result = parseResponse({
+      mode: 'insert',
+      insertIndex: 2,
+      content: 'hello',
+    })
+
+    expect(result).toEqual({
+      mode: 'insert',
+      index: 2,
+      content: 'hello',
+    })
+  })
+
+  test('parses choices response when unrelated fields are omitted', () => {
+    const result = parseResponse({
+      mode: 'choices',
+      choices: ['x', 'y'],
+    })
+
+    expect(result).toEqual({
+      mode: 'choices',
+      choices: ['x', 'y'],
+    })
+  })
+
+  test('streams partial insert response with legacy index field', () => {
+    const parser = new ResponseParser()
+
+    parser.feed({ mode: 'insert', index: 3, content: 'abc' })
+
+    expect(parser.finalize()).toEqual({
+      mode: 'insert',
+      index: 3,
+      content: 'abc',
+    })
+  })
+
+  test('keeps insert index when partial index arrives before mode', () => {
+    const parser = new ResponseParser()
+
+    parser.feed({ insertIndex: 5, content: 'later-mode' })
+    parser.feed({ mode: 'insert' })
+
+    expect(parser.finalize()).toEqual({
+      mode: 'insert',
+      index: 5,
+      content: 'later-mode',
+    })
+  })
+
   test('streams partial choices and finalizes on complete output', () => {
     const parser = new ResponseParser()
 

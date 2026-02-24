@@ -10,7 +10,6 @@ import {
   configManager,
 } from '../../config/manager.js'
 import { resetClient } from '../../ai/provider.js'
-import { reloadRuntimeConfig } from '../../yjs/server.js'
 import { router, publicProcedure } from '../index.js'
 
 type EditableConfigKey = (typeof EDITABLE_CONFIG_KEYS)[number]
@@ -68,7 +67,7 @@ export const configRouter = router({
     return buildConfigPayload(state)
   }),
 
-  update: publicProcedure.input(editableConfigSchema).mutation(({ input }) => {
+  update: publicProcedure.input(editableConfigSchema).mutation(({ ctx, input }) => {
     const sanitizedInput: Pick<PersistedAppConfig, EditableConfigKey> = {
       aiApiKey: input.aiApiKey.trim(),
       aiBaseUrl: input.aiBaseUrl.trim(),
@@ -97,7 +96,11 @@ export const configRouter = router({
     }
 
     if (YJS_RUNTIME_KEYS.some((key) => changedEffectiveSet.has(key))) {
-      reloadRuntimeConfig()
+      const config = configManager.getConfig()
+      ctx.yjsRuntime.reloadRuntimeConfig({
+        persistenceFlushIntervalMs: config.yjs.persistenceFlushIntervalMs,
+        versionSnapshotIntervalMs: config.yjs.versionSnapshotIntervalMs,
+      })
     }
 
     return {

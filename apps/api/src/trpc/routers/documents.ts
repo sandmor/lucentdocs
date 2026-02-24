@@ -1,8 +1,7 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../index.js'
-import { documentsRepo, projectsRepo } from '../../db/index.js'
-import type { ImportDocumentErrorKind } from '../../db/repositories/documents.js'
+import type { ImportDocumentErrorKind } from '../../core/services/documents.service.js'
 import {
   isValidId,
   normalizeDocumentPath,
@@ -15,6 +14,7 @@ import {
 } from '@plotline/shared'
 import { configManager } from '../../config/manager.js'
 import { projectSyncBus } from '../project-sync.js'
+import { YJS_RESTORE_CLOSE_CODE, YJS_RESTORE_CLOSE_REASON } from '../../yjs/runtime.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const pathSchema = z.string().trim().min(1).max(400)
@@ -30,8 +30,11 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 )
 const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSchema)
 
-async function assertProjectExists(projectId: string): Promise<void> {
-  const exists = await projectsRepo.hasProject(projectId)
+async function assertProjectExists(
+  projectId: string,
+  services: { projects: { has: (id: string) => Promise<boolean> } }
+): Promise<void> {
+  const exists = await services.projects.has(projectId)
   if (!exists) {
     throw new TRPCError({
       code: 'NOT_FOUND',
@@ -40,8 +43,13 @@ async function assertProjectExists(projectId: string): Promise<void> {
   }
 }
 
-async function getProjectDefaultDocumentId(projectId: string): Promise<string | null> {
-  const project = await projectsRepo.getProject(projectId)
+async function getProjectDefaultDocumentId(
+  projectId: string,
+  services: {
+    projects: { getById: (id: string) => Promise<{ metadata: JsonObject | null } | null> }
+  }
+): Promise<string | null> {
+  const project = await services.projects.getById(projectId)
   if (!project?.metadata) return null
   const value = project.metadata['default_document']
   return typeof value === 'string' && isValidId(value) ? value : null
@@ -73,10 +81,10 @@ export const documentsRouter = router({
         projectId: idSchema,
       })
     )
-    .query(async ({ input }) => {
-      const docs = await documentsRepo.listDocumentsForProject(input.projectId)
+    .query(async ({ ctx, input }) => {
+      const docs = await ctx.services.documents.listForProject(input.projectId)
       if (docs.length === 0) {
-        await assertProjectExists(input.projectId)
+        await assertProjectExists(input.projectId, ctx.services)
       }
       return docs
     }),
@@ -87,8 +95,8 @@ export const documentsRouter = router({
         projectId: idSchema,
       })
     )
-    .mutation(async ({ input }) => {
-      const doc = await documentsRepo.openOrCreateDefaultDocumentForProject(input.projectId)
+    .mutation(async ({ ctx, input }) => {
+      const doc = await ctx.services.documents.openOrCreateDefaultForProject(input.projectId)
       if (!doc) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -105,8 +113,8 @@ export const documentsRouter = router({
         id: idSchema,
       })
     )
-    .query(async ({ input }) => {
-      const doc = await documentsRepo.getDocumentForProject(input.projectId, input.id)
+    .query(async ({ ctx, input }) => {
+      const doc = await ctx.services.documents.getForProject(input.projectId, input.id)
       if (!doc) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -123,8 +131,8 @@ export const documentsRouter = router({
         id: idSchema,
       })
     )
-    .mutation(async ({ input }) => {
-      const updated = await documentsRepo.setDefaultDocumentForProject(input.projectId, input.id)
+    .mutation(async ({ ctx, input }) => {
+      const updated = await ctx.services.documents.setDefaultForProject(input.projectId, input.id)
       if (!updated) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -151,11 +159,11 @@ export const documentsRouter = router({
         title: pathSchema,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const normalizedTitle = normalizeAndValidatePath(input.title, 'Document path')
-      const doc = await documentsRepo.createDocumentForProject(input.projectId, normalizedTitle)
+      const doc = await ctx.services.documents.createForProject(input.projectId, normalizedTitle)
       if (!doc) {
-        const exists = await projectsRepo.hasProject(input.projectId)
+        const exists = await ctx.services.projects.has(input.projectId)
         if (!exists) {
           throw new TRPCError({
             code: 'NOT_FOUND',
@@ -169,7 +177,7 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -196,7 +204,7 @@ export const documentsRouter = router({
           path: ['title'],
         })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { projectId, id, title, metadata } = input
       const data: { title?: string; metadata?: JsonObject | null } = { metadata }
 
@@ -205,9 +213,9 @@ export const documentsRouter = router({
         data.title = normalizedTitle
       }
 
-      const doc = await documentsRepo.updateDocumentForProject(projectId, id, data)
+      const doc = await ctx.services.documents.updateForProject(projectId, id, data)
       if (!doc) {
-        const exists = await documentsRepo.getDocumentForProject(projectId, id)
+        const exists = await ctx.services.documents.getForProject(projectId, id)
         if (!exists) {
           throw new TRPCError({
             code: 'NOT_FOUND',
@@ -221,7 +229,7 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(projectId)
+      const defaultDocumentId = await getProjectDefaultDocumentId(projectId, ctx.services)
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId,
@@ -241,10 +249,13 @@ export const documentsRouter = router({
         id: idSchema,
       })
     )
-    .query(async ({ input }) => {
-      const versions = await documentsRepo.getVersionHistoryForProject(input.projectId, input.id)
+    .query(async ({ ctx, input }) => {
+      const versions = await ctx.services.documents.getVersionHistoryForProject(
+        input.projectId,
+        input.id
+      )
       if (versions.length === 0) {
-        const doc = await documentsRepo.getDocumentForProject(input.projectId, input.id)
+        const doc = await ctx.services.documents.getForProject(input.projectId, input.id)
         if (!doc) {
           throw new TRPCError({
             code: 'NOT_FOUND',
@@ -262,8 +273,8 @@ export const documentsRouter = router({
         id: idSchema,
       })
     )
-    .mutation(async ({ input }) => {
-      const snapshot = await documentsRepo.createVersionSnapshotForProject(
+    .mutation(async ({ ctx, input }) => {
+      const snapshot = await ctx.services.documents.createSnapshotForProject(
         input.projectId,
         input.id
       )
@@ -284,8 +295,8 @@ export const documentsRouter = router({
         snapshotId: idSchema,
       })
     )
-    .mutation(async ({ input }) => {
-      const doc = await documentsRepo.restoreToSnapshotForProject(
+    .mutation(async ({ ctx, input }) => {
+      const doc = await ctx.services.documents.restoreToSnapshotForProject(
         input.projectId,
         input.id,
         input.snapshotId
@@ -296,6 +307,12 @@ export const documentsRouter = router({
           message: `Document ${input.id} or snapshot ${input.snapshotId} not found in project ${input.projectId}`,
         })
       }
+
+      ctx.yjsRuntime.evictLiveDocument(input.id, {
+        closeCode: YJS_RESTORE_CLOSE_CODE,
+        closeReason: YJS_RESTORE_CLOSE_REASON,
+      })
+
       return doc
     }),
 
@@ -306,8 +323,8 @@ export const documentsRouter = router({
         id: idSchema,
       })
     )
-    .mutation(async ({ input }) => {
-      const deleted = await documentsRepo.deleteDocumentForProject(input.projectId, input.id)
+    .mutation(async ({ ctx, input }) => {
+      const deleted = await ctx.services.documents.deleteForProject(input.projectId, input.id)
       if (!deleted) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -315,7 +332,9 @@ export const documentsRouter = router({
         })
       }
 
-      const nextDefaultDocument = await documentsRepo.openOrCreateDefaultDocumentForProject(
+      ctx.yjsRuntime.evictLiveDocument(input.id)
+
+      const nextDefaultDocument = await ctx.services.documents.openOrCreateDefaultForProject(
         input.projectId
       )
       const defaultDocumentId = nextDefaultDocument?.id ?? null
@@ -340,15 +359,15 @@ export const documentsRouter = router({
         path: pathSchema,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const normalizedPath = normalizeAndValidatePath(input.path, 'Destination path')
-      const moved = await documentsRepo.moveDocumentForProject(
+      const moved = await ctx.services.documents.moveForProject(
         input.projectId,
         input.id,
         normalizedPath
       )
       if (!moved) {
-        const exists = await documentsRepo.getDocumentForProject(input.projectId, input.id)
+        const exists = await ctx.services.documents.getForProject(input.projectId, input.id)
         if (!exists) {
           throw new TRPCError({
             code: 'NOT_FOUND',
@@ -362,7 +381,7 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -382,11 +401,14 @@ export const documentsRouter = router({
         path: pathSchema,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const normalizedPath = normalizeAndValidatePath(input.path, 'Directory path')
-      const created = await documentsRepo.createDirectoryForProject(input.projectId, normalizedPath)
+      const created = await ctx.services.documents.createDirectoryForProject(
+        input.projectId,
+        normalizedPath
+      )
       if (!created) {
-        const exists = await projectsRepo.hasProject(input.projectId)
+        const exists = await ctx.services.projects.has(input.projectId)
         if (!exists) {
           throw new TRPCError({
             code: 'NOT_FOUND',
@@ -400,7 +422,7 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -421,23 +443,25 @@ export const documentsRouter = router({
         destinationPath: pathSchema,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const sourcePath = normalizeAndValidatePath(input.sourcePath, 'Source directory path')
       const destinationPath = normalizeAndValidatePath(
         input.destinationPath,
         'Destination directory path'
       )
 
-      const moved = await documentsRepo.moveDirectoryForProject(
+      const moved = await ctx.services.documents.moveDirectoryForProject(
         input.projectId,
         sourcePath,
         destinationPath
       )
       if (!moved) {
-        const existing = await documentsRepo.listDocumentsForProject(input.projectId)
-        const normalizedPaths = existing.map((doc) => normalizeDocumentPath(doc.title))
+        const existing = await ctx.services.documents.listForProject(input.projectId)
+        const normalizedPaths = existing.map((doc: { title: string }) =>
+          normalizeDocumentPath(doc.title)
+        )
         const hasSourceDirectory = normalizedPaths.some(
-          (path) =>
+          (path: string) =>
             path === toDirectorySentinelPath(sourcePath) || path.startsWith(`${sourcePath}/`)
         )
         if (!hasSourceDirectory) {
@@ -453,7 +477,7 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -473,9 +497,12 @@ export const documentsRouter = router({
         path: pathSchema,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const normalizedPath = normalizeAndValidatePath(input.path, 'Directory path')
-      const deleted = await documentsRepo.deleteDirectoryForProject(input.projectId, normalizedPath)
+      const deleted = await ctx.services.documents.deleteDirectoryForProject(
+        input.projectId,
+        normalizedPath
+      )
       if (!deleted) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -483,7 +510,11 @@ export const documentsRouter = router({
         })
       }
 
-      const nextDefaultDocument = await documentsRepo.openOrCreateDefaultDocumentForProject(
+      for (const deletedDocumentId of deleted.deletedDocumentIds) {
+        ctx.yjsRuntime.evictLiveDocument(deletedDocumentId)
+      }
+
+      const nextDefaultDocument = await ctx.services.documents.openOrCreateDefaultForProject(
         input.projectId
       )
       const defaultDocumentId = nextDefaultDocument?.id ?? null
@@ -507,9 +538,9 @@ export const documentsRouter = router({
         id: idSchema,
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const maxDocExportChars = configManager.getConfig().limits.docExportChars
-      const doc = await documentsRepo.getDocumentForProject(input.projectId, input.id)
+      const doc = await ctx.services.documents.getForProject(input.projectId, input.id)
       if (!doc) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -556,7 +587,7 @@ export const documentsRouter = router({
         markdown: z.string(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const maxDocImportChars = configManager.getConfig().limits.docImportChars
       if (input.markdown.length > maxDocImportChars) {
         throw new TRPCError({
@@ -566,7 +597,7 @@ export const documentsRouter = router({
       }
 
       const normalizedTitle = normalizeAndValidatePath(input.title, 'Document path')
-      const result = await documentsRepo.importDocumentForProject(
+      const result = await ctx.services.documents.importForProject(
         input.projectId,
         normalizedTitle,
         input.markdown
@@ -594,11 +625,12 @@ export const documentsRouter = router({
             message: 'Failed to parse markdown content',
           },
         }
-        const { code, message } = errorMessages[result.error.kind]
+        const errorKind = result.error.kind as ImportDocumentErrorKind
+        const { code, message } = errorMessages[errorKind]
         throw new TRPCError({ code, message })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,

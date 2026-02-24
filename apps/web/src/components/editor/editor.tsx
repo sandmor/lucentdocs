@@ -17,7 +17,7 @@ import { Switch } from '@/components/ui/switch'
 import { ArrowRight, Loader2 } from 'lucide-react'
 
 export interface EditorHandle {
-  startAIContinuationAtStoryEnd: () => void
+  startAIContinuation: (at_doc_end: boolean) => void
 }
 
 interface EditorProps {
@@ -292,9 +292,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   ])
 
   useImperativeHandle(ref, () => ({
-    startAIContinuationAtStoryEnd() {
+    startAIContinuation(at_doc_end: boolean) {
       if (!viewRef.current) return
-      aiControllerRef.current?.startAIContinuationAtStoryEnd(viewRef.current)
+      aiControllerRef.current?.startAIContinuation(viewRef.current, at_doc_end)
     },
   }))
 
@@ -319,7 +319,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           size="sm"
           onClick={() => {
             if (!viewRef.current) return
-            aiControllerRef.current?.startAIContinuationAtStoryEnd(viewRef.current)
+            aiControllerRef.current?.startAIContinuation(viewRef.current, true)
           }}
           disabled={isGenerating}
         >

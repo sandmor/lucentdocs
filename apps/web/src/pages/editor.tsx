@@ -386,7 +386,7 @@ export function EditorPage() {
         if (!isEditorFocused) return
 
         e.preventDefault()
-        editorRef.current?.startAIContinuationAtStoryEnd()
+        editorRef.current?.startAIContinuation(false)
       }
     }
     window.addEventListener('keydown', handler)

@@ -10,8 +10,10 @@ import {
 } from '../ai/index.js'
 import {
   ResponseParser,
+  parseResponse,
   selectionEditOutputSchema,
   type AIMode,
+  type SelectionEditOutput,
   type SelectionEditPartialOutput,
 } from '../ai/response-parser.js'
 import {
@@ -33,18 +35,101 @@ interface AiStreamInput {
 
 export function emitIncrementalChoices(
   choices: string[],
-  emittedChoiceIndexes: Set<number>,
+  emittedChoicesByIndex: Map<number, string>,
   writeChoice: (choice: string) => void
 ): void {
-  for (let i = 0; i < choices.length; i += 1) {
-    if (emittedChoiceIndexes.has(i)) continue
+  const seenInBatch = new Set<string>()
 
-    const choice = choices[i]
-    if (choice.trim().length === 0) continue
+  for (let i = 0; i < choices.length; i += 1) {
+    const choice = choices[i]?.trim()
+    if (!choice) continue
+    if (seenInBatch.has(choice)) continue
+    if (emittedChoicesByIndex.get(i) === choice) continue
 
     writeChoice(choice)
-    emittedChoiceIndexes.add(i)
+    emittedChoicesByIndex.set(i, choice)
+    seenInBatch.add(choice)
   }
+}
+
+function toCanonicalSelectionEditOutput(
+  value: ReturnType<typeof parseResponse>
+): SelectionEditOutput {
+  if (!value) {
+    return {
+      mode: 'replace',
+      insertIndex: null,
+      index: null,
+      content: '',
+      choices: null,
+    }
+  }
+
+  if (value.mode === 'replace') {
+    return {
+      mode: 'replace',
+      insertIndex: null,
+      index: null,
+      content: value.content,
+      choices: null,
+    }
+  }
+
+  if (value.mode === 'insert') {
+    return {
+      mode: 'insert',
+      insertIndex: value.index,
+      index: value.index,
+      content: value.content,
+      choices: null,
+    }
+  }
+
+  return {
+    mode: 'choices',
+    insertIndex: null,
+    index: null,
+    content: null,
+    choices: value.choices,
+  }
+}
+
+export function parseSelectionEditOutputFromText(text: string): SelectionEditOutput | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+
+  const candidates = new Set<string>([trimmed])
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fencedMatch?.[1]) {
+    candidates.add(fencedMatch[1].trim())
+  }
+
+  const firstBrace = trimmed.indexOf('{')
+  const lastBrace = trimmed.lastIndexOf('}')
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.add(trimmed.slice(firstBrace, lastBrace + 1).trim())
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    try {
+      const parsed = JSON.parse(candidate) as unknown
+      const structured = selectionEditOutputSchema.safeParse(parsed)
+      if (structured.success) {
+        return structured.data
+      }
+
+      const normalized = parseResponse(parsed)
+      if (normalized) {
+        return toCanonicalSelectionEditOutput(normalized)
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return null
 }
 
 function buildAiStreamInputSchema() {
@@ -290,7 +375,7 @@ async function handlePromptStream(
   const cleaner = createStreamCleaner(input.contextBefore, contextAfter)
   const parser = new ResponseParser()
   let lastSentContentLength = 0
-  const emittedChoiceIndexes = new Set<number>()
+  const emittedChoicesByIndex = new Map<number, string>()
   const abortController = new AbortController()
   const abortIfClientDisconnected = () => {
     if (!res.writableEnded) abortController.abort()
@@ -336,22 +421,48 @@ async function handlePromptStream(
       return
     }
 
-    emitIncrementalChoices(parseResult.choices, emittedChoiceIndexes, writeChoice)
+    if (parseResult.isComplete) {
+      emitIncrementalChoices(parseResult.choices, emittedChoicesByIndex, writeChoice)
+    }
   }
 
   const resolveFallback = async (): Promise<boolean> => {
     const model = await getLanguageModel()
-    const fallback = await generateText({
-      model,
-      system: rendered.systemPrompt,
-      prompt: rendered.userPrompt,
-      output: Output.object({ schema: selectionEditOutputSchema }),
-      maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
-      temperature: rendered.definition.defaults.temperature,
-      abortSignal: abortController.signal,
-    })
+    let fallbackResult: ReturnType<ResponseParser['feedComplete']> | null = null
 
-    const fallbackResult = parser.feedComplete(fallback.output)
+    try {
+      const fallback = await generateText({
+        model,
+        system: rendered.systemPrompt,
+        prompt: rendered.userPrompt,
+        output: Output.object({ schema: selectionEditOutputSchema }),
+        maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+        temperature: rendered.definition.defaults.temperature,
+        abortSignal: abortController.signal,
+      })
+
+      fallbackResult = parser.feedComplete(fallback.output)
+      if (!fallbackResult.mode) {
+        const parsedFromText = parseSelectionEditOutputFromText(fallback.text)
+        if (parsedFromText) {
+          fallbackResult = parser.feedComplete(parsedFromText)
+        }
+      }
+    } catch {
+      const rawFallbackText = await generate({
+        systemPrompt: rendered.systemPrompt,
+        userPrompt: rendered.userPrompt,
+        maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+        temperature: rendered.definition.defaults.temperature,
+        abortSignal: abortController.signal,
+      })
+      const parsedFromText = parseSelectionEditOutputFromText(rawFallbackText)
+      if (parsedFromText) {
+        fallbackResult = parser.feedComplete(parsedFromText)
+      }
+    }
+
+    if (!fallbackResult) return false
     if (!fallbackResult.mode) return false
 
     flushParsedState(fallbackResult)

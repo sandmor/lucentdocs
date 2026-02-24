@@ -2,17 +2,20 @@ import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { isValidId } from '@plotline/shared'
-import { chatsRepo, documentsRepo } from '../../db/index.js'
 import { projectSyncBus } from '../project-sync.js'
 import { publicProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'
-import { chatRuntime, type ChatObserveState } from '../../chat/runtime.js'
+import type { ChatObserveState } from '../../chat/runtime.js'
 import { configManager } from '../../config/manager.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 
-async function assertProjectDocument(projectId: string, documentId: string): Promise<void> {
-  const document = await documentsRepo.getDocumentForProject(projectId, documentId)
+async function assertProjectDocument(
+  projectId: string,
+  documentId: string,
+  services: { documents: { getForProject: (p: string, d: string) => Promise<unknown | null> } }
+): Promise<void> {
+  const document = await services.documents.getForProject(projectId, documentId)
   if (!document) {
     throw new TRPCError({
       code: 'NOT_FOUND',
@@ -66,10 +69,10 @@ export const chatRouter = router({
         documentId: idSchema,
       })
     )
-    .query(async ({ input }) => {
-      await assertProjectDocument(input.projectId, input.documentId)
+    .query(async ({ ctx, input }) => {
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       return {
-        threads: await chatsRepo.listDocumentChats(input.projectId, input.documentId),
+        threads: await ctx.services.chats.listForDocument(input.projectId, input.documentId),
       }
     }),
 
@@ -81,9 +84,9 @@ export const chatRouter = router({
         chatId: idSchema,
       })
     )
-    .query(async ({ input }) => {
-      await assertProjectDocument(input.projectId, input.documentId)
-      const thread = await chatsRepo.getDocumentChatById(
+    .query(async ({ ctx, input }) => {
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      const thread = await ctx.services.chats.getById(
         input.projectId,
         input.documentId,
         input.chatId
@@ -101,7 +104,7 @@ export const chatRouter = router({
         messages: thread.messages,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
-        generating: chatRuntime.isGenerating(input),
+        generating: ctx.chatRuntime.isGenerating(input),
       }
     }),
 
@@ -113,12 +116,12 @@ export const chatRouter = router({
         chatId: idSchema,
       })
     )
-    .subscription(({ input, signal }) => {
+    .subscription(({ ctx, input, signal }) => {
       return observable<ChatObserveState>((emit) => {
         let closed = false
         let unsubscribe: (() => void) | null = null
 
-        void chatRuntime
+        void ctx.chatRuntime
           .subscribe(input, (state) => {
             emit.next(state)
           })
@@ -156,9 +159,9 @@ export const chatRouter = router({
         title: z.string().trim().min(1).max(160).optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      await assertProjectDocument(input.projectId, input.documentId)
-      const created = await chatsRepo.createDocumentChat(
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      const created = await ctx.services.chats.create(
         input.projectId,
         input.documentId,
         input.title
@@ -175,7 +178,7 @@ export const chatRouter = router({
         changedChatIds: [created.id],
         deletedChatIds: [],
       })
-      await chatRuntime.publishPersistedState({
+      await ctx.chatRuntime.publishPersistedState({
         projectId: input.projectId,
         documentId: input.documentId,
         chatId: created.id,
@@ -195,8 +198,8 @@ export const chatRouter = router({
         selectionTo: z.number().int().min(0).optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      await assertProjectDocument(input.projectId, input.documentId)
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       const message = input.message.trim()
       const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
       if (message.length === 0 || message.length > maxChatMessageChars) {
@@ -207,7 +210,7 @@ export const chatRouter = router({
       }
 
       try {
-        const started = await chatRuntime.startGeneration({ ...input, message })
+        const started = await ctx.chatRuntime.startGeneration({ ...input, message })
         return { accepted: true, generationId: started.generationId }
       } catch (error) {
         throw mapRuntimeError(error)
@@ -222,9 +225,9 @@ export const chatRouter = router({
         chatId: idSchema,
       })
     )
-    .mutation(async ({ input }) => {
-      await assertProjectDocument(input.projectId, input.documentId)
-      return { canceled: chatRuntime.cancelGeneration(input) }
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      return { canceled: ctx.chatRuntime.cancelGeneration(input) }
     }),
 
   deleteById: publicProcedure
@@ -235,9 +238,9 @@ export const chatRouter = router({
         chatId: idSchema,
       })
     )
-    .mutation(async ({ input }) => {
-      await assertProjectDocument(input.projectId, input.documentId)
-      const deleted = await chatsRepo.deleteDocumentChat(
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      const deleted = await ctx.services.chats.delete(
         input.projectId,
         input.documentId,
         input.chatId
@@ -254,7 +257,7 @@ export const chatRouter = router({
         changedChatIds: [],
         deletedChatIds: [input.chatId],
       })
-      chatRuntime.markDeleted(input)
+      ctx.chatRuntime.markDeleted(input)
 
       return { deleted: true }
     }),

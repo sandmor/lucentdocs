@@ -9,20 +9,30 @@ import { createExpressMiddleware } from '@trpc/server/adapters/express'
 import cookieParser from 'cookie-parser'
 import { type WebSocketServer } from 'ws'
 import { appRouter } from './trpc/router.js'
+import type { AppContext } from './trpc/index.js'
 import { PROJECT_ROOT } from './paths.js'
 import { configManager } from './config/manager.js'
 import { registerAiTextStreamRoute } from './http/ai-stream.js'
 import { setupYjsWebSocket } from './yjs/websocket-handler.js'
 import { setupTrpcWebSocket, type TrpcWebSocketRuntime } from './trpc/websocket.js'
-import {
-  flushAllDocumentStates,
-  startSnapshotTimer,
-  stopPersistenceFlushLoop,
-  stopSnapshotTimer,
-} from './yjs/server.js'
+import { createContainer } from './app/container.js'
 
 const appConfig = configManager.getConfig()
 const isProd = appConfig.runtime.isProduction
+const container = createContainer(appConfig.paths.dbFile, {
+  persistenceFlushIntervalMs: appConfig.yjs.persistenceFlushIntervalMs,
+  versionSnapshotIntervalMs: appConfig.yjs.versionSnapshotIntervalMs,
+})
+
+container.yjsRuntime.initialize()
+
+function createTprcContext(): AppContext {
+  return {
+    services: container.services,
+    yjsRuntime: container.yjsRuntime,
+    chatRuntime: container.chatRuntime,
+  }
+}
 
 function displayHostForLog(bindHost: string): string {
   if (bindHost === '0.0.0.0' || bindHost === '::') return 'localhost'
@@ -40,7 +50,10 @@ function registerMetaRoutes(app: Express): void {
 }
 
 function registerTrpcRoutes(app: Express): void {
-  app.use('/api/trpc', createExpressMiddleware({ router: appRouter }))
+  app.use(
+    '/api/trpc',
+    createExpressMiddleware({ router: appRouter, createContext: createTprcContext })
+  )
 }
 
 function resolveTheme(value: unknown): 'light' | 'dark' {
@@ -148,8 +161,8 @@ function registerProcessHandlers(
     shuttingDown = true
 
     console.log('Shutting down...')
-    stopSnapshotTimer()
-    stopPersistenceFlushLoop()
+    container.yjsRuntime.stopSnapshotTimer()
+    container.yjsRuntime.stopPersistenceFlushLoop()
 
     const forceShutdownTimer = setTimeout(() => {
       console.error('Graceful shutdown timed out, forcing exit.')
@@ -159,7 +172,8 @@ function registerProcessHandlers(
       forceShutdownTimer.unref()
     }
 
-    void flushAllDocumentStates()
+    void container.yjsRuntime
+      .flushAllDocumentStates()
       .catch((error) => {
         console.error('Failed to flush Yjs documents on shutdown:', error)
       })
@@ -236,9 +250,20 @@ async function startServer() {
     })
   })
 
-  const yjsWss = setupYjsWebSocket(httpServer)
-  const trpcWs = setupTrpcWebSocket(httpServer)
-  startSnapshotTimer()
+  const yjsWss = setupYjsWebSocket(httpServer, container.yjsRuntime)
+  const trpcWs = setupTrpcWebSocket(httpServer, createTprcContext)
+  container.yjsRuntime.startSnapshotTimer()
+
+  yjsWss.on('error', (error) => {
+    console.error('Yjs websocket server error:', error)
+  })
+  trpcWs.wss.on('error', (error) => {
+    console.error('tRPC websocket server error:', error)
+  })
+  httpServer.on('error', (error) => {
+    console.error(`Failed to start HTTP server on ${host}:${port}:`, error)
+    process.exit(1)
+  })
 
   httpServer.listen(port, host, () => {
     console.log(

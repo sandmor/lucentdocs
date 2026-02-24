@@ -28,7 +28,7 @@ interface ZoneMarkPatch {
 }
 
 export interface AIWriterController {
-  startAIContinuationAtStoryEnd: (view: EditorView) => void
+  startAIContinuation: (view: EditorView, at_doc_end: boolean) => void
   startAIPromptAtRange: (
     view: EditorView,
     prompt: string,
@@ -473,13 +473,13 @@ export function createAIWriterController(
     view.dispatch(tr)
   }
 
-  function startAIContinuationAtStoryEnd(view: EditorView): void {
+  function startAIContinuation(view: EditorView, at_doc_end: boolean): void {
     const pluginState = aiWriterPluginKey.getState(view.state)
     if (pluginState?.active && pluginState.streaming) {
       return
     }
 
-    const pos = view.state.doc.content.size
+    const pos = at_doc_end ? view.state.doc.content.size : view.state.selection.to
     const selection = view.state.selection
     if (!(selection.empty && selection.from === pos)) {
       const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, pos))
@@ -672,7 +672,7 @@ export function createAIWriterController(
   }
 
   return {
-    startAIContinuationAtStoryEnd,
+    startAIContinuation,
     startAIPromptAtRange,
     acceptAI,
     rejectAI,

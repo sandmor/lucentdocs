@@ -22,7 +22,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `cd ../.. && PLOTLINE_TEST_MODE=1 NODE_ENV=test PLOTLINE_DATA_DIR=${TEST_DATA_DIR} HOST=${TEST_HOST} PORT=${TEST_PORT} bun run dev`,
+    command: `cd ../api && PLOTLINE_TEST_MODE=1 NODE_ENV=test PLOTLINE_DATA_DIR=${TEST_DATA_DIR} HOST=${TEST_HOST} PORT=${TEST_PORT} bun run start`,
     url: TEST_BASE_URL,
     reuseExistingServer: false,
     timeout: 120_000,

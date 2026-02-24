@@ -1,8 +1,8 @@
 import { WebSocketServer } from 'ws'
 import { Server as HttpServer } from 'http'
 import { isValidId } from '@plotline/shared'
-import * as dalDocuments from '../db/dal/documents.js'
-import { ensureDocumentLoaded, setupWSConnection } from './server.js'
+import type { YjsRuntime } from './runtime.js'
+import { setupWSConnection } from './runtime.js'
 
 export function extractDocumentIdFromYjsUrl(urlValue: string, host: string): string | null {
   try {
@@ -24,7 +24,7 @@ export function extractDocumentIdFromYjsUrl(urlValue: string, host: string): str
   }
 }
 
-export function setupYjsWebSocket(server: HttpServer): WebSocketServer {
+export function setupYjsWebSocket(server: HttpServer, runtime: YjsRuntime): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true })
 
   server.on('upgrade', (req, socket, head) => {
@@ -36,27 +36,25 @@ export function setupYjsWebSocket(server: HttpServer): WebSocketServer {
       return
     }
 
-    void dalDocuments
-      .findById(documentId)
-      .then((existingDoc) => {
-        if (!existingDoc) {
+    void (async () => {
+      try {
+        const repos = runtime.getRepos()
+        const yjsData = await repos.yjsDocuments.getPersisted(documentId)
+
+        if (!yjsData) {
           socket.destroy()
           return
         }
 
-        return ensureDocumentLoaded(documentId).then(() => {
-          wss.handleUpgrade(req, socket, head, (ws) => {
-            setupWSConnection(ws, req, { docName: documentId })
-          })
+        await runtime.ensureDocumentLoaded(documentId)
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          setupWSConnection(ws, req, { docName: documentId })
         })
-      })
-      .then(() => {
-        return
-      })
-      .catch((error) => {
+      } catch (error) {
         console.error(`Failed to initialize Yjs doc ${documentId}:`, error)
         socket.destroy()
-      })
+      }
+    })()
   })
 
   return wss

@@ -12,6 +12,7 @@ import { MarkdownSerializer, defaultMarkdownSerializer } from 'prosemirror-markd
 import { nanoid } from 'nanoid'
 import { safeValidateUIMessages, type UIMessage } from 'ai'
 import { configManager } from '../config/manager.js'
+import type { ChatThread } from '../core/services/chats.service.js'
 
 const markdownSerializer = new MarkdownSerializer(defaultMarkdownSerializer.nodes, {
   ...defaultMarkdownSerializer.marks,
@@ -49,9 +50,7 @@ export function toChatKey(scope: {
   return `${scope.projectId}:${scope.documentId}:${scope.chatId}`
 }
 
-export function toPersistedThread(
-  thread: Awaited<ReturnType<typeof import('../db/repositories/chats.js').getDocumentChatById>>
-): PersistedChatThread | null {
+export function toPersistedThread(thread: ChatThread | null): PersistedChatThread | null {
   if (!thread) return null
 
   return {
@@ -120,7 +119,7 @@ function addDirectoryWithAncestors(pathValue: string, directories: Set<string>):
 
 export async function buildProjectFileIndex(
   projectId: string,
-  listDocumentsForProject: typeof import('../db/repositories/documents.js').listDocumentsForProject
+  listDocumentsForProject: (projectId: string) => Promise<Array<{ id: string; title: string }>>
 ): Promise<ProjectFileIndex> {
   const documents = await listDocumentsForProject(projectId)
   const files = new Map<string, string>()
