@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import {
   PointerSensor,
@@ -45,7 +45,7 @@ export function useDocumentBrowser({
   activeDocumentId,
   onOpenDocument,
 }: DocumentBrowserProps) {
-  const [currentPath, setCurrentPath] = useState('')
+  const [userPath, setUserPath] = useState<string | null>(null)
   const [newDocumentName, setNewDocumentName] = useState('')
   const [newDirectoryName, setNewDirectoryName] = useState('')
   const [createDocumentOpen, setCreateDocumentOpen] = useState(false)
@@ -56,7 +56,7 @@ export function useDocumentBrowser({
   const [moveDestination, setMoveDestination] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
 
-  const activeDocumentSignatureRef = useRef<string | null>(null)
+  const prevSignatureRef = useRef<string | null>(null)
 
   const utils = trpc.useUtils()
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -89,27 +89,21 @@ export function useDocumentBrowser({
     [explicitDirectoryPaths]
   )
 
-  const rows = useMemo(() => buildRows(allDocuments, currentPath), [allDocuments, currentPath])
-  const breadcrumbs = useMemo(() => pathSegments(currentPath), [currentPath])
-
   const activeDocumentPath = useMemo(() => {
     const active = visibleDocuments.find((doc) => doc.id === activeDocumentId)
     return active ? normalizeDocumentPath(active.title) : null
   }, [visibleDocuments, activeDocumentId])
 
-  useEffect(() => {
-    if (!activeDocumentId) {
-      activeDocumentSignatureRef.current = null
-      return
-    }
-    if (!activeDocumentPath) return
+  const activeSignature = activeDocumentPath ? `${activeDocumentId}:${activeDocumentPath}` : null
+  if (activeSignature !== prevSignatureRef.current) {
+    prevSignatureRef.current = activeSignature
+    setUserPath(null)
+  }
 
-    const signature = `${activeDocumentId}:${activeDocumentPath}`
-    if (activeDocumentSignatureRef.current === signature) return
+  const currentPath = userPath ?? (activeDocumentPath ? parentPath(activeDocumentPath) : '')
 
-    activeDocumentSignatureRef.current = signature
-    setCurrentPath(parentPath(activeDocumentPath))
-  }, [activeDocumentId, activeDocumentPath])
+  const rows = useMemo(() => buildRows(allDocuments, currentPath), [allDocuments, currentPath])
+  const breadcrumbs = useMemo(() => pathSegments(currentPath), [currentPath])
 
   const isDirectoryPathTaken = useCallback(
     (path: string): boolean => {
@@ -144,7 +138,7 @@ export function useDocumentBrowser({
     onSuccess: (_result, variables) => {
       setCreateDirectoryOpen(false)
       setNewDirectoryName('')
-      setCurrentPath(normalizeDocumentPath(variables.path))
+      setUserPath(normalizeDocumentPath(variables.path))
       utils.documents.list.invalidate({ projectId })
     },
     onError: (error) => {
@@ -186,7 +180,7 @@ export function useDocumentBrowser({
       }
 
       if (isPathInsideDirectory(currentPath, variables.sourcePath)) {
-        setCurrentPath(
+        setUserPath(
           remapPathInsideDirectory(currentPath, variables.sourcePath, result.destinationPath)
         )
       }
@@ -229,11 +223,22 @@ export function useDocumentBrowser({
       }
 
       if (isPathInsideDirectory(currentPath, variables.path)) {
-        setCurrentPath(parentPath(variables.path))
+        setUserPath(parentPath(variables.path))
       }
     },
     onError: (error) => {
       toast.error('Failed to delete directory', { description: error.message })
+    },
+  })
+
+  const importMutation = trpc.documents.import.useMutation({
+    onSuccess: (doc) => {
+      utils.documents.list.invalidate({ projectId })
+      utils.documents.get.invalidate({ projectId, id: doc.id })
+      onOpenDocument(doc.id)
+    },
+    onError: (error) => {
+      toast.error('Failed to import document', { description: error.message })
     },
   })
 
@@ -510,6 +515,45 @@ export function useDocumentBrowser({
     [findDocumentById]
   )
 
+  const handleExportDocument = useCallback(
+    async (documentId: string) => {
+      try {
+        const result = await utils.documents.export.fetch({ projectId, id: documentId })
+        const blob = new Blob([result.markdown], { type: 'text/markdown' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = result.title || 'document.md'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      } catch (error) {
+        toast.error('Failed to export document', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        })
+      }
+    },
+    [projectId, utils.documents.export]
+  )
+
+  const handleImportDocument = useCallback(
+    async (file: File) => {
+      const fileName = file.name.endsWith('.md') ? file.name : `${file.name}.md`
+      const targetPath = currentPath ? `${currentPath}/${fileName}` : fileName
+
+      try {
+        const content = await file.text()
+        importMutation.mutate({ projectId, title: targetPath, markdown: content })
+      } catch (error) {
+        toast.error('Failed to read file', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        })
+      }
+    },
+    [currentPath, importMutation, projectId]
+  )
+
   const handleRenameDirectory = useCallback((path: string) => {
     setRenameTarget({ type: 'directory', path })
     setRenameName(basename(path))
@@ -556,6 +600,7 @@ export function useDocumentBrowser({
             onRenameDocument={handleRenameDocument}
             onMoveDocument={handleMoveDocument}
             onDeleteDocument={handleDeleteDocument}
+            onExportDocument={handleExportDocument}
             onRenameDirectory={handleRenameDirectory}
             onMoveDirectory={handleMoveDirectory}
             onDeleteDirectory={handleDeleteDirectory}
@@ -567,6 +612,7 @@ export function useDocumentBrowser({
       activeDocumentId,
       handleDeleteDirectory,
       handleDeleteDocument,
+      handleExportDocument,
       handleMoveDirectory,
       handleMoveDocument,
       handleRenameDirectory,
@@ -577,7 +623,7 @@ export function useDocumentBrowser({
   const handleRowClick = useCallback(
     (row: BrowserRow) => {
       if (row.type === 'directory') {
-        setCurrentPath(row.path)
+        setUserPath(row.path)
         return
       }
 
@@ -589,11 +635,11 @@ export function useDocumentBrowser({
   const goToCrumb = useCallback(
     (index: number) => {
       if (index < 0) {
-        setCurrentPath('')
+        setUserPath('')
         return
       }
 
-      setCurrentPath(breadcrumbs.slice(0, index + 1).join('/'))
+      setUserPath(breadcrumbs.slice(0, index + 1).join('/'))
     },
     [breadcrumbs]
   )
@@ -674,6 +720,8 @@ export function useDocumentBrowser({
     handleRowClick,
     goToCrumb,
     isBusy,
+    handleImportDocument,
+    isImporting: importMutation.isPending,
     isCreatingDocument: createMutation.isPending,
     isCreatingDirectory: createDirectoryMutation.isPending,
     isRenaming: renameMutation.isPending || moveDirectoryMutation.isPending,

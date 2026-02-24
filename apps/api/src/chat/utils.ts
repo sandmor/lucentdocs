@@ -11,9 +11,7 @@ import { Node as ProseMirrorNode } from 'prosemirror-model'
 import { MarkdownSerializer, defaultMarkdownSerializer } from 'prosemirror-markdown'
 import { nanoid } from 'nanoid'
 import { safeValidateUIMessages, type UIMessage } from 'ai'
-
-const MAX_TOOL_ENTRIES = 2_000
-const MAX_TOOL_READ_CHARS = 120_000
+import { configManager } from '../config/manager.js'
 
 const markdownSerializer = new MarkdownSerializer(defaultMarkdownSerializer.nodes, {
   ...defaultMarkdownSerializer.marks,
@@ -263,7 +261,10 @@ export function toModelMessages(messages: UIMessage[]): Array<Omit<UIMessage, 'i
   })
 }
 
-export const TOOL_LIMITS = {
-  MAX_TOOL_ENTRIES,
-  MAX_TOOL_READ_CHARS,
+export function getToolLimits() {
+  const limits = configManager.getConfig().limits
+  return {
+    MAX_TOOL_ENTRIES: limits.toolEntries,
+    MAX_TOOL_READ_CHARS: limits.toolReadChars,
+  }
 }

@@ -7,9 +7,9 @@ import { projectSyncBus } from '../project-sync.js'
 import { publicProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'
 import { chatRuntime, type ChatObserveState } from '../../chat/runtime.js'
+import { configManager } from '../../config/manager.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
-const generateMessageSchema = z.string().trim().min(1).max(20_000)
 
 async function assertProjectDocument(projectId: string, documentId: string): Promise<void> {
   const document = await documentsRepo.getDocumentForProject(projectId, documentId)
@@ -190,16 +190,24 @@ export const chatRouter = router({
         projectId: idSchema,
         documentId: idSchema,
         chatId: idSchema,
-        message: generateMessageSchema,
+        message: z.string(),
         selectionFrom: z.number().int().min(0).optional(),
         selectionTo: z.number().int().min(0).optional(),
       })
     )
     .mutation(async ({ input }) => {
       await assertProjectDocument(input.projectId, input.documentId)
+      const message = input.message.trim()
+      const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
+      if (message.length === 0 || message.length > maxChatMessageChars) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Message must be between 1 and ${maxChatMessageChars} characters`,
+        })
+      }
 
       try {
-        const started = await chatRuntime.startGeneration(input)
+        const started = await chatRuntime.startGeneration({ ...input, message })
         return { accepted: true, generationId: started.generationId }
       } catch (error) {
         throw mapRuntimeError(error)

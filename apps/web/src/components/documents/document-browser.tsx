@@ -21,6 +21,8 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
           onGoToCrumb={browser.goToCrumb}
           onCreateDirectory={() => browser.setCreateDirectoryOpen(true)}
           onCreateDocument={() => browser.setCreateDocumentOpen(true)}
+          onImportDocument={browser.handleImportDocument}
+          isImporting={browser.isImporting}
           rootDropRef={browser.setRootDropRef}
           isOverRoot={browser.isOverRoot}
         />

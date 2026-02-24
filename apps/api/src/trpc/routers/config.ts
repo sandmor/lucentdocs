@@ -15,8 +15,8 @@ import { router, publicProcedure } from '../index.js'
 
 type EditableConfigKey = (typeof EDITABLE_CONFIG_KEYS)[number]
 
-const AI_RUNTIME_KEYS = ['AI_API_KEY', 'AI_BASE_URL', 'AI_MODEL'] as const
-const YJS_RUNTIME_KEYS = ['YJS_PERSISTENCE_FLUSH_MS', 'YJS_VERSION_INTERVAL_MS'] as const
+const AI_RUNTIME_KEYS = ['aiApiKey', 'aiBaseUrl', 'aiModel'] as const
+const YJS_RUNTIME_KEYS = ['yjsPersistenceFlushMs', 'yjsVersionIntervalMs'] as const
 
 interface ConfigFieldPayload {
   effectiveValue: string | number
@@ -47,7 +47,7 @@ function buildConfigPayload(state: ConfigStateSnapshot) {
     }
   }
 
-  const host = String(fields.HOST.effectiveValue)
+  const host = String(fields.host.effectiveValue)
 
   return {
     fields,
@@ -70,11 +70,23 @@ export const configRouter = router({
 
   update: publicProcedure.input(editableConfigSchema).mutation(({ input }) => {
     const sanitizedInput: Pick<PersistedAppConfig, EditableConfigKey> = {
-      AI_API_KEY: input.AI_API_KEY.trim(),
-      AI_BASE_URL: input.AI_BASE_URL.trim(),
-      AI_MODEL: input.AI_MODEL.trim(),
-      YJS_PERSISTENCE_FLUSH_MS: input.YJS_PERSISTENCE_FLUSH_MS,
-      YJS_VERSION_INTERVAL_MS: input.YJS_VERSION_INTERVAL_MS,
+      aiApiKey: input.aiApiKey.trim(),
+      aiBaseUrl: input.aiBaseUrl.trim(),
+      aiModel: input.aiModel.trim(),
+      yjsPersistenceFlushMs: input.yjsPersistenceFlushMs,
+      yjsVersionIntervalMs: input.yjsVersionIntervalMs,
+      maxContextChars: input.maxContextChars,
+      maxHintChars: input.maxHintChars,
+      maxPromptChars: input.maxPromptChars,
+      maxToolEntries: input.maxToolEntries,
+      maxToolReadChars: input.maxToolReadChars,
+      maxChatMessageChars: input.maxChatMessageChars,
+      maxPromptNameChars: input.maxPromptNameChars,
+      maxPromptDescChars: input.maxPromptDescChars,
+      maxPromptSystemChars: input.maxPromptSystemChars,
+      maxPromptUserChars: input.maxPromptUserChars,
+      maxDocImportChars: input.maxDocImportChars,
+      maxDocExportChars: input.maxDocExportChars,
     }
 
     const result = configManager.updateFileConfig(sanitizedInput)
@@ -94,5 +106,9 @@ export const configRouter = router({
       changedEffectiveKeys: result.changedEffectiveKeys,
       overriddenChangedKeys: result.overriddenChangedKeys,
     }
+  }),
+
+  limits: publicProcedure.query(() => {
+    return configManager.getConfig().limits
   }),
 })

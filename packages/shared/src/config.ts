@@ -1,18 +1,30 @@
 import { z } from 'zod/v4'
 
 export interface PersistedAppConfig {
-  NODE_ENV: string
-  HOST: string
-  PORT: number
-  AI_API_KEY: string
-  AI_BASE_URL: string
-  AI_MODEL: string
-  YJS_PERSISTENCE_FLUSH_MS: number
-  YJS_VERSION_INTERVAL_MS: number
+  nodeEnv: string
+  host: string
+  port: number
+  aiApiKey: string
+  aiBaseUrl: string
+  aiModel: string
+  yjsPersistenceFlushMs: number
+  yjsVersionIntervalMs: number
+  maxContextChars: number
+  maxHintChars: number
+  maxPromptChars: number
+  maxToolEntries: number
+  maxToolReadChars: number
+  maxChatMessageChars: number
+  maxPromptNameChars: number
+  maxPromptDescChars: number
+  maxPromptSystemChars: number
+  maxPromptUserChars: number
+  maxDocImportChars: number
+  maxDocExportChars: number
 }
 
 export type PersistedConfigKey = keyof PersistedAppConfig
-export type PersistedConfigSection = 'app' | 'server' | 'ai' | 'yjs'
+export type PersistedConfigSection = 'app' | 'server' | 'ai' | 'yjs' | 'limits'
 export type ConfigValueKind = 'string' | 'int'
 
 export interface ConfigFieldDefinition {
@@ -29,7 +41,7 @@ export interface ConfigFieldDefinition {
 
 export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   {
-    key: 'NODE_ENV',
+    key: 'nodeEnv',
     section: 'app',
     tomlKey: 'environment',
     envVar: 'NODE_ENV',
@@ -38,7 +50,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     allowEmptyString: false,
   },
   {
-    key: 'HOST',
+    key: 'host',
     section: 'server',
     tomlKey: 'host',
     envVar: 'HOST',
@@ -47,7 +59,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     allowEmptyString: false,
   },
   {
-    key: 'PORT',
+    key: 'port',
     section: 'server',
     tomlKey: 'port',
     envVar: 'PORT',
@@ -58,7 +70,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     max: 65535,
   },
   {
-    key: 'AI_API_KEY',
+    key: 'aiApiKey',
     section: 'ai',
     tomlKey: 'api_key',
     envVar: 'AI_API_KEY',
@@ -67,7 +79,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     allowEmptyString: true,
   },
   {
-    key: 'AI_BASE_URL',
+    key: 'aiBaseUrl',
     section: 'ai',
     tomlKey: 'base_url',
     envVar: 'AI_BASE_URL',
@@ -76,7 +88,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     allowEmptyString: true,
   },
   {
-    key: 'AI_MODEL',
+    key: 'aiModel',
     section: 'ai',
     tomlKey: 'model',
     envVar: 'AI_MODEL',
@@ -85,7 +97,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     allowEmptyString: true,
   },
   {
-    key: 'YJS_PERSISTENCE_FLUSH_MS',
+    key: 'yjsPersistenceFlushMs',
     section: 'yjs',
     tomlKey: 'persistence_flush_interval_ms',
     envVar: 'YJS_PERSISTENCE_FLUSH_MS',
@@ -95,7 +107,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     min: 1,
   },
   {
-    key: 'YJS_VERSION_INTERVAL_MS',
+    key: 'yjsVersionIntervalMs',
     section: 'yjs',
     tomlKey: 'version_snapshot_interval_ms',
     envVar: 'YJS_VERSION_INTERVAL_MS',
@@ -103,6 +115,126 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     defaultValue: 300000,
     allowEmptyString: false,
     min: 1,
+  },
+  {
+    key: 'maxContextChars',
+    section: 'limits',
+    tomlKey: 'context_chars',
+    envVar: 'LIMITS_CONTEXT_CHARS',
+    kind: 'int',
+    defaultValue: 1_000_000,
+    allowEmptyString: false,
+    min: 1000,
+  },
+  {
+    key: 'maxHintChars',
+    section: 'limits',
+    tomlKey: 'hint_chars',
+    envVar: 'LIMITS_HINT_CHARS',
+    kind: 'int',
+    defaultValue: 10_000,
+    allowEmptyString: false,
+    min: 100,
+  },
+  {
+    key: 'maxPromptChars',
+    section: 'limits',
+    tomlKey: 'prompt_chars',
+    envVar: 'LIMITS_PROMPT_CHARS',
+    kind: 'int',
+    defaultValue: 50_000,
+    allowEmptyString: false,
+    min: 100,
+  },
+  {
+    key: 'maxToolEntries',
+    section: 'limits',
+    tomlKey: 'tool_entries',
+    envVar: 'LIMITS_TOOL_ENTRIES',
+    kind: 'int',
+    defaultValue: 2_000,
+    allowEmptyString: false,
+    min: 10,
+  },
+  {
+    key: 'maxToolReadChars',
+    section: 'limits',
+    tomlKey: 'tool_read_chars',
+    envVar: 'LIMITS_TOOL_READ_CHARS',
+    kind: 'int',
+    defaultValue: 120_000,
+    allowEmptyString: false,
+    min: 1000,
+  },
+  {
+    key: 'maxChatMessageChars',
+    section: 'limits',
+    tomlKey: 'chat_message_chars',
+    envVar: 'LIMITS_CHAT_MESSAGE_CHARS',
+    kind: 'int',
+    defaultValue: 20_000,
+    allowEmptyString: false,
+    min: 100,
+  },
+  {
+    key: 'maxPromptNameChars',
+    section: 'limits',
+    tomlKey: 'prompt_name_chars',
+    envVar: 'LIMITS_PROMPT_NAME_CHARS',
+    kind: 'int',
+    defaultValue: 160,
+    allowEmptyString: false,
+    min: 10,
+  },
+  {
+    key: 'maxPromptDescChars',
+    section: 'limits',
+    tomlKey: 'prompt_desc_chars',
+    envVar: 'LIMITS_PROMPT_DESC_CHARS',
+    kind: 'int',
+    defaultValue: 2_000,
+    allowEmptyString: false,
+    min: 100,
+  },
+  {
+    key: 'maxPromptSystemChars',
+    section: 'limits',
+    tomlKey: 'prompt_system_chars',
+    envVar: 'LIMITS_PROMPT_SYSTEM_CHARS',
+    kind: 'int',
+    defaultValue: 80_000,
+    allowEmptyString: false,
+    min: 1000,
+  },
+  {
+    key: 'maxPromptUserChars',
+    section: 'limits',
+    tomlKey: 'prompt_user_chars',
+    envVar: 'LIMITS_PROMPT_USER_CHARS',
+    kind: 'int',
+    defaultValue: 200_000,
+    allowEmptyString: false,
+    min: 1000,
+  },
+  {
+    key: 'maxDocImportChars',
+    section: 'limits',
+    tomlKey: 'doc_import_chars',
+    envVar: 'LIMITS_DOC_IMPORT_CHARS',
+    kind: 'int',
+    defaultValue: 500_000,
+    allowEmptyString: false,
+    min: 1000,
+  },
+  {
+    key: 'maxDocExportChars',
+    section: 'limits',
+    tomlKey: 'doc_export_chars',
+    envVar: 'LIMITS_DOC_EXPORT_CHARS',
+    kind: 'int',
+    defaultValue: 1_000_000,
+    allowEmptyString: false,
+    min: 1000,
   },
 ] as const
 
@@ -125,19 +257,73 @@ export const DEFAULT_PERSISTED_CONFIG = Object.freeze(
 )
 
 export const EDITABLE_CONFIG_KEYS = [
-  'AI_API_KEY',
-  'AI_BASE_URL',
-  'AI_MODEL',
-  'YJS_PERSISTENCE_FLUSH_MS',
-  'YJS_VERSION_INTERVAL_MS',
+  'aiApiKey',
+  'aiBaseUrl',
+  'aiModel',
+  'yjsPersistenceFlushMs',
+  'yjsVersionIntervalMs',
+  'maxContextChars',
+  'maxHintChars',
+  'maxPromptChars',
+  'maxToolEntries',
+  'maxToolReadChars',
+  'maxChatMessageChars',
+  'maxPromptNameChars',
+  'maxPromptDescChars',
+  'maxPromptSystemChars',
+  'maxPromptUserChars',
+  'maxDocImportChars',
+  'maxDocExportChars',
 ] as const satisfies ReadonlyArray<PersistedConfigKey>
 
-const yjsPersistenceFlushField = CONFIG_FIELD_BY_KEY.YJS_PERSISTENCE_FLUSH_MS
-const yjsVersionIntervalField = CONFIG_FIELD_BY_KEY.YJS_VERSION_INTERVAL_MS
+export const LIMITS_CONFIG_KEYS = [
+  'maxContextChars',
+  'maxHintChars',
+  'maxPromptChars',
+  'maxToolEntries',
+  'maxToolReadChars',
+  'maxChatMessageChars',
+  'maxPromptNameChars',
+  'maxPromptDescChars',
+  'maxPromptSystemChars',
+  'maxPromptUserChars',
+  'maxDocImportChars',
+  'maxDocExportChars',
+] as const satisfies ReadonlyArray<PersistedConfigKey>
+
+export interface LimitsConfig {
+  contextChars: number
+  hintChars: number
+  promptChars: number
+  toolEntries: number
+  toolReadChars: number
+  chatMessageChars: number
+  promptNameChars: number
+  promptDescChars: number
+  promptSystemChars: number
+  promptUserChars: number
+  docImportChars: number
+  docExportChars: number
+}
+
+const yjsPersistenceFlushField = CONFIG_FIELD_BY_KEY.yjsPersistenceFlushMs
+const yjsVersionIntervalField = CONFIG_FIELD_BY_KEY.yjsVersionIntervalMs
+const limitsContextCharsField = CONFIG_FIELD_BY_KEY.maxContextChars
+const limitsHintCharsField = CONFIG_FIELD_BY_KEY.maxHintChars
+const limitsPromptCharsField = CONFIG_FIELD_BY_KEY.maxPromptChars
+const limitsToolEntriesField = CONFIG_FIELD_BY_KEY.maxToolEntries
+const limitsToolReadCharsField = CONFIG_FIELD_BY_KEY.maxToolReadChars
+const limitsChatMessageCharsField = CONFIG_FIELD_BY_KEY.maxChatMessageChars
+const limitsPromptNameCharsField = CONFIG_FIELD_BY_KEY.maxPromptNameChars
+const limitsPromptDescCharsField = CONFIG_FIELD_BY_KEY.maxPromptDescChars
+const limitsPromptSystemCharsField = CONFIG_FIELD_BY_KEY.maxPromptSystemChars
+const limitsPromptUserCharsField = CONFIG_FIELD_BY_KEY.maxPromptUserChars
+const limitsDocImportCharsField = CONFIG_FIELD_BY_KEY.maxDocImportChars
+const limitsDocExportCharsField = CONFIG_FIELD_BY_KEY.maxDocExportChars
 
 export const editableConfigSchema = z.object({
-  AI_API_KEY: z.string().max(4096),
-  AI_BASE_URL: z
+  aiApiKey: z.string().max(4096),
+  aiBaseUrl: z
     .string()
     .max(2048)
     .refine(
@@ -155,17 +341,65 @@ export const editableConfigSchema = z.object({
         message: 'Must be a valid http(s) URL or empty to use provider defaults.',
       }
     ),
-  AI_MODEL: z.string().max(200),
-  YJS_PERSISTENCE_FLUSH_MS: z
+  aiModel: z.string().max(200),
+  yjsPersistenceFlushMs: z
     .number()
     .int()
     .min(Math.max(yjsPersistenceFlushField.min ?? 1, 100))
     .max(600000),
-  YJS_VERSION_INTERVAL_MS: z
+  yjsVersionIntervalMs: z
     .number()
     .int()
     .min(Math.max(yjsVersionIntervalField.min ?? 1, 1000))
     .max(86400000),
+  maxContextChars: z
+    .number()
+    .int()
+    .min(limitsContextCharsField.min ?? 1000),
+  maxHintChars: z
+    .number()
+    .int()
+    .min(limitsHintCharsField.min ?? 100),
+  maxPromptChars: z
+    .number()
+    .int()
+    .min(limitsPromptCharsField.min ?? 100),
+  maxToolEntries: z
+    .number()
+    .int()
+    .min(limitsToolEntriesField.min ?? 10),
+  maxToolReadChars: z
+    .number()
+    .int()
+    .min(limitsToolReadCharsField.min ?? 1000),
+  maxChatMessageChars: z
+    .number()
+    .int()
+    .min(limitsChatMessageCharsField.min ?? 100),
+  maxPromptNameChars: z
+    .number()
+    .int()
+    .min(limitsPromptNameCharsField.min ?? 10),
+  maxPromptDescChars: z
+    .number()
+    .int()
+    .min(limitsPromptDescCharsField.min ?? 100),
+  maxPromptSystemChars: z
+    .number()
+    .int()
+    .min(limitsPromptSystemCharsField.min ?? 1000),
+  maxPromptUserChars: z
+    .number()
+    .int()
+    .min(limitsPromptUserCharsField.min ?? 1000),
+  maxDocImportChars: z
+    .number()
+    .int()
+    .min(limitsDocImportCharsField.min ?? 1000),
+  maxDocExportChars: z
+    .number()
+    .int()
+    .min(limitsDocExportCharsField.min ?? 1000),
 })
 
 export type EditableConfigInput = z.infer<typeof editableConfigSchema>

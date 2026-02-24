@@ -22,7 +22,7 @@ import {
   readResponseError,
   serializeConversationForPrompt,
   toModelMessages,
-  TOOL_LIMITS,
+  getToolLimits,
   type PersistedChatThread,
 } from './utils.js'
 
@@ -253,7 +253,7 @@ export class GenerationEngine {
           const allEntries = [...directoryEntries, ...fileEntries].sort((left, right) =>
             left.path.localeCompare(right.path)
           )
-          const entries = allEntries.slice(0, TOOL_LIMITS.MAX_TOOL_ENTRIES)
+          const entries = allEntries.slice(0, getToolLimits().MAX_TOOL_ENTRIES)
 
           return {
             path: normalizedPath || '/',
@@ -300,8 +300,9 @@ export class GenerationEngine {
 
           let content = lines.slice(start - 1, end).join('\n')
           let truncated = false
-          if (content.length > TOOL_LIMITS.MAX_TOOL_READ_CHARS) {
-            content = content.slice(0, TOOL_LIMITS.MAX_TOOL_READ_CHARS)
+          const toolLimits = getToolLimits()
+          if (content.length > toolLimits.MAX_TOOL_READ_CHARS) {
+            content = content.slice(0, toolLimits.MAX_TOOL_READ_CHARS)
             truncated = true
           }
 

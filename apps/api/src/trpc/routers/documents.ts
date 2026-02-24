@@ -2,14 +2,18 @@ import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../index.js'
 import { documentsRepo, projectsRepo } from '../../db/index.js'
+import type { ImportDocumentErrorKind } from '../../db/repositories/documents.js'
 import {
   isValidId,
   normalizeDocumentPath,
   pathHasSentinelSegment,
   toDirectorySentinelPath,
+  parseContent,
+  proseMirrorDocToMarkdown,
   type JsonObject,
   type JsonValue,
 } from '@plotline/shared'
+import { configManager } from '../../config/manager.js'
 import { projectSyncBus } from '../project-sync.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
@@ -494,5 +498,116 @@ export const documentsRouter = router({
       })
 
       return deleted
+    }),
+
+  export: publicProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        id: idSchema,
+      })
+    )
+    .query(async ({ input }) => {
+      const maxDocExportChars = configManager.getConfig().limits.docExportChars
+      const doc = await documentsRepo.getDocumentForProject(input.projectId, input.id)
+      if (!doc) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Document ${input.id} not found in project ${input.projectId}`,
+        })
+      }
+
+      let markdown = ''
+      try {
+        const parsed = parseContent(doc.content)
+        const markdownResult = proseMirrorDocToMarkdown(parsed.doc)
+        if (!markdownResult.ok) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Failed to serialize document to markdown',
+          })
+        }
+        markdown = markdownResult.value
+      } catch {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to serialize document to markdown',
+        })
+      }
+
+      if (markdown.length > maxDocExportChars) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Document export exceeds limit of ${maxDocExportChars} characters`,
+        })
+      }
+
+      return {
+        title: normalizeDocumentPath(doc.title),
+        markdown,
+      }
+    }),
+
+  import: publicProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        title: pathSchema,
+        markdown: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const maxDocImportChars = configManager.getConfig().limits.docImportChars
+      if (input.markdown.length > maxDocImportChars) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Markdown import exceeds limit of ${maxDocImportChars} characters`,
+        })
+      }
+
+      const normalizedTitle = normalizeAndValidatePath(input.title, 'Document path')
+      const result = await documentsRepo.importDocumentForProject(
+        input.projectId,
+        normalizedTitle,
+        input.markdown
+      )
+
+      if (!result.ok) {
+        const errorMessages: Record<
+          ImportDocumentErrorKind,
+          { code: 'NOT_FOUND' | 'BAD_REQUEST'; message: string }
+        > = {
+          invalid_project_id: {
+            code: 'BAD_REQUEST',
+            message: 'Invalid project ID',
+          },
+          invalid_path: {
+            code: 'BAD_REQUEST',
+            message: `Cannot import document at ${normalizedTitle}: invalid path`,
+          },
+          project_not_found: {
+            code: 'NOT_FOUND',
+            message: `Project ${input.projectId} not found`,
+          },
+          markdown_parse_failed: {
+            code: 'BAD_REQUEST',
+            message: 'Failed to parse markdown content',
+          },
+        }
+        const { code, message } = errorMessages[result.error.kind]
+        throw new TRPCError({ code, message })
+      }
+
+      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId)
+      projectSyncBus.publish({
+        type: 'documents.changed',
+        projectId: input.projectId,
+        reason: 'documents.create',
+        changedDocumentIds: [result.doc.id],
+        deletedDocumentIds: [],
+        defaultDocumentId,
+      })
+
+      return result.doc
     }),
 })

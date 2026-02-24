@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import {
   DEFAULT_PERSISTED_CONFIG,
+  EDITABLE_CONFIG_KEYS,
   editableConfigSchema,
   type EditableConfigInput,
 } from '@plotline/shared'
@@ -23,8 +24,53 @@ import {
 } from '@/components/ui/input-group'
 
 type ConfigFormValues = EditableConfigInput
+type EditableFieldKey = keyof ConfigFormValues
+type NumberFieldKey = {
+  [Key in EditableFieldKey]: ConfigFormValues[Key] extends number ? Key : never
+}[EditableFieldKey]
+type StringFieldKey = Exclude<EditableFieldKey, NumberFieldKey>
 
 type FieldSource = 'env' | 'file' | 'default'
+type ConfigFieldPayload = {
+  effectiveValue: string | number
+  fileValue: string | number | null
+  source: FieldSource
+  isOverridden: boolean
+}
+type RuntimeFieldKey = 'host' | 'port' | 'nodeEnv'
+type ConfigQueryData = {
+  fields: Record<EditableFieldKey | RuntimeFieldKey, ConfigFieldPayload>
+  runtime: {
+    nodeEnv: string
+    host: string
+    port: number
+    configFilePath: string
+    dataDir: string
+    isLoopbackHost: boolean
+  }
+}
+type EditableFieldMeta =
+  | {
+      kind: 'secret'
+      id: string
+      label: string
+      description: string
+      placeholder?: string
+    }
+  | {
+      kind: 'text'
+      id: string
+      label: string
+      description: string
+      placeholder?: string
+    }
+  | {
+      kind: 'number'
+      id: string
+      label: string
+      description: string
+      overrideSuffix?: string
+    }
 
 function sourceBadge(source: FieldSource): {
   label: string
@@ -40,50 +86,177 @@ function formatDisplayValue(value: string | number): string {
   return value || '(empty)'
 }
 
+const EDITABLE_FIELD_META: Record<EditableFieldKey, EditableFieldMeta> = {
+  aiApiKey: {
+    kind: 'secret',
+    id: 'ai-api-key',
+    label: 'API key',
+    description: 'Hidden by default. Current effective value is returned by the API.',
+    placeholder: 'sk-...',
+  },
+  aiBaseUrl: {
+    kind: 'text',
+    id: 'ai-base-url',
+    label: 'Base URL',
+    description: 'Leave empty to use provider defaults derived from the model name.',
+    placeholder: 'https://api.openai.com/v1',
+  },
+  aiModel: {
+    kind: 'text',
+    id: 'ai-model',
+    label: 'Model',
+    description: 'Model ID passed to your AI provider.',
+    placeholder: 'gpt-5',
+  },
+  yjsPersistenceFlushMs: {
+    kind: 'number',
+    id: 'flush-ms',
+    label: 'Flush interval (ms)',
+    description: 'How often dirty documents flush to SQLite.',
+    overrideSuffix: ' ms',
+  },
+  yjsVersionIntervalMs: {
+    kind: 'number',
+    id: 'snapshot-ms',
+    label: 'Snapshot interval (ms)',
+    description: 'How often active documents auto-create version snapshots.',
+    overrideSuffix: ' ms',
+  },
+  maxContextChars: {
+    kind: 'number',
+    id: 'max-context',
+    label: 'Context chars',
+    description: 'Max characters for AI context.',
+  },
+  maxHintChars: {
+    kind: 'number',
+    id: 'max-hint',
+    label: 'Hint chars',
+    description: 'Max characters for hints.',
+  },
+  maxPromptChars: {
+    kind: 'number',
+    id: 'max-prompt',
+    label: 'Prompt chars',
+    description: 'Max characters for prompts.',
+  },
+  maxToolEntries: {
+    kind: 'number',
+    id: 'max-tool-entries',
+    label: 'Tool entries',
+    description: 'Max entries returned by tools.',
+  },
+  maxToolReadChars: {
+    kind: 'number',
+    id: 'max-tool-read',
+    label: 'Tool read chars',
+    description: 'Max characters read by tools.',
+  },
+  maxChatMessageChars: {
+    kind: 'number',
+    id: 'max-chat-msg',
+    label: 'Chat message chars',
+    description: 'Max characters per chat message.',
+  },
+  maxPromptNameChars: {
+    kind: 'number',
+    id: 'max-prompt-name',
+    label: 'Prompt name chars',
+    description: 'Max prompt name length.',
+  },
+  maxPromptDescChars: {
+    kind: 'number',
+    id: 'max-prompt-desc',
+    label: 'Prompt desc chars',
+    description: 'Max prompt description length.',
+  },
+  maxPromptSystemChars: {
+    kind: 'number',
+    id: 'max-prompt-system',
+    label: 'Prompt system chars',
+    description: 'Max system prompt length.',
+  },
+  maxPromptUserChars: {
+    kind: 'number',
+    id: 'max-prompt-user',
+    label: 'Prompt user chars',
+    description: 'Max user prompt length.',
+  },
+  maxDocImportChars: {
+    kind: 'number',
+    id: 'max-doc-import',
+    label: 'Doc import chars',
+    description: 'Max characters for document import.',
+  },
+  maxDocExportChars: {
+    kind: 'number',
+    id: 'max-doc-export',
+    label: 'Doc export chars',
+    description: 'Max characters for document export.',
+  },
+}
+
+const AI_FIELD_KEYS = [
+  'aiApiKey',
+  'aiBaseUrl',
+  'aiModel',
+] as const satisfies ReadonlyArray<EditableFieldKey>
+const COLLABORATION_FIELD_KEYS = [
+  'yjsPersistenceFlushMs',
+  'yjsVersionIntervalMs',
+] as const satisfies ReadonlyArray<EditableFieldKey>
+const LIMIT_FIELD_ROWS = [
+  {
+    keys: ['maxContextChars', 'maxHintChars', 'maxPromptChars'],
+    columnsClassName: 'sm:grid-cols-3',
+  },
+  {
+    keys: ['maxToolEntries', 'maxToolReadChars', 'maxChatMessageChars'],
+    columnsClassName: 'sm:grid-cols-3',
+  },
+  {
+    keys: [
+      'maxPromptNameChars',
+      'maxPromptDescChars',
+      'maxPromptSystemChars',
+      'maxPromptUserChars',
+    ],
+    columnsClassName: 'sm:grid-cols-2',
+  },
+  {
+    keys: ['maxDocImportChars', 'maxDocExportChars'],
+    columnsClassName: 'sm:grid-cols-2',
+  },
+] as const satisfies ReadonlyArray<{
+  keys: ReadonlyArray<EditableFieldKey>
+  columnsClassName: string
+}>
+
+function toFormValues(data: ConfigQueryData | undefined): ConfigFormValues {
+  const values: Partial<Record<EditableFieldKey, string | number>> = {}
+
+  for (const key of EDITABLE_CONFIG_KEYS) {
+    const fallback = DEFAULT_PERSISTED_CONFIG[key]
+    const rawValue = data?.fields[key].fileValue ?? fallback
+    values[key] = typeof fallback === 'number' ? Number(rawValue) : String(rawValue)
+  }
+
+  return values as ConfigFormValues
+}
+
 export function AdminConfigPage() {
   const navigate = useNavigate()
   const [showApiKey, setShowApiKey] = useState(false)
   const configQuery = trpc.config.get.useQuery()
   const updateMutation = trpc.config.update.useMutation()
   const utils = trpc.useUtils()
-  type ConfigQueryData = NonNullable<typeof configQuery.data>
-
-  const toFormValues = useCallback(
-    (data: ConfigQueryData | undefined): ConfigFormValues => ({
-      AI_API_KEY: data
-        ? String(data.fields.AI_API_KEY.fileValue ?? DEFAULT_PERSISTED_CONFIG.AI_API_KEY)
-        : DEFAULT_PERSISTED_CONFIG.AI_API_KEY,
-      AI_BASE_URL: data
-        ? String(data.fields.AI_BASE_URL.fileValue ?? DEFAULT_PERSISTED_CONFIG.AI_BASE_URL)
-        : DEFAULT_PERSISTED_CONFIG.AI_BASE_URL,
-      AI_MODEL: data
-        ? String(data.fields.AI_MODEL.fileValue ?? DEFAULT_PERSISTED_CONFIG.AI_MODEL)
-        : DEFAULT_PERSISTED_CONFIG.AI_MODEL,
-      YJS_PERSISTENCE_FLUSH_MS: data
-        ? Number(
-            data.fields.YJS_PERSISTENCE_FLUSH_MS.fileValue ??
-              DEFAULT_PERSISTED_CONFIG.YJS_PERSISTENCE_FLUSH_MS
-          )
-        : DEFAULT_PERSISTED_CONFIG.YJS_PERSISTENCE_FLUSH_MS,
-      YJS_VERSION_INTERVAL_MS: data
-        ? Number(
-            data.fields.YJS_VERSION_INTERVAL_MS.fileValue ??
-              DEFAULT_PERSISTED_CONFIG.YJS_VERSION_INTERVAL_MS
-          )
-        : DEFAULT_PERSISTED_CONFIG.YJS_VERSION_INTERVAL_MS,
-    }),
-    []
-  )
 
   const form = useForm<ConfigFormValues>({
     resolver: zodResolver(editableConfigSchema),
-    defaultValues: toFormValues(configQuery.data ?? undefined),
+    defaultValues: toFormValues(configQuery.data),
   })
 
-  const queryValues = useMemo(
-    () => toFormValues(configQuery.data ?? undefined),
-    [configQuery.data, toFormValues]
-  )
+  const queryValues = toFormValues(configQuery.data)
 
   useEffect(() => {
     if (!configQuery.data) return
@@ -146,14 +319,76 @@ export function AdminConfigPage() {
   const fields = configQuery.data.fields
   const runtime = configQuery.data.runtime
 
-  const aiSource = sourceBadge(fields.AI_API_KEY.source)
-  const baseUrlSource = sourceBadge(fields.AI_BASE_URL.source)
-  const modelSource = sourceBadge(fields.AI_MODEL.source)
-  const flushSource = sourceBadge(fields.YJS_PERSISTENCE_FLUSH_MS.source)
-  const versionSource = sourceBadge(fields.YJS_VERSION_INTERVAL_MS.source)
-  const hostSource = sourceBadge(fields.HOST.source)
-  const portSource = sourceBadge(fields.PORT.source)
-  const nodeEnvSource = sourceBadge(fields.NODE_ENV.source)
+  const renderEditableField = (key: EditableFieldKey) => {
+    const meta = EDITABLE_FIELD_META[key]
+    const fieldState = fields[key]
+    const badge = sourceBadge(fieldState.source)
+    const errorMessage = form.formState.errors[key]?.message
+
+    const sharedDescription = (
+      <FieldDescription key={`${key}-description`}>{meta.description}</FieldDescription>
+    )
+
+    const overrideDescription =
+      meta.kind === 'secret' ? (
+        <FieldDescription key={`${key}-override`}>
+          Env var override is active. Runtime uses environment value even after save.
+        </FieldDescription>
+      ) : (
+        <FieldDescription key={`${key}-override`}>
+          Runtime currently uses env override:{' '}
+          <code>
+            {formatDisplayValue(fieldState.effectiveValue)}
+            {meta.kind === 'number' ? (meta.overrideSuffix ?? '') : ''}
+          </code>
+        </FieldDescription>
+      )
+
+    const inputControl =
+      meta.kind === 'secret' ? (
+        <InputGroup>
+          <InputGroupInput
+            id={meta.id}
+            type={showApiKey ? 'text' : 'password'}
+            autoComplete="off"
+            placeholder={meta.placeholder}
+            {...form.register(key as StringFieldKey)}
+          />
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton
+              size="icon-xs"
+              aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+              onClick={() => setShowApiKey((value) => !value)}
+            >
+              {showApiKey ? <EyeOff /> : <Eye />}
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+      ) : (
+        <Input
+          id={meta.id}
+          type={meta.kind === 'number' ? 'number' : 'text'}
+          autoComplete="off"
+          placeholder={meta.kind === 'text' ? meta.placeholder : undefined}
+          {...(meta.kind === 'number'
+            ? form.register(key as NumberFieldKey, { valueAsNumber: true })
+            : form.register(key as StringFieldKey))}
+        />
+      )
+
+    return (
+      <Field key={key}>
+        <div className="flex items-center gap-2">
+          <FieldLabel htmlFor={meta.id}>{meta.label}</FieldLabel>
+          <Badge variant={badge.variant}>{badge.label}</Badge>
+        </div>
+        {inputControl}
+        {sharedDescription}
+        {fieldState.isOverridden && overrideDescription}
+        <FieldError>{errorMessage}</FieldError>
+      </Field>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -219,83 +454,7 @@ export function AdminConfigPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-6">
-              <Field>
-                <div className="flex items-center gap-2">
-                  <FieldLabel htmlFor="ai-api-key">API key</FieldLabel>
-                  <Badge variant={aiSource.variant}>{aiSource.label}</Badge>
-                </div>
-                <InputGroup>
-                  <InputGroupInput
-                    id="ai-api-key"
-                    type={showApiKey ? 'text' : 'password'}
-                    autoComplete="off"
-                    placeholder="sk-..."
-                    {...form.register('AI_API_KEY')}
-                  />
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      size="icon-xs"
-                      aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
-                      onClick={() => setShowApiKey((value) => !value)}
-                    >
-                      {showApiKey ? <EyeOff /> : <Eye />}
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
-                <FieldDescription>
-                  Hidden by default. Current effective value is returned by the API.
-                </FieldDescription>
-                {fields.AI_API_KEY.isOverridden && (
-                  <FieldDescription>
-                    Env var override is active. Runtime uses environment value even after save.
-                  </FieldDescription>
-                )}
-                <FieldError>{form.formState.errors.AI_API_KEY?.message}</FieldError>
-              </Field>
-
-              <Field>
-                <div className="flex items-center gap-2">
-                  <FieldLabel htmlFor="ai-base-url">Base URL</FieldLabel>
-                  <Badge variant={baseUrlSource.variant}>{baseUrlSource.label}</Badge>
-                </div>
-                <Input
-                  id="ai-base-url"
-                  autoComplete="off"
-                  placeholder="https://api.openai.com/v1"
-                  {...form.register('AI_BASE_URL')}
-                />
-                <FieldDescription>
-                  Leave empty to use provider defaults derived from the model name.
-                </FieldDescription>
-                {fields.AI_BASE_URL.isOverridden && (
-                  <FieldDescription>
-                    Runtime currently uses env override:{' '}
-                    <code>{formatDisplayValue(fields.AI_BASE_URL.effectiveValue)}</code>
-                  </FieldDescription>
-                )}
-                <FieldError>{form.formState.errors.AI_BASE_URL?.message}</FieldError>
-              </Field>
-
-              <Field>
-                <div className="flex items-center gap-2">
-                  <FieldLabel htmlFor="ai-model">Model</FieldLabel>
-                  <Badge variant={modelSource.variant}>{modelSource.label}</Badge>
-                </div>
-                <Input
-                  id="ai-model"
-                  autoComplete="off"
-                  placeholder="gpt-5"
-                  {...form.register('AI_MODEL')}
-                />
-                <FieldDescription>Model ID passed to your AI provider.</FieldDescription>
-                {fields.AI_MODEL.isOverridden && (
-                  <FieldDescription>
-                    Runtime currently uses env override:{' '}
-                    <code>{formatDisplayValue(fields.AI_MODEL.effectiveValue)}</code>
-                  </FieldDescription>
-                )}
-                <FieldError>{form.formState.errors.AI_MODEL?.message}</FieldError>
-              </Field>
+              {AI_FIELD_KEYS.map(renderEditableField)}
             </CardContent>
           </Card>
 
@@ -308,57 +467,23 @@ export function AdminConfigPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-6 sm:grid-cols-2">
-              <Field>
-                <div className="flex items-center gap-2">
-                  <FieldLabel htmlFor="flush-ms">Flush interval (ms)</FieldLabel>
-                  <Badge variant={flushSource.variant}>{flushSource.label}</Badge>
-                </div>
-                <Input
-                  id="flush-ms"
-                  type="number"
-                  autoComplete="off"
-                  min={100}
-                  step={100}
-                  {...form.register('YJS_PERSISTENCE_FLUSH_MS', { valueAsNumber: true })}
-                />
-                <FieldDescription>How often dirty documents flush to SQLite.</FieldDescription>
-                {fields.YJS_PERSISTENCE_FLUSH_MS.isOverridden && (
-                  <FieldDescription>
-                    Runtime currently uses env override:{' '}
-                    <code>
-                      {formatDisplayValue(fields.YJS_PERSISTENCE_FLUSH_MS.effectiveValue)} ms
-                    </code>
-                  </FieldDescription>
-                )}
-                <FieldError>{form.formState.errors.YJS_PERSISTENCE_FLUSH_MS?.message}</FieldError>
-              </Field>
+              {COLLABORATION_FIELD_KEYS.map(renderEditableField)}
+            </CardContent>
+          </Card>
 
-              <Field>
-                <div className="flex items-center gap-2">
-                  <FieldLabel htmlFor="snapshot-ms">Snapshot interval (ms)</FieldLabel>
-                  <Badge variant={versionSource.variant}>{versionSource.label}</Badge>
+          <Card>
+            <CardHeader>
+              <CardTitle>Limits</CardTitle>
+              <CardDescription>
+                Character and entry limits for various operations. Changes take effect immediately.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-6">
+              {LIMIT_FIELD_ROWS.map((row) => (
+                <div key={row.keys.join('-')} className={`grid gap-4 ${row.columnsClassName}`}>
+                  {row.keys.map(renderEditableField)}
                 </div>
-                <Input
-                  id="snapshot-ms"
-                  type="number"
-                  autoComplete="off"
-                  min={1000}
-                  step={1000}
-                  {...form.register('YJS_VERSION_INTERVAL_MS', { valueAsNumber: true })}
-                />
-                <FieldDescription>
-                  How often active documents auto-create version snapshots.
-                </FieldDescription>
-                {fields.YJS_VERSION_INTERVAL_MS.isOverridden && (
-                  <FieldDescription>
-                    Runtime currently uses env override:{' '}
-                    <code>
-                      {formatDisplayValue(fields.YJS_VERSION_INTERVAL_MS.effectiveValue)} ms
-                    </code>
-                  </FieldDescription>
-                )}
-                <FieldError>{form.formState.errors.YJS_VERSION_INTERVAL_MS?.message}</FieldError>
-              </Field>
+              ))}
             </CardContent>
           </Card>
 
@@ -368,27 +493,31 @@ export function AdminConfigPage() {
               <CardDescription>Read-only values currently active on the server.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-              <div className="bg-muted/40 rounded-xl border px-3 py-2">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="text-muted-foreground text-sm">Host</p>
-                  <Badge variant={hostSource.variant}>{hostSource.label}</Badge>
+              {[
+                {
+                  label: 'Host',
+                  value: runtime.host,
+                  source: sourceBadge(fields.host.source),
+                },
+                {
+                  label: 'Port',
+                  value: runtime.port,
+                  source: sourceBadge(fields.port.source),
+                },
+                {
+                  label: 'Environment',
+                  value: runtime.nodeEnv,
+                  source: sourceBadge(fields.nodeEnv.source),
+                },
+              ].map((item) => (
+                <div key={item.label} className="bg-muted/40 rounded-xl border px-3 py-2">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <p className="text-muted-foreground text-sm">{item.label}</p>
+                    <Badge variant={item.source.variant}>{item.source.label}</Badge>
+                  </div>
+                  <p className="font-medium">{item.value}</p>
                 </div>
-                <p className="font-medium">{runtime.host}</p>
-              </div>
-              <div className="bg-muted/40 rounded-xl border px-3 py-2">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="text-muted-foreground text-sm">Port</p>
-                  <Badge variant={portSource.variant}>{portSource.label}</Badge>
-                </div>
-                <p className="font-medium">{runtime.port}</p>
-              </div>
-              <div className="bg-muted/40 rounded-xl border px-3 py-2">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="text-muted-foreground text-sm">Environment</p>
-                  <Badge variant={nodeEnvSource.variant}>{nodeEnvSource.label}</Badge>
-                </div>
-                <p className="font-medium">{runtime.nodeEnv}</p>
-              </div>
+              ))}
               <div className="bg-muted/40 rounded-xl border px-3 py-2">
                 <p className="text-muted-foreground mb-1 text-sm">Config file</p>
                 <p className="font-mono text-xs">{runtime.configFilePath}</p>

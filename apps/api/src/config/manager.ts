@@ -10,6 +10,7 @@ import {
   type PersistedAppConfig,
   type PersistedConfigKey,
   type PersistedConfigSection,
+  type LimitsConfig,
 } from '@plotline/shared'
 import {
   CONFIG_FILE_NAME,
@@ -59,6 +60,7 @@ export interface AppConfig {
     persistenceFlushIntervalMs: number
     versionSnapshotIntervalMs: number
   }
+  limits: LimitsConfig
 }
 
 export interface ConfigStateSnapshot {
@@ -265,6 +267,7 @@ function serializeConfig(config: PersistedAppConfig): string {
     server: {},
     ai: {},
     yjs: {},
+    limits: {},
   }
 
   for (const field of CONFIG_FIELD_DEFINITIONS) {
@@ -315,22 +318,22 @@ function guessProviderFromDomain(baseURL: string, model: string): AiProvider {
 }
 
 function resolveAiConfig(config: PersistedAppConfig): ResolvedAiConfig {
-  const defaultModel = config.AI_MODEL || DEFAULT_AI_MODEL
-  const provider = guessProviderFromDomain(config.AI_BASE_URL, defaultModel)
+  const defaultModel = config.aiModel || DEFAULT_AI_MODEL
+  const provider = guessProviderFromDomain(config.aiBaseUrl, defaultModel)
 
   if (provider === 'anthropic') {
     return {
       provider,
-      apiKey: config.AI_API_KEY,
-      baseURL: config.AI_BASE_URL || DEFAULT_ANTHROPIC_BASE_URL,
-      model: config.AI_MODEL || DEFAULT_ANTHROPIC_MODEL,
+      apiKey: config.aiApiKey,
+      baseURL: config.aiBaseUrl || DEFAULT_ANTHROPIC_BASE_URL,
+      model: config.aiModel || DEFAULT_ANTHROPIC_MODEL,
     }
   }
 
   return {
     provider,
-    apiKey: config.AI_API_KEY,
-    baseURL: config.AI_BASE_URL || DEFAULT_OPENAI_BASE_URL,
+    apiKey: config.aiApiKey,
+    baseURL: config.aiBaseUrl || DEFAULT_OPENAI_BASE_URL,
     model: defaultModel,
   }
 }
@@ -342,7 +345,25 @@ function freezeResolvedConfig(config: AppConfig): AppConfig {
   Object.freeze(config.paths)
   Object.freeze(config.ai)
   Object.freeze(config.yjs)
+  Object.freeze(config.limits)
   return Object.freeze(config)
+}
+
+function buildLimitsConfig(rawConfig: PersistedAppConfig): LimitsConfig {
+  return {
+    contextChars: rawConfig.maxContextChars,
+    hintChars: rawConfig.maxHintChars,
+    promptChars: rawConfig.maxPromptChars,
+    toolEntries: rawConfig.maxToolEntries,
+    toolReadChars: rawConfig.maxToolReadChars,
+    chatMessageChars: rawConfig.maxChatMessageChars,
+    promptNameChars: rawConfig.maxPromptNameChars,
+    promptDescChars: rawConfig.maxPromptDescChars,
+    promptSystemChars: rawConfig.maxPromptSystemChars,
+    promptUserChars: rawConfig.maxPromptUserChars,
+    docImportChars: rawConfig.maxDocImportChars,
+    docExportChars: rawConfig.maxDocExportChars,
+  }
 }
 
 function buildResolvedConfig(
@@ -354,12 +375,12 @@ function buildResolvedConfig(
   return freezeResolvedConfig({
     raw: { ...rawConfig },
     runtime: {
-      nodeEnv: rawConfig.NODE_ENV,
-      isProduction: rawConfig.NODE_ENV === 'production',
+      nodeEnv: rawConfig.nodeEnv,
+      isProduction: rawConfig.nodeEnv === 'production',
     },
     server: {
-      host: rawConfig.HOST,
-      port: rawConfig.PORT,
+      host: rawConfig.host,
+      port: rawConfig.port,
     },
     paths: {
       dataDir: resolveDataDir(configuredDataDir),
@@ -368,9 +389,10 @@ function buildResolvedConfig(
     },
     ai: { ...aiConfig },
     yjs: {
-      persistenceFlushIntervalMs: rawConfig.YJS_PERSISTENCE_FLUSH_MS,
-      versionSnapshotIntervalMs: rawConfig.YJS_VERSION_INTERVAL_MS,
+      persistenceFlushIntervalMs: rawConfig.yjsPersistenceFlushMs,
+      versionSnapshotIntervalMs: rawConfig.yjsVersionIntervalMs,
     },
+    limits: buildLimitsConfig(rawConfig),
   })
 }
 

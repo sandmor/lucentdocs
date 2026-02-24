@@ -79,9 +79,9 @@ describe('ConfigManager', () => {
       server?: { host?: string; port?: number }
     }
 
-    expect(parsed.app?.environment).toBe(DEFAULT_PERSISTED_CONFIG.NODE_ENV)
-    expect(parsed.server?.host).toBe(DEFAULT_PERSISTED_CONFIG.HOST)
-    expect(parsed.server?.port).toBe(DEFAULT_PERSISTED_CONFIG.PORT)
+    expect(parsed.app?.environment).toBe(DEFAULT_PERSISTED_CONFIG.nodeEnv)
+    expect(parsed.server?.host).toBe(DEFAULT_PERSISTED_CONFIG.host)
+    expect(parsed.server?.port).toBe(DEFAULT_PERSISTED_CONFIG.port)
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
@@ -101,13 +101,13 @@ describe('ConfigManager', () => {
     })
 
     const result = manager.updateFileConfig({
-      AI_MODEL: 'gpt-from-file',
-      YJS_PERSISTENCE_FLUSH_MS: 7777,
+      aiModel: 'gpt-from-file',
+      yjsPersistenceFlushMs: 7777,
     })
 
-    expect(result.changedFileKeys.sort()).toEqual(['AI_MODEL', 'YJS_PERSISTENCE_FLUSH_MS'])
+    expect(result.changedFileKeys.sort()).toEqual(['aiModel', 'yjsPersistenceFlushMs'])
     expect(result.changedEffectiveKeys).toEqual([])
-    expect(result.overriddenChangedKeys.sort()).toEqual(['AI_MODEL', 'YJS_PERSISTENCE_FLUSH_MS'])
+    expect(result.overriddenChangedKeys.sort()).toEqual(['aiModel', 'yjsPersistenceFlushMs'])
     expect(result.state.config.ai.model).toBe('gpt-from-env')
     expect(result.state.config.yjs.persistenceFlushIntervalMs).toBe(2500)
 
@@ -144,17 +144,17 @@ describe('ConfigManager', () => {
 
     const state = manager.getState()
 
-    expect(state.config.server.host).toBe(DEFAULT_PERSISTED_CONFIG.HOST)
-    expect(state.config.server.port).toBe(DEFAULT_PERSISTED_CONFIG.PORT)
+    expect(state.config.server.host).toBe(DEFAULT_PERSISTED_CONFIG.host)
+    expect(state.config.server.port).toBe(DEFAULT_PERSISTED_CONFIG.port)
     expect(state.config.yjs.persistenceFlushIntervalMs).toBe(
-      DEFAULT_PERSISTED_CONFIG.YJS_PERSISTENCE_FLUSH_MS
+      DEFAULT_PERSISTED_CONFIG.yjsPersistenceFlushMs
     )
-    expect(state.sources.HOST).toBe('default')
-    expect(state.sources.PORT).toBe('default')
-    expect(state.sources.YJS_PERSISTENCE_FLUSH_MS).toBe('default')
-    expect(state.fileConfig.HOST).toBeUndefined()
-    expect(state.fileConfig.PORT).toBeUndefined()
-    expect(state.fileConfig.YJS_PERSISTENCE_FLUSH_MS).toBeUndefined()
+    expect(state.sources.host).toBe('default')
+    expect(state.sources.port).toBe('default')
+    expect(state.sources.yjsPersistenceFlushMs).toBe('default')
+    expect(state.fileConfig.host).toBeUndefined()
+    expect(state.fileConfig.port).toBeUndefined()
+    expect(state.fileConfig.yjsPersistenceFlushMs).toBeUndefined()
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })

@@ -1,5 +1,5 @@
-import type { RefCallback } from 'react'
-import { ChevronRight, FilePlus, FolderPlus } from 'lucide-react'
+import { useRef, type RefCallback } from 'react'
+import { ChevronRight, FilePlus, FolderPlus, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -8,6 +8,8 @@ interface BrowserHeaderProps {
   onGoToCrumb: (index: number) => void
   onCreateDirectory: () => void
   onCreateDocument: () => void
+  onImportDocument: (file: File) => void
+  isImporting: boolean
   rootDropRef: RefCallback<HTMLSpanElement>
   isOverRoot: boolean
 }
@@ -17,9 +19,25 @@ export function BrowserHeader({
   onGoToCrumb,
   onCreateDirectory,
   onCreateDocument,
+  onImportDocument,
+  isImporting,
   rootDropRef,
   isOverRoot,
 }: BrowserHeaderProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      onImportDocument(file)
+      event.target.value = ''
+    }
+  }
+
   return (
     <header className="border-b px-4 py-3">
       <div className="flex items-center justify-between gap-2">
@@ -55,6 +73,17 @@ export function BrowserHeader({
         </div>
 
         <div className="flex items-center gap-1">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".md"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <Button size="sm" variant="outline" onClick={handleImportClick} disabled={isImporting}>
+            <Upload data-icon="inline-start" />
+            Import
+          </Button>
           <Button size="sm" variant="outline" onClick={onCreateDirectory}>
             <FolderPlus data-icon="inline-start" />
             Folder

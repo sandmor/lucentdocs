@@ -7,41 +7,52 @@ import {
   resolveContinuePrompt,
   resolveSelectionPrompt,
 } from '../ai/prompt-engine.js'
+import { configManager } from '../config/manager.js'
 
-const MAX_CONTEXT_CHARS = 1_000_000
-const MAX_HINT_CHARS = 10_000
-const MAX_PROMPT_CHARS = 50_000
+interface AiStreamInput {
+  mode: 'continue' | 'prompt'
+  contextBefore: string
+  contextAfter?: string
+  hint?: string
+  prompt?: string
+  selectedText?: string
+  maxOutputTokens?: number
+}
 
-const aiStreamInputSchema = z
-  .object({
-    mode: z.enum(['continue', 'prompt']),
-    contextBefore: z.string().max(MAX_CONTEXT_CHARS),
-    contextAfter: z.string().max(MAX_CONTEXT_CHARS).optional(),
-    hint: z.string().trim().max(MAX_HINT_CHARS).optional(),
-    prompt: z.string().trim().max(MAX_PROMPT_CHARS).optional(),
-    selectedText: z.string().max(MAX_CONTEXT_CHARS).optional(),
-    maxOutputTokens: z.number().int().min(64).max(4096).optional(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.mode === 'prompt' && !value.prompt?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['prompt'],
-        message: 'Prompt is required when mode is "prompt".',
-      })
-    }
-    const totalContext = value.contextBefore.length + (value.contextAfter?.length ?? 0)
-    if (totalContext > MAX_CONTEXT_CHARS) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['contextBefore'],
-        message: `Combined contextBefore and contextAfter length exceeds ${MAX_CONTEXT_CHARS} characters.`,
-      })
-    }
-  })
+function buildAiStreamInputSchema() {
+  const limits = configManager.getConfig().limits
+  return z
+    .object({
+      mode: z.enum(['continue', 'prompt']),
+      contextBefore: z.string().max(limits.contextChars),
+      contextAfter: z.string().max(limits.contextChars).optional(),
+      hint: z.string().trim().max(limits.hintChars).optional(),
+      prompt: z.string().trim().max(limits.promptChars).optional(),
+      selectedText: z.string().max(limits.contextChars).optional(),
+      maxOutputTokens: z.number().int().min(64).max(4096).optional(),
+    })
+    .superRefine((value, ctx) => {
+      if (value.mode === 'prompt' && !value.prompt?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['prompt'],
+          message: 'Prompt is required when mode is "prompt".',
+        })
+      }
+      const totalContext = value.contextBefore.length + (value.contextAfter?.length ?? 0)
+      if (totalContext > limits.contextChars) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['contextBefore'],
+          message: `Combined contextBefore and contextAfter length exceeds ${limits.contextChars} characters.`,
+        })
+      }
+    }) as z.ZodType<AiStreamInput>
+}
 
 export function registerAiTextStreamRoute(app: Express): void {
   app.post('/api/ai/stream', async (req, res) => {
+    const aiStreamInputSchema = buildAiStreamInputSchema()
     const parsed = aiStreamInputSchema.safeParse(req.body)
     if (!parsed.success) {
       res.status(400).json({ message: 'Invalid AI stream payload', issues: parsed.error.issues })
@@ -195,7 +206,7 @@ async function handleGenericStream(
 async function handleContinueStream(
   req: express.Request,
   res: express.Response,
-  input: z.infer<typeof aiStreamInputSchema> & { mode: 'continue' },
+  input: AiStreamInput & { mode: 'continue' },
   contextAfter: string | null
 ): Promise<void> {
   const rendered = resolveContinuePrompt(input.contextBefore, contextAfter, input.hint)
@@ -236,7 +247,7 @@ async function handleContinueStream(
 async function handlePromptStream(
   req: express.Request,
   res: express.Response,
-  input: z.infer<typeof aiStreamInputSchema> & { mode: 'prompt' },
+  input: AiStreamInput & { mode: 'prompt' },
   contextAfter: string | null,
   selectedText: string | null
 ): Promise<void> {

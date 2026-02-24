@@ -205,7 +205,8 @@ export function AdminPromptsPage() {
     selectionBindingOptions.find((option) => option.id === bindings.selectionEditPromptId) ??
     selectionBindingOptions[0]
   const selectedChatBinding =
-    chatBindingOptions.find((option) => option.id === bindings.chatPromptId) ?? chatBindingOptions[0]
+    chatBindingOptions.find((option) => option.id === bindings.chatPromptId) ??
+    chatBindingOptions[0]
 
   useEffect(() => {
     if (creatingMode !== null) return

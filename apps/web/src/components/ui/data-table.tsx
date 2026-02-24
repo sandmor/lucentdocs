@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/incompatible-library */
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import {
   Table,

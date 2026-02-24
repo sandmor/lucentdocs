@@ -18,11 +18,7 @@ import { SidebarIconBar, type SidebarPanel } from '@/components/editor/sidebar-i
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from '@/components/ui/resizable'
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ArrowLeft, Loader2, Wifi, WifiOff, PanelLeftClose, PanelLeft, Menu, X } from 'lucide-react'
 import type { ConnectionStatus } from '@/lib/yjs-provider'
 import { parseProjectSyncEvent } from '@/lib/project-sync-events'
@@ -612,23 +608,19 @@ export function EditorPage() {
         </div>
       )}
 
-      {hasDocuments &&
-        (documentQuery.error || !documentQuery.data) &&
-        !documentQuery.isLoading && (
-          <div className="flex h-full flex-col items-center justify-center gap-4">
-            <p className="text-destructive">
-              {documentQuery.error?.message ?? 'Document not found'}
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (fallbackDocumentId) handleOpenDocument(fallbackDocumentId)
-              }}
-            >
-              Open default document
-            </Button>
-          </div>
-        )}
+      {hasDocuments && (documentQuery.error || !documentQuery.data) && !documentQuery.isLoading && (
+        <div className="flex h-full flex-col items-center justify-center gap-4">
+          <p className="text-destructive">{documentQuery.error?.message ?? 'Document not found'}</p>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (fallbackDocumentId) handleOpenDocument(fallbackDocumentId)
+            }}
+          >
+            Open default document
+          </Button>
+        </div>
+      )}
 
       {hasDocuments && documentQuery.data && !documentQuery.isLoading && currentDocumentId && (
         <div className="mx-auto max-w-3xl px-4 sm:px-8 py-6 sm:py-10">

@@ -6,6 +6,12 @@ export { isValidId } from './validators.js'
 export { schema } from './schema.js'
 export { parseContent, createDefaultContent } from './content.js'
 export {
+  markdownToProseMirrorDoc,
+  proseMirrorDocToMarkdown,
+  type MarkdownParseError,
+  type MarkdownResult,
+} from './markdown.js'
+export {
   DIRECTORY_SENTINEL_NAME,
   normalizeDocumentPath,
   pathSegments,
@@ -24,6 +30,7 @@ export type {
   ConfigValueKind,
   ConfigFieldDefinition,
   EditableConfigInput,
+  LimitsConfig,
 } from './config.js'
 export {
   CONFIG_FIELD_DEFINITIONS,
@@ -31,6 +38,7 @@ export {
   PERSISTED_CONFIG_KEYS,
   DEFAULT_PERSISTED_CONFIG,
   EDITABLE_CONFIG_KEYS,
+  LIMITS_CONFIG_KEYS,
   editableConfigSchema,
 } from './config.js'
 export type {

@@ -14,6 +14,7 @@ import {
   type JsonObject,
   createDefaultContent,
   parseContent,
+  markdownToProseMirrorDoc,
 } from '@plotline/shared'
 import * as dalDocs from '../dal/documents.js'
 import * as dalProjectDocs from '../dal/projectDocuments.js'
@@ -37,6 +38,21 @@ export interface VersionSnapshot {
   documentId: string
   createdAt: number
 }
+
+export type ImportDocumentErrorKind =
+  | 'invalid_project_id'
+  | 'invalid_path'
+  | 'project_not_found'
+  | 'markdown_parse_failed'
+
+export interface ImportDocumentError {
+  kind: ImportDocumentErrorKind
+  cause?: unknown
+}
+
+export type ImportDocumentResult =
+  | { ok: true; doc: DocumentWithContent }
+  | { ok: false; error: ImportDocumentError }
 
 async function isSoleDocumentForProject(projectId: string, documentId: string): Promise<boolean> {
   const soleProjectId = await dalProjectDocs.findSoleProjectIdByDocumentId(documentId)
@@ -678,5 +694,82 @@ export async function openOrCreateDefaultDocumentForProject(
     if (!created) return null
     await setProjectDefaultDocument(projectId, created.id)
     return created
+  })
+}
+
+function resolveUniqueImportPath(requestedPath: string, existingPaths: string[]): string {
+  const normalized = normalizeDocumentPath(requestedPath)
+  if (!normalized) {
+    return 'imported.md'
+  }
+
+  const pathSet = new Set(existingPaths.map((p) => normalizeDocumentPath(p)))
+
+  if (!pathSet.has(normalized) && !hasAncestorFileConflict([...existingPaths, normalized])) {
+    return normalized
+  }
+
+  const lastDotIndex = normalized.lastIndexOf('.')
+  const baseName = lastDotIndex > 0 ? normalized.slice(0, lastDotIndex) : normalized
+  const extension = lastDotIndex > 0 ? normalized.slice(lastDotIndex) : ''
+
+  for (let index = 1; index <= 10000; index++) {
+    const candidate = `${baseName}-${index}${extension}`
+    if (!pathSet.has(candidate) && !hasAncestorFileConflict([...existingPaths, candidate])) {
+      return candidate
+    }
+  }
+
+  throw new Error('Unable to allocate a unique import path')
+}
+
+export async function importDocumentForProject(
+  projectId: string,
+  title: string,
+  markdown: string
+): Promise<ImportDocumentResult> {
+  if (!isValidId(projectId)) {
+    return { ok: false, error: { kind: 'invalid_project_id' } }
+  }
+
+  const normalizedTitle = normalizeDocumentPath(title)
+  if (!normalizedTitle) {
+    return { ok: false, error: { kind: 'invalid_path' } }
+  }
+
+  if (isDirectorySentinelPath(normalizedTitle)) {
+    return { ok: false, error: { kind: 'invalid_path' } }
+  }
+  if (pathHasSentinelSegment(normalizedTitle)) {
+    return { ok: false, error: { kind: 'invalid_path' } }
+  }
+
+  const parseResult = markdownToProseMirrorDoc(markdown)
+  if (!parseResult.ok) {
+    return { ok: false, error: { kind: 'markdown_parse_failed', cause: parseResult.error.cause } }
+  }
+
+  return withTransaction(async () => {
+    const project = await dalProjects.findById(projectId)
+    if (!project) {
+      return { ok: false, error: { kind: 'project_not_found' } }
+    }
+
+    const docs = await listDocumentsForProject(projectId)
+    const existingPaths = docs.map((doc) => normalizeDocumentPath(doc.title))
+
+    const uniquePath = resolveUniqueImportPath(normalizedTitle, existingPaths)
+
+    const content = JSON.stringify({ doc: parseResult.value, aiDraft: null })
+
+    const doc = await createDocument(uniquePath, content)
+
+    await dalProjectDocs.insert({
+      projectId,
+      documentId: doc.id,
+      addedAt: Date.now(),
+    })
+
+    return { ok: true, doc } as const
   })
 }
