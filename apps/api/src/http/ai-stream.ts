@@ -1,7 +1,19 @@
 import express, { type Express } from 'express'
+import { Output, generateText, streamText } from 'ai'
 import { z } from 'zod/v4'
-import { generate, generateStream, createStreamCleaner, cleanText } from '../ai/index.js'
-import { ResponseParser, type AIMode } from '../ai/response-parser.js'
+import {
+  generate,
+  generateStream,
+  createStreamCleaner,
+  cleanText,
+  getLanguageModel,
+} from '../ai/index.js'
+import {
+  ResponseParser,
+  selectionEditOutputSchema,
+  type AIMode,
+  type SelectionEditPartialOutput,
+} from '../ai/response-parser.js'
 import {
   assertPromptProtocolMode,
   resolveContinuePrompt,
@@ -17,6 +29,22 @@ interface AiStreamInput {
   prompt?: string
   selectedText?: string
   maxOutputTokens?: number
+}
+
+export function emitIncrementalChoices(
+  choices: string[],
+  emittedChoiceIndexes: Set<number>,
+  writeChoice: (choice: string) => void
+): void {
+  for (let i = 0; i < choices.length; i += 1) {
+    if (emittedChoiceIndexes.has(i)) continue
+
+    const choice = choices[i]
+    if (choice.trim().length === 0) continue
+
+    writeChoice(choice)
+    emittedChoiceIndexes.add(i)
+  }
 }
 
 function buildAiStreamInputSchema() {
@@ -262,57 +290,145 @@ async function handlePromptStream(
   const cleaner = createStreamCleaner(input.contextBefore, contextAfter)
   const parser = new ResponseParser()
   let lastSentContentLength = 0
-  let lastSentChoicesCount = 0
+  const emittedChoiceIndexes = new Set<number>()
+  const abortController = new AbortController()
+  const abortIfClientDisconnected = () => {
+    if (!res.writableEnded) abortController.abort()
+  }
+  req.on('aborted', abortIfClientDisconnected)
+  res.on('close', abortIfClientDisconnected)
 
-  await handleGenericStream(req, res, {
-    systemPrompt: rendered.systemPrompt,
-    userPrompt: rendered.userPrompt,
-    maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
-    temperature: rendered.definition.defaults.temperature,
-    onDelta: (text, hasWrittenHeaders, writeHeaders, writeContent, writeChoice) => {
-      const parseResult = parser.feed(text)
-      if (parseResult.mode && !hasWrittenHeaders)
-        writeHeaders(parseResult.mode, parseResult.insertIndex ?? undefined)
-      if (parseResult.mode === 'replace' || parseResult.mode === 'insert') {
-        const newContent = parseResult.content.slice(lastSentContentLength)
-        if (newContent) {
-          const content = cleaner.process(newContent)
-          if (content) writeContent(content)
-          lastSentContentLength = parseResult.content.length
-        }
-      } else if (parseResult.mode === 'choices') {
-        for (let i = lastSentChoicesCount; i < parseResult.choices.length; i += 1) {
-          writeChoice(parseResult.choices[i])
-        }
-        lastSentChoicesCount = parseResult.choices.length
+  let hasWrittenHeaders = false
+
+  const writeHeaders = (mode: AIMode, insertIndex?: number) => {
+    if (hasWrittenHeaders) return
+    res.status(200).set({
+      'Content-Type': 'application/jsonl; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-AI-Mode': mode,
+    })
+    if (insertIndex !== undefined) res.set('X-AI-Insert-Index', String(insertIndex))
+    hasWrittenHeaders = true
+  }
+
+  const writeContent = (content: string) => {
+    res.write(JSON.stringify(content) + '\n')
+  }
+
+  const writeChoice = (choice: string) => {
+    res.write(JSON.stringify(choice) + '\n')
+  }
+
+  const flushParsedState = (parseResult: ReturnType<ResponseParser['feed']>): void => {
+    if (!parseResult.mode) return
+    if (!hasWrittenHeaders) {
+      writeHeaders(parseResult.mode, parseResult.insertIndex ?? undefined)
+    }
+
+    if (parseResult.mode === 'replace' || parseResult.mode === 'insert') {
+      const newContent = parseResult.content.slice(lastSentContentLength)
+      if (!newContent) return
+
+      const cleaned = cleaner.process(newContent)
+      if (cleaned) writeContent(cleaned)
+      lastSentContentLength = parseResult.content.length
+      return
+    }
+
+    emitIncrementalChoices(parseResult.choices, emittedChoiceIndexes, writeChoice)
+  }
+
+  const resolveFallback = async (): Promise<boolean> => {
+    const model = await getLanguageModel()
+    const fallback = await generateText({
+      model,
+      system: rendered.systemPrompt,
+      prompt: rendered.userPrompt,
+      output: Output.object({ schema: selectionEditOutputSchema }),
+      maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+      temperature: rendered.definition.defaults.temperature,
+      abortSignal: abortController.signal,
+    })
+
+    const fallbackResult = parser.feedComplete(fallback.output)
+    if (!fallbackResult.mode) return false
+
+    flushParsedState(fallbackResult)
+
+    if (fallbackResult.mode === 'replace' || fallbackResult.mode === 'insert') {
+      const tail = cleaner.flush()
+      if (tail) writeContent(tail)
+    }
+
+    return true
+  }
+
+  try {
+    const model = await getLanguageModel()
+    const result = streamText({
+      model,
+      system: rendered.systemPrompt,
+      prompt: rendered.userPrompt,
+      output: Output.object({ schema: selectionEditOutputSchema }),
+      maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+      temperature: rendered.definition.defaults.temperature,
+      abortSignal: abortController.signal,
+      onError: ({ error }) => {
+        console.error('AI prompt structured stream error', error)
+      },
+    })
+
+    for await (const partialObject of result.partialOutputStream) {
+      const parseResult = parser.feed(partialObject as SelectionEditPartialOutput)
+      flushParsedState(parseResult)
+    }
+
+    const finalOutput = await result.output
+    const finalResult = parser.feedComplete(finalOutput)
+    flushParsedState(finalResult)
+
+    if (!hasWrittenHeaders) {
+      const fallbackResolved = await resolveFallback()
+      if (!fallbackResolved) {
+        res.status(502).json({ message: 'AI stream finished without structured output' })
+        return
       }
-    },
-    generateFallback: async (signal) => {
-      return await generate({
-        systemPrompt: rendered.systemPrompt,
-        userPrompt: rendered.userPrompt,
-        maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
-        temperature: rendered.definition.defaults.temperature,
-        abortSignal: signal,
-      })
-    },
-    onFallbackDone: (fallbackText, writeHeaders, writeContent, writeChoice) => {
-      const fallbackParser = new ResponseParser()
-      fallbackParser.feed(fallbackText)
-      const fallbackResponse = fallbackParser.finalize()
-      if (fallbackResponse) {
-        const insertIndex = fallbackResponse.mode === 'insert' ? fallbackResponse.index : undefined
-        writeHeaders(fallbackResponse.mode, insertIndex)
-        if (fallbackResponse.mode === 'replace' || fallbackResponse.mode === 'insert') {
-          const content = cleanText(fallbackResponse.content, input.contextBefore, contextAfter)
-          if (content) writeContent(content)
-        } else if (fallbackResponse.mode === 'choices') {
-          for (const choice of fallbackResponse.choices) writeChoice(choice)
+      res.end()
+      return
+    }
+
+    if (finalResult.mode === 'replace' || finalResult.mode === 'insert') {
+      const tail = cleaner.flush()
+      if (tail) writeContent(tail)
+    }
+
+    res.end()
+  } catch (error: unknown) {
+    if (abortController.signal.aborted) {
+      if (!res.headersSent) res.end()
+      return
+    }
+
+    console.error('AI prompt stream failed', error)
+
+    if (!hasWrittenHeaders) {
+      try {
+        const fallbackResolved = await resolveFallback()
+        if (fallbackResolved) {
+          res.end()
+          return
         }
-        return true
+      } catch (fallbackError) {
+        console.error('AI prompt fallback failed', fallbackError)
       }
-      return false
-    },
-    onFlush: () => cleaner.flush(),
-  })
+
+      const message =
+        error instanceof Error ? error.message : 'Failed to generate structured prompt stream'
+      res.status(500).json({ message })
+      return
+    }
+
+    res.end()
+  }
 }

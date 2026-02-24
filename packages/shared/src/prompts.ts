@@ -13,14 +13,14 @@ export const plainTextProtocolSchema = z.object({
 })
 export type PlainTextProtocol = z.infer<typeof plainTextProtocolSchema>
 
-export const pythonEditProtocolSchema = z.object({
-  type: z.literal('python-edit-v1'),
+export const selectionEditProtocolSchema = z.object({
+  type: z.literal('selection-edit-v1'),
 })
-export type PythonEditProtocol = z.infer<typeof pythonEditProtocolSchema>
+export type SelectionEditProtocol = z.infer<typeof selectionEditProtocolSchema>
 
 export const responseProtocolSchema = z.discriminatedUnion('type', [
   plainTextProtocolSchema,
-  pythonEditProtocolSchema,
+  selectionEditProtocolSchema,
 ])
 export type ResponseProtocol = z.infer<typeof responseProtocolSchema>
 

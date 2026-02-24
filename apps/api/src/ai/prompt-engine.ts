@@ -4,7 +4,7 @@ import {
   buildChatVariables,
   buildContinueVariables,
   buildPromptVariables,
-  isPythonEditProtocol,
+  isSelectionEditProtocol,
   renderTemplate,
 } from './prompts.js'
 
@@ -70,9 +70,9 @@ export function assertPromptProtocolMode(
     throw new Error(`Prompt "${definition.id}" must use plain-text-v1 protocol for continue mode`)
   }
 
-  if (expectedMode === 'prompt' && !isPythonEditProtocol(definition.protocol)) {
+  if (expectedMode === 'prompt' && !isSelectionEditProtocol(definition.protocol)) {
     throw new Error(
-      `Prompt "${definition.id}" must use python-edit-v1 protocol for structured prompt mode`
+      `Prompt "${definition.id}" must use selection-edit-v1 protocol for structured prompt mode`
     )
   }
 

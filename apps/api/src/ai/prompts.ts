@@ -3,7 +3,7 @@ import type {
   PromptEditable,
   PromptMode,
   PromptSystemSlot,
-  PythonEditProtocol,
+  SelectionEditProtocol,
   ResponseProtocol,
 } from '@plotline/shared'
 
@@ -14,8 +14,8 @@ export const SYSTEM_CHAT_PROMPT_ID = 'system.chat.default'
 export const WRITING_GAP_MARKER = '<plotline_writing_gap_v1 />'
 export const ESCAPED_WRITING_GAP_MARKER = '<plotline_writing_gap_escaped_v1 />'
 
-export const DEFAULT_PYTHON_EDIT_PROTOCOL: PythonEditProtocol = {
-  type: 'python-edit-v1',
+export const DEFAULT_SELECTION_EDIT_PROTOCOL: SelectionEditProtocol = {
+  type: 'selection-edit-v1',
 }
 
 const TEMPLATE_IDENTIFIER_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]*$/
@@ -54,57 +54,28 @@ const SYSTEM_PROMPT_STRUCTURED = `You are a skilled fiction writing assistant he
 - Provide creative suggestions that fit the story's direction
 
 RESPONSE FORMAT:
+Return a single structured edit action with one of these modes:
 
-Always respond with a Python function that returns one of these classes:
+- mode "replace"
+  Use when the selected text should be rewritten or replaced.
+  Provide "content" with the replacement text.
 
-class ReplaceText:
-    """Replace the selected text entirely with new content."""
-    def with_content(self, content: str) -> "ReplaceText":
-        self.content = content
-        return self
+- mode "insert"
+  Use when text should be inserted relative to the selection.
+  Provide:
+  - "insertIndex" where 0 inserts before selection, -1 inserts after selection, and positive values insert at that character offset into the selection.
+  - "content" with the text to insert.
 
-class InsertText:
-    """Insert new text at a specific position within or around the selection."""
-    def __init__(self, index: int):
-        """
-        Index of where to insert:
-        - 0 = insert before the selection
-        - N = insert after N characters from the start of selection
-        - -1 = insert after the selection
-        """
-        self.index = index
-    def with_content(self, content: str) -> "InsertText":
-        self.content = content
-        return self
+- mode "choices"
+  Use when the author asked for alternatives/options.
+  Provide "choices" as an array of candidate strings.
 
-class PresentChoices:
-    """Present multiple options for the user to choose from."""
-    def with_choices(self, choices: tuple) -> "PresentChoices":
-        self.choices = choices
-        return self
-
-Example responses:
-
-# Replace a word with a better one:
-def respond() -> ReplaceText | InsertText | PresentChoices:
-    return ReplaceText().with_content("""exclaimed""")
-
-# Add emphasis before a word:
-def respond() -> ReplaceText | InsertText | PresentChoices:
-    return InsertText(0).with_content("""very """)
-
-# Add description after a word:
-def respond() -> ReplaceText | InsertText | PresentChoices:
-    return InsertText(-1).with_content(""" loudly""")
-
-# Present alternative word choices:
-def respond() -> ReplaceText | InsertText | PresentChoices:
-    return PresentChoices().with_choices(("whispered", "muttered", "exclaimed", "declared"))
-
-WHEN TO USE EACH:
-- Use ReplaceText when the user wants to replace or rewrite the selected text
-- Use InsertText when the user wants to add content before, after, or within the selection
-- Use PresentChoices when the user asks for alternatives, options, or suggestions to choose from`
+RULES:
+- Return only the structured edit action.
+- Always return a JSON object with all keys: mode, insertIndex, content, choices.
+- For fields that do not apply to the chosen mode, set them to null.
+- Never include explanations or markdown.
+- Keep edits concise and stylistically consistent with the surrounding passage.`
 
 const SYSTEM_PROMPT_CHAT = `You are Plotline's sidebar AI assistant for software projects.
 
@@ -162,7 +133,7 @@ const PROMPT_USER_TEMPLATE = `Story context:
 The author requests:
 {{prompt}}
 
-Respond with the appropriate Python function.`
+Return the appropriate structured edit action.`
 
 const CHAT_USER_TEMPLATE = `Active file path:
 {{currentFilePath}}
@@ -224,7 +195,7 @@ export function createDefaultPromptDefinitions(nowIso: string): PromptDefinition
         description: 'Selection toolbar prompt that returns replace/insert/choices output.',
         systemTemplate: SYSTEM_PROMPT_STRUCTURED,
         userTemplate: PROMPT_USER_TEMPLATE,
-        protocol: DEFAULT_PYTHON_EDIT_PROTOCOL,
+        protocol: DEFAULT_SELECTION_EDIT_PROTOCOL,
         defaults: {
           temperature: 0.85,
         },
@@ -342,12 +313,12 @@ export function buildPromptVariables(
   const safeSelectedText = selectedText ?? ''
   const modeGuidance = selectedText
     ? `MODE GUIDANCE:
-- If the request asks to replace, rewrite, or improve the selection -> use ReplaceText
-- If the request asks to add content before/after/within the selection -> use InsertText
-- If the request asks for alternatives, options, or suggestions -> use PresentChoices`
+- If the request asks to replace, rewrite, or improve the selection -> use mode "replace"
+- If the request asks to add content before/after/within the selection -> use mode "insert"
+- If the request asks for alternatives, options, or suggestions -> use mode "choices"`
     : `MODE GUIDANCE:
-- Use InsertText when adding text relative to the current cursor location
-- Use PresentChoices when user asks for alternatives`
+- Use mode "insert" when adding text relative to the current cursor location
+- Use mode "choices" when user asks for alternatives`
 
   return {
     contextBefore: safeContextBefore,
@@ -393,6 +364,8 @@ export function renderTemplate(template: string, variables: Record<string, strin
   })
 }
 
-export function isPythonEditProtocol(protocol: ResponseProtocol): protocol is PythonEditProtocol {
-  return protocol.type === 'python-edit-v1'
+export function isSelectionEditProtocol(
+  protocol: ResponseProtocol
+): protocol is SelectionEditProtocol {
+  return protocol.type === 'selection-edit-v1'
 }

@@ -58,7 +58,7 @@ interface BindingOption {
 
 function createDefaultProtocol(mode: PromptMode): ResponseProtocol {
   if (mode === 'continue' || mode === 'chat') return { type: 'plain-text-v1' }
-  return { type: 'python-edit-v1' }
+  return { type: 'selection-edit-v1' }
 }
 
 function createEmptyForm(mode: PromptMode): PromptFormState {

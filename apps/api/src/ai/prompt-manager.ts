@@ -4,7 +4,6 @@ import { nanoid } from 'nanoid'
 import {
   promptBindingsSchema,
   promptDefinitionSchema,
-  promptEditableSchema,
   type PromptBindings,
   type PromptDefinition,
   type PromptEditable,
@@ -14,9 +13,6 @@ import {
 } from '@plotline/shared'
 import { configManager } from '../config/manager.js'
 import {
-  SYSTEM_CHAT_PROMPT_ID,
-  SYSTEM_CONTINUE_PROMPT_ID,
-  SYSTEM_SELECTION_PROMPT_ID,
   createDefaultPromptBindings,
   createDefaultPromptDefinitions,
   modeForSlot,
@@ -88,120 +84,6 @@ function normalizeStore(store: PromptStore): PromptStore {
   }
 }
 
-function coerceProtocol(protocol: unknown): PromptEditable['protocol'] | null {
-  if (typeof protocol !== 'object' || protocol === null || Array.isArray(protocol)) return null
-  const record = protocol as Record<string, unknown>
-  if (record.type === 'plain-text-v1') return { type: 'plain-text-v1' }
-  if (record.type === 'python-edit-v1') return { type: 'python-edit-v1' }
-  return null
-}
-
-function parseLegacyPromptEntry(entry: unknown, nowIso: string): PromptDefinition | null {
-  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null
-  const record = entry as Record<string, unknown>
-
-  const id = typeof record.id === 'string' ? record.id : null
-  const mode =
-    record.mode === 'continue' || record.mode === 'prompt' || record.mode === 'chat'
-      ? record.mode
-      : null
-  const name = typeof record.name === 'string' ? record.name : null
-  const systemTemplate = typeof record.systemTemplate === 'string' ? record.systemTemplate : null
-  const userTemplate = typeof record.userTemplate === 'string' ? record.userTemplate : null
-  const protocol = coerceProtocol(record.protocol)
-  if (!id || !mode || !name || !systemTemplate || !userTemplate || !protocol) return null
-
-  const defaultsRaw =
-    typeof record.defaults === 'object' &&
-    record.defaults !== null &&
-    !Array.isArray(record.defaults)
-      ? (record.defaults as Record<string, unknown>)
-      : {}
-  const temperature =
-    typeof defaultsRaw.temperature === 'number' && Number.isFinite(defaultsRaw.temperature)
-      ? defaultsRaw.temperature
-      : 0.85
-  const maxOutputTokens =
-    typeof defaultsRaw.maxOutputTokens === 'number' && Number.isInteger(defaultsRaw.maxOutputTokens)
-      ? defaultsRaw.maxOutputTokens
-      : undefined
-
-  const editableParsed = promptEditableSchema.safeParse({
-    mode,
-    name,
-    description: typeof record.description === 'string' ? record.description : '',
-    systemTemplate,
-    userTemplate,
-    protocol,
-    defaults: {
-      temperature,
-      ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
-    },
-  })
-  if (!editableParsed.success) return null
-
-  const parsedDefinition = promptDefinitionSchema.safeParse({
-    id,
-    ...editableParsed.data,
-    isSystem:
-      record.isSystem === true ||
-      id === SYSTEM_CONTINUE_PROMPT_ID ||
-      id === SYSTEM_SELECTION_PROMPT_ID ||
-      id === SYSTEM_CHAT_PROMPT_ID,
-    createdAt: typeof record.createdAt === 'string' ? record.createdAt : nowIso,
-    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : nowIso,
-  })
-  if (!parsedDefinition.success) return null
-  return parsedDefinition.data
-}
-
-function migrateStore(raw: Record<string, unknown>): PromptStore | null {
-  const promptsRaw = raw.prompts
-  if (!Array.isArray(promptsRaw)) return null
-
-  const nowIso = new Date().toISOString()
-  const parsedPrompts: PromptDefinition[] = []
-  for (const entry of promptsRaw) {
-    const parsed = parseLegacyPromptEntry(entry, nowIso)
-    if (parsed) parsedPrompts.push(parsed)
-  }
-  if (parsedPrompts.length === 0) return null
-
-  const defaults = createDefaultPromptBindings()
-  const bindingsRaw =
-    typeof raw.bindings === 'object' && raw.bindings !== null && !Array.isArray(raw.bindings)
-      ? (raw.bindings as Record<string, unknown>)
-      : {}
-
-  const parsedBindings = promptBindingsSchema.safeParse({
-    continuePromptId:
-      typeof bindingsRaw.continuePromptId === 'string'
-        ? bindingsRaw.continuePromptId
-        : (parsedPrompts.find((prompt) => prompt.id === defaults.continuePromptId)?.id ??
-          parsedPrompts.find((prompt) => prompt.mode === 'continue')?.id ??
-          null),
-    selectionEditPromptId:
-      typeof bindingsRaw.selectionEditPromptId === 'string'
-        ? bindingsRaw.selectionEditPromptId
-        : (parsedPrompts.find((prompt) => prompt.id === defaults.selectionEditPromptId)?.id ??
-          parsedPrompts.find((prompt) => prompt.mode === 'prompt')?.id ??
-          null),
-    chatPromptId:
-      typeof bindingsRaw.chatPromptId === 'string'
-        ? bindingsRaw.chatPromptId
-        : (parsedPrompts.find((prompt) => prompt.id === defaults.chatPromptId)?.id ??
-          parsedPrompts.find((prompt) => prompt.mode === 'chat')?.id ??
-          null),
-  })
-  if (!parsedBindings.success) return null
-
-  return ensureDefaultPromptsAndBindings({
-    version: STORE_VERSION,
-    prompts: parsedPrompts,
-    bindings: parsedBindings.data,
-  })
-}
-
 function ensureDefaultPromptsAndBindings(store: PromptStore): PromptStore {
   const defaults = createDefaultPromptBindings()
   const prompts = [...store.prompts]
@@ -254,30 +136,27 @@ function parseStoreFile(contents: string): PromptStore | null {
     const raw = JSON.parse(contents) as unknown
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
     const record = raw as Record<string, unknown>
+    if (record.version !== STORE_VERSION) return null
 
-    if (record.version === STORE_VERSION) {
-      const promptsRaw = record.prompts
-      const bindingsRaw = record.bindings
-      if (!Array.isArray(promptsRaw)) return null
+    const promptsRaw = record.prompts
+    const bindingsRaw = record.bindings
+    if (!Array.isArray(promptsRaw)) return null
 
-      const prompts: PromptDefinition[] = []
-      for (const entry of promptsRaw) {
-        const parsed = promptDefinitionSchema.safeParse(entry)
-        if (!parsed.success) return null
-        prompts.push(parsed.data)
-      }
-
-      const bindings = promptBindingsSchema.safeParse(bindingsRaw)
-      if (!bindings.success) return null
-
-      return ensureDefaultPromptsAndBindings({
-        version: STORE_VERSION,
-        prompts,
-        bindings: bindings.data,
-      })
+    const prompts: PromptDefinition[] = []
+    for (const entry of promptsRaw) {
+      const parsed = promptDefinitionSchema.safeParse(entry)
+      if (!parsed.success) return null
+      prompts.push(parsed.data)
     }
 
-    return migrateStore(record)
+    const bindings = promptBindingsSchema.safeParse(bindingsRaw)
+    if (!bindings.success) return null
+
+    return ensureDefaultPromptsAndBindings({
+      version: STORE_VERSION,
+      prompts,
+      bindings: bindings.data,
+    })
   } catch {
     return null
   }
@@ -318,10 +197,10 @@ function ensureProtocolCompatible(editable: PromptEditable): void {
       'Continue prompts must use the plain-text-v1 protocol.'
     )
   }
-  if (editable.mode === 'prompt' && editable.protocol.type !== 'python-edit-v1') {
+  if (editable.mode === 'prompt' && editable.protocol.type !== 'selection-edit-v1') {
     throw new PromptManagerError(
       'BAD_REQUEST',
-      'Selection-edit prompts must use the python-edit-v1 protocol.'
+      'Selection-edit prompts must use the selection-edit-v1 protocol.'
     )
   }
   if (editable.mode === 'chat' && editable.protocol.type !== 'plain-text-v1') {
