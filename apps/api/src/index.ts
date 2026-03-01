@@ -240,7 +240,7 @@ async function startServer() {
   app.use(cookieParser())
 
   registerMetaRoutes(app)
-  registerAiTextStreamRoute(app)
+  registerAiTextStreamRoute(app, container.services)
   registerTrpcRoutes(app)
 
   const vite = await setupWebRuntime(app)

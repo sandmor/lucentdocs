@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
-import { Bold, Check, Italic, Loader2, Pen, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Bold, Check, Italic, Loader2, Pen, Search, X } from 'lucide-react'
 import type { EditorView } from 'prosemirror-view'
+import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
-import type { AIMode } from './ai-writer-plugin'
+import type { InlineZoneSession } from './inline-ai-session'
 import type { AnimationPhase, FormatMarkName, InlineControlState } from './inline-ai-types'
 import { selectChoice } from './inline-ai-utils'
 
@@ -160,12 +161,13 @@ interface AIZoneSurfaceProps {
   zoneId?: string
   from: number
   to: number
-  mode: AIMode | null
   state: InlineControlState
-  choices: string[]
   stuck: boolean
+  session: InlineZoneSession | null
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
+  onContinuePrompt: (zoneId: string, prompt: string) => boolean
+  onDismissChoices: (zoneId: string) => boolean
 }
 
 export function AIZoneSurface({
@@ -176,15 +178,38 @@ export function AIZoneSurface({
   zoneId,
   from,
   to,
-  mode,
   state,
-  choices,
   stuck,
+  session,
   onAccept,
   onReject,
+  onContinuePrompt,
+  onDismissChoices,
 }: AIZoneSurfaceProps) {
   const isProcessing = state === 'processing'
   const isReview = state === 'review'
+  const choices = session?.choices ?? []
+  const [followupPrompt, setFollowupPrompt] = useState('')
+
+  const canSendFollowup = useMemo(
+    () => Boolean(zoneId && followupPrompt.trim() && !isProcessing),
+    [followupPrompt, isProcessing, zoneId]
+  )
+
+  const handleSendFollowup = () => {
+    if (!zoneId) return
+    const trimmed = followupPrompt.trim()
+    if (!trimmed) return
+    const started = onContinuePrompt(zoneId, trimmed)
+    if (started) {
+      setFollowupPrompt('')
+    }
+  }
+
+  const handleDismissChoices = () => {
+    if (!zoneId) return
+    onDismissChoices(zoneId)
+  }
 
   return (
     <div
@@ -202,7 +227,7 @@ export function AIZoneSurface({
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
           <Pen className="size-3" />
-          {isProcessing ? 'Loading' : 'AI Zone'}
+          Inline AI
         </span>
         <span className="ml-auto">
           {isProcessing ? (
@@ -218,34 +243,85 @@ export function AIZoneSurface({
         </span>
       </div>
 
-      {isProcessing ? (
-        <div className="flex items-center justify-center gap-2 px-4 py-3 text-muted-foreground">
-          <Loader2 className="size-3 animate-spin" />
-          <span className="text-xs">Awaiting AI response…</span>
-        </div>
-      ) : mode === 'choices' ? (
-        <>
-          {!choices || choices.length === 0 ? (
-            <div className="flex items-center justify-center gap-2 px-4 py-3 text-muted-foreground">
-              <span className="ai-fc-dot" />
-              <span className="ai-fc-dot" />
-              <span className="ai-fc-dot" />
-              <span className="ml-1 text-xs">Generating options…</span>
+      <div className="space-y-2 p-2">
+        {session?.messages && session.messages.length > 0 ? (
+          <div className="max-h-40 space-y-2 overflow-y-auto px-1">
+            {session.messages.map((message) => (
+              <div
+                key={message.id}
+                className={
+                  message.role === 'user'
+                    ? 'rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-xs'
+                    : 'rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs'
+                }
+              >
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {message.role === 'user' ? 'You' : 'AI'}
+                </div>
+                {message.text ? (
+                  <div className="streamdown prose prose-xs dark:prose-invert max-w-none leading-relaxed">
+                    <Streamdown>{message.text}</Streamdown>
+                  </div>
+                ) : null}
+                {message.tools.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {message.tools.map((tool) => (
+                      <span
+                        key={`${message.id}-${tool.toolName}`}
+                        className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      >
+                        <Search className="size-2.5" />
+                        {tool.toolName.replace(/_/g, ' ')}
+                        {tool.state === 'pending' ? '…' : ''}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : isProcessing ? (
+          <div className="flex items-center justify-center gap-2 px-2 py-3 text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" />
+            <span className="text-xs">Awaiting AI response…</span>
+          </div>
+        ) : null}
+
+        {isProcessing && stuck ? (
+          <div className="mx-1 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+            <Loader2 className="size-3 animate-spin" />
+            <span>Still processing this inline request…</span>
+          </div>
+        ) : null}
+
+        {choices.length > 0 ? (
+          <div className="space-y-1.5 px-1 py-0.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Suggestions
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                title="Dismiss all suggestions"
+                data-action="dismiss-choices"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  handleDismissChoices()
+                }}
+              >
+                <X className="size-3" />
+              </Button>
             </div>
-          ) : (
-            <div
-              className="grid gap-1 p-2"
-              style={{
-                gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
-                maxWidth: '320px',
-              }}
-            >
+
+            <div className="max-h-48 space-y-1 overflow-y-auto">
               {choices.map((choice, index) => (
-                <Button
+                <button
                   key={`${zoneId ?? 'zone'}-choice-${index}`}
-                  variant="outline"
-                  size="xs"
-                  className="truncate"
+                  className="group flex w-full cursor-pointer items-start gap-2 rounded-md border border-border/50 bg-background px-2.5 py-2 text-left text-xs transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   title={choice}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={(event) => {
@@ -254,13 +330,60 @@ export function AIZoneSurface({
                     selectChoice(view, choice, from, to)
                   }}
                 >
-                  {choice}
-                </Button>
+                  <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground transition-colors group-hover:bg-primary/15 group-hover:text-primary">
+                    {index + 1}
+                  </span>
+                  <span className="line-clamp-3 leading-relaxed text-foreground/80 group-hover:text-foreground">
+                    {choice}
+                  </span>
+                </button>
               ))}
             </div>
-          )}
+          </div>
+        ) : null}
 
-          <div className="flex items-center justify-end p-1.5 pt-0">
+        {zoneId ? (
+          <div className="space-y-1 px-1">
+            <Textarea
+              value={followupPrompt}
+              onChange={(event) => setFollowupPrompt(event.target.value)}
+              placeholder="Ask a follow-up for this AI zone..."
+              className="min-h-14 text-xs"
+              disabled={isProcessing}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault()
+                  handleSendFollowup()
+                }
+              }}
+            />
+            <div className="flex items-center justify-end">
+              <Button size="xs" disabled={!canSendFollowup} onClick={handleSendFollowup}>
+                Send
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {isReview && choices.length === 0 ? (
+          <div className="flex items-center gap-1.5 p-1.5">
+            <Button
+              variant="ghost"
+              size="xs"
+              className="gap-1.5 text-muted-foreground hover:border-success/50 hover:bg-success/15 hover:text-success dark:hover:text-emerald-400"
+              title="Accept (Tab)"
+              data-action="accept"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onAccept(zoneId)
+              }}
+            >
+              <Check className="size-3" />
+              Accept
+              <Kbd>Tab</Kbd>
+            </Button>
             <Button
               variant="ghost"
               size="xs"
@@ -279,45 +402,8 @@ export function AIZoneSurface({
               <Kbd>Esc</Kbd>
             </Button>
           </div>
-        </>
-      ) : isReview ? (
-        <div className="flex items-center gap-1.5 p-1.5">
-          <Button
-            variant="ghost"
-            size="xs"
-            className="gap-1.5 text-muted-foreground hover:border-success/50 hover:bg-success/15 hover:text-success dark:hover:text-emerald-400"
-            title="Accept (Tab)"
-            data-action="accept"
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              onAccept(zoneId)
-            }}
-          >
-            <Check className="size-3" />
-            Accept
-            <Kbd>Tab</Kbd>
-          </Button>
-          <Button
-            variant="ghost"
-            size="xs"
-            className="gap-1.5 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-            title="Reject (Esc)"
-            data-action="reject"
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              onReject(zoneId)
-            }}
-          >
-            <X className="size-3" />
-            Reject
-            <Kbd>Esc</Kbd>
-          </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   )
 }

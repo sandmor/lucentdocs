@@ -79,6 +79,7 @@ export const configRouter = router({
       maxPromptChars: input.maxPromptChars,
       maxToolEntries: input.maxToolEntries,
       maxToolReadChars: input.maxToolReadChars,
+      maxAiToolSteps: input.maxAiToolSteps,
       maxChatMessageChars: input.maxChatMessageChars,
       maxPromptNameChars: input.maxPromptNameChars,
       maxPromptDescChars: input.maxPromptDescChars,

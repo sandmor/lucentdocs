@@ -116,20 +116,25 @@ export function EditorPage() {
   const autoOpenAttemptedProjectRef = useRef<string | null>(null)
   const persistedDefaultSignatureRef = useRef<string | null>(null)
   const lastHandledSyncEventIdRef = useRef<string | null>(null)
-  const initialDesktopSidebarStateRef = useRef<PersistedDesktopSidebarState | null>(null)
-  const initialDesktopSidebarState =
-    initialDesktopSidebarStateRef.current ??
-    (initialDesktopSidebarStateRef.current = resolveDesktopSidebarState(id))
+  const initialDesktopSidebarState = useMemo(() => resolveDesktopSidebarState(id), [id])
 
   const [includeAfterContext, setIncludeAfterContext] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
   const [titleInput, setTitleInput] = useState('')
   const [editorSessionKey, setEditorSessionKey] = useState(0)
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>('explorer')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => initialDesktopSidebarState.isOpen)
-  const [desktopSidebarWidthPercentage, setDesktopSidebarWidthPercentage] = useState(
-    () => initialDesktopSidebarState.widthPercentage
+  const [desktopSidebarStateByProject, setDesktopSidebarStateByProject] = useState<
+    Record<string, PersistedDesktopSidebarState>
+  >(() => (id ? { [id]: initialDesktopSidebarState } : {}))
+  const currentDesktopSidebarState = useMemo<PersistedDesktopSidebarState>(
+    () =>
+      id
+        ? (desktopSidebarStateByProject[id] ?? initialDesktopSidebarState)
+        : initialDesktopSidebarState,
+    [desktopSidebarStateByProject, id, initialDesktopSidebarState]
   )
+  const isSidebarOpen = currentDesktopSidebarState.isOpen
+  const desktopSidebarWidthPercentage = currentDesktopSidebarState.widthPercentage
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isDesktop, setIsDesktop] = useState(() => {
     if (typeof window === 'undefined') return true
@@ -140,7 +145,54 @@ export function EditorPage() {
     to: number
   } | null>(null)
   const sidebarPanelRef = useRef<PanelImperativeHandle | null>(null)
-  const [sidebarStateReadyProjectId, setSidebarStateReadyProjectId] = useState<string | null>(null)
+
+  const updateCurrentSidebarState = useCallback(
+    (updater: (previous: PersistedDesktopSidebarState) => PersistedDesktopSidebarState) => {
+      if (!id) return
+
+      setDesktopSidebarStateByProject((previous) => {
+        const current = previous[id] ?? resolveDesktopSidebarState(id)
+        const updated = updater(current)
+        const next: PersistedDesktopSidebarState = {
+          isOpen: updated.isOpen,
+          widthPercentage: clampDesktopSidebarWidth(updated.widthPercentage),
+        }
+
+        if (
+          next.isOpen === current.isOpen &&
+          Math.abs(next.widthPercentage - current.widthPercentage) < 0.1
+        ) {
+          return previous
+        }
+
+        return {
+          ...previous,
+          [id]: next,
+        }
+      })
+    },
+    [id]
+  )
+
+  const setIsSidebarOpen = useCallback(
+    (next: boolean | ((previous: boolean) => boolean)) => {
+      updateCurrentSidebarState((previous) => ({
+        ...previous,
+        isOpen: typeof next === 'function' ? next(previous.isOpen) : next,
+      }))
+    },
+    [updateCurrentSidebarState]
+  )
+
+  const setDesktopSidebarWidthPercentage = useCallback(
+    (next: number | ((previous: number) => number)) => {
+      updateCurrentSidebarState((previous) => ({
+        ...previous,
+        widthPercentage: typeof next === 'function' ? next(previous.widthPercentage) : next,
+      }))
+    },
+    [updateCurrentSidebarState]
+  )
 
   const projectQuery = trpc.projects.get.useQuery(
     { id: id! },
@@ -504,34 +556,18 @@ export function EditorPage() {
   }, [])
 
   useEffect(() => {
-    if (!id) {
-      setSidebarStateReadyProjectId(null)
-      return
-    }
-
-    setSidebarStateReadyProjectId(null)
-
-    const nextSidebarState = resolveDesktopSidebarState(id)
-    setIsSidebarOpen(nextSidebarState.isOpen)
-    setDesktopSidebarWidthPercentage(nextSidebarState.widthPercentage)
-    setSidebarStateReadyProjectId(id)
-  }, [id])
-
-  useEffect(() => {
     if (!isDesktop) return
     if (!id) return
-    if (sidebarStateReadyProjectId !== id) return
 
     writePersistedDesktopSidebarState(id, {
       isOpen: isSidebarOpen,
       widthPercentage: desktopSidebarWidthPercentage,
     })
-  }, [desktopSidebarWidthPercentage, id, isDesktop, isSidebarOpen, sidebarStateReadyProjectId])
+  }, [desktopSidebarWidthPercentage, id, isDesktop, isSidebarOpen])
 
   useEffect(() => {
     if (!isDesktop) return
     if (!id) return
-    if (sidebarStateReadyProjectId !== id) return
 
     const panel = sidebarPanelRef.current
     if (!panel) return
@@ -548,7 +584,7 @@ export function EditorPage() {
     if (asPercentage > DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE) {
       panel.collapse()
     }
-  }, [desktopSidebarWidthPercentage, id, isDesktop, isSidebarOpen, sidebarStateReadyProjectId])
+  }, [desktopSidebarWidthPercentage, id, isDesktop, isSidebarOpen])
 
   const handleConnectionChange = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)
@@ -679,23 +715,26 @@ export function EditorPage() {
       panel.collapse()
       setIsSidebarOpen(false)
     }
-  }, [desktopSidebarWidthPercentage])
+  }, [desktopSidebarWidthPercentage, setDesktopSidebarWidthPercentage, setIsSidebarOpen])
 
-  const handleDesktopLayoutChanged = useCallback((layout: Record<string, number>) => {
-    const sidebarSize = layout[DESKTOP_SIDEBAR_PANEL_ID]
-    if (typeof sidebarSize !== 'number' || !Number.isFinite(sidebarSize)) return
+  const handleDesktopLayoutChanged = useCallback(
+    (layout: Record<string, number>) => {
+      const sidebarSize = layout[DESKTOP_SIDEBAR_PANEL_ID]
+      if (typeof sidebarSize !== 'number' || !Number.isFinite(sidebarSize)) return
 
-    const nextIsOpen = sidebarSize > DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE
-    setIsSidebarOpen((previous) => (previous === nextIsOpen ? previous : nextIsOpen))
+      const nextIsOpen = sidebarSize > DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE
+      setIsSidebarOpen((previous) => (previous === nextIsOpen ? previous : nextIsOpen))
 
-    if (!nextIsOpen) return
+      if (!nextIsOpen) return
 
-    const nextWidth = clampDesktopSidebarWidth(sidebarSize)
-    setDesktopSidebarWidthPercentage((previous) => {
-      if (Math.abs(previous - nextWidth) < 0.1) return previous
-      return nextWidth
-    })
-  }, [])
+      const nextWidth = clampDesktopSidebarWidth(sidebarSize)
+      setDesktopSidebarWidthPercentage((previous) => {
+        if (Math.abs(previous - nextWidth) < 0.1) return previous
+        return nextWidth
+      })
+    },
+    [setDesktopSidebarWidthPercentage, setIsSidebarOpen]
+  )
 
   const handleMobileOpenDocument = useCallback(
     (documentId: string) => {
@@ -802,6 +841,7 @@ export function EditorPage() {
           <Editor
             key={`${currentDocumentId}-${editorSessionKey}`}
             ref={editorRef}
+            projectId={id}
             documentId={currentDocumentId}
             onConnectionChange={handleConnectionChange}
             onEditorSelectionChange={setEditorSelectionForChat}
@@ -855,11 +895,11 @@ export function EditorPage() {
               onKeyDown={handleTitleKeyDown}
               autoComplete="off"
               disabled={!currentDocumentId || documentQuery.isLoading || !!documentQuery.error}
-              className="w-full max-w-[180px] sm:max-w-xs border-none bg-transparent text-sm sm:text-base font-semibold shadow-none focus-visible:ring-0"
+              className="w-full max-w-45 sm:max-w-xs border-none bg-transparent text-sm sm:text-base font-semibold shadow-none focus-visible:ring-0"
             />
           </div>
 
-          <span className="text-muted-foreground hidden text-sm lg:inline truncate max-w-[200px]">
+          <span className="text-muted-foreground hidden text-sm lg:inline truncate max-w-50">
             {project.title}
           </span>
 

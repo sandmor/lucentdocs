@@ -1,4 +1,5 @@
 import {
+  type PromptEditable,
   promptCreateInputSchema,
   promptDeleteInputSchema,
   promptGetInputSchema,
@@ -7,7 +8,37 @@ import {
 } from '@plotline/shared'
 import { TRPCError } from '@trpc/server'
 import { PromptManagerError, promptManager } from '../../ai/prompt-manager.js'
+import { configManager } from '../../config/manager.js'
 import { router, publicProcedure } from '../index.js'
+
+function assertPromptWithinConfiguredLimits(prompt: PromptEditable): void {
+  const limits = configManager.getConfig().limits
+
+  if (prompt.name.length > limits.promptNameChars) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Prompt name exceeds limit of ${limits.promptNameChars} characters`,
+    })
+  }
+  if (prompt.description.length > limits.promptDescChars) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Prompt description exceeds limit of ${limits.promptDescChars} characters`,
+    })
+  }
+  if (prompt.systemTemplate.length > limits.promptSystemChars) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `System template exceeds limit of ${limits.promptSystemChars} characters`,
+    })
+  }
+  if (prompt.userTemplate.length > limits.promptUserChars) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `User template exceeds limit of ${limits.promptUserChars} characters`,
+    })
+  }
+}
 
 function toTrpcPromptError(error: unknown): never {
   if (error instanceof TRPCError) throw error
@@ -47,6 +78,7 @@ export const promptsRouter = router({
 
   create: publicProcedure.input(promptCreateInputSchema).mutation(({ input }) => {
     try {
+      assertPromptWithinConfiguredLimits(input.prompt)
       const prompt = promptManager.createPrompt(input.prompt)
       return {
         prompt,
@@ -59,6 +91,7 @@ export const promptsRouter = router({
 
   update: publicProcedure.input(promptUpdateInputSchema).mutation(({ input }) => {
     try {
+      assertPromptWithinConfiguredLimits(input.prompt)
       const result = promptManager.updatePrompt(input.id, input.prompt)
       return {
         ...result,

@@ -15,6 +15,8 @@ interface InlineAIControlsProps {
   onGenerate: (prompt: string, selection: SelectionRange) => boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
+  onContinuePrompt: (zoneId: string, prompt: string) => boolean
+  onDismissChoices: (zoneId: string) => boolean
   onInteractionChange: (interacting: boolean) => void
 }
 
@@ -24,6 +26,8 @@ export function InlineAIControls({
   onGenerate,
   onAccept,
   onReject,
+  onContinuePrompt,
+  onDismissChoices,
   onInteractionChange,
 }: InlineAIControlsProps) {
   const state = useAIWriterState(view)
@@ -39,7 +43,7 @@ export function InlineAIControls({
         zoneId: activeZone.id,
         from: activeZone.from,
         to: activeZone.to,
-        mode: activeZone.mode,
+        session: activeZone.session,
       }
     }
 
@@ -52,7 +56,7 @@ export function InlineAIControls({
       zoneId: state.zoneId ?? undefined,
       from: Math.min(from, to),
       to: Math.max(from, to),
-      mode: state.mode ?? null,
+      session: null,
     }
   }, [state])
 
@@ -62,6 +66,16 @@ export function InlineAIControls({
     if (!state) return []
     return state.zones.filter((zone) => zone.id !== loadingZoneId)
   }, [state, loadingZoneId])
+
+  let activeReviewZone: ReviewZone | null = null
+  if (!activeLoadingAnchor && reviewZones.length > 0) {
+    if (state?.zoneId) {
+      activeReviewZone = reviewZones.find((zone) => zone.id === state.zoneId) ?? null
+    }
+    if (!activeReviewZone) {
+      activeReviewZone = reviewZones[reviewZones.length - 1] ?? null
+    }
+  }
 
   if (!view) return null
 
@@ -77,6 +91,8 @@ export function InlineAIControls({
         onGenerate={onGenerate}
         onAccept={onAccept}
         onReject={onReject}
+        onContinuePrompt={onContinuePrompt}
+        onDismissChoices={onDismissChoices}
         onInteractionChange={onInteractionChange}
       />
     )
@@ -87,7 +103,7 @@ export function InlineAIControls({
       <SelectionComposeFloatingControl
         view={view}
         selection={selection}
-        visible={hasSelection}
+        visible={hasSelection && !state?.active}
         onGenerate={onGenerate}
         onInteractionChange={onInteractionChange}
       />
@@ -99,30 +115,32 @@ export function InlineAIControls({
           zoneId={activeLoadingAnchor.zoneId}
           from={activeLoadingAnchor.from}
           to={activeLoadingAnchor.to}
-          mode={activeLoadingAnchor.mode}
           state="processing"
-          choices={[]}
           stuck={Boolean(state?.stuck)}
+          session={activeLoadingAnchor.session}
           onAccept={onAccept}
           onReject={onReject}
+          onContinuePrompt={onContinuePrompt}
+          onDismissChoices={onDismissChoices}
         />
       ) : null}
 
-      {reviewZones.map((zone) => (
+      {activeReviewZone ? (
         <AIZoneFloatingControl
-          key={zone.id}
+          key={activeReviewZone.id}
           view={view}
-          zoneId={zone.id}
-          from={zone.from}
-          to={zone.to}
-          mode={zone.mode}
-          state={zone.streaming ? 'processing' : 'review'}
-          choices={zone.choices}
+          zoneId={activeReviewZone.id}
+          from={activeReviewZone.from}
+          to={activeReviewZone.to}
+          state={activeReviewZone.streaming ? 'processing' : 'review'}
           stuck={false}
+          session={activeReviewZone.session}
           onAccept={onAccept}
           onReject={onReject}
+          onContinuePrompt={onContinuePrompt}
+          onDismissChoices={onDismissChoices}
         />
-      ))}
+      ) : null}
     </>
   )
 }

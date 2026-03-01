@@ -26,16 +26,16 @@ export type ResponseProtocol = z.infer<typeof responseProtocolSchema>
 
 export const promptDefaultsSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.85),
-  maxOutputTokens: z.number().int().min(64).max(4096).optional(),
+  maxOutputTokens: z.number().int().min(1).optional(),
 })
 export type PromptDefaults = z.infer<typeof promptDefaultsSchema>
 
 export const promptEditableSchema = z.object({
   mode: promptModeSchema,
-  name: z.string().trim().min(1).max(160),
-  description: z.string().trim().max(2000).default(''),
-  systemTemplate: z.string().trim().min(1).max(80_000),
-  userTemplate: z.string().trim().min(1).max(200_000),
+  name: z.string().trim().min(1),
+  description: z.string().trim().default(''),
+  systemTemplate: z.string().trim().min(1),
+  userTemplate: z.string().trim().min(1),
   protocol: responseProtocolSchema,
   defaults: promptDefaultsSchema,
 })

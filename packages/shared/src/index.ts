@@ -75,3 +75,16 @@ export {
   promptSetBindingInputSchema,
   promptSummarySchema,
 } from './prompts.js'
+export type {
+  InlineZoneReplaceAction,
+  InlineZoneChoicesAction,
+  InlineZoneWriteAction,
+} from './inline-ai.js'
+export {
+  INLINE_AI_MAX_ZONE_CHOICES,
+  INLINE_AI_DEFAULT_TOOL_STEP_LIMIT,
+  inlineZoneWriteToolInputSchema,
+  inlineZoneChoicesToolInputSchema,
+  normalizeInlineZoneChoices,
+  parseInlineZoneWriteAction,
+} from './inline-ai.js'

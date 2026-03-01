@@ -1,4 +1,5 @@
 import { z } from 'zod/v4'
+import { INLINE_AI_DEFAULT_TOOL_STEP_LIMIT } from './inline-ai.js'
 
 export interface PersistedAppConfig {
   nodeEnv: string
@@ -14,6 +15,7 @@ export interface PersistedAppConfig {
   maxPromptChars: number
   maxToolEntries: number
   maxToolReadChars: number
+  maxAiToolSteps: number
   maxChatMessageChars: number
   maxPromptNameChars: number
   maxPromptDescChars: number
@@ -124,7 +126,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 1_000_000,
     allowEmptyString: false,
-    min: 1000,
+    min: 1,
   },
   {
     key: 'maxHintChars',
@@ -134,7 +136,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 10_000,
     allowEmptyString: false,
-    min: 100,
+    min: 1,
   },
   {
     key: 'maxPromptChars',
@@ -144,7 +146,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 50_000,
     allowEmptyString: false,
-    min: 100,
+    min: 1,
   },
   {
     key: 'maxToolEntries',
@@ -154,7 +156,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 2_000,
     allowEmptyString: false,
-    min: 10,
+    min: 1,
   },
   {
     key: 'maxToolReadChars',
@@ -164,7 +166,17 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 120_000,
     allowEmptyString: false,
-    min: 1000,
+    min: 1,
+  },
+  {
+    key: 'maxAiToolSteps',
+    section: 'limits',
+    tomlKey: 'ai_tool_steps',
+    envVar: 'LIMITS_AI_TOOL_STEPS',
+    kind: 'int',
+    defaultValue: INLINE_AI_DEFAULT_TOOL_STEP_LIMIT,
+    allowEmptyString: false,
+    min: 1,
   },
   {
     key: 'maxChatMessageChars',
@@ -174,7 +186,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 20_000,
     allowEmptyString: false,
-    min: 100,
+    min: 1,
   },
   {
     key: 'maxPromptNameChars',
@@ -184,7 +196,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 160,
     allowEmptyString: false,
-    min: 10,
+    min: 1,
   },
   {
     key: 'maxPromptDescChars',
@@ -194,7 +206,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 2_000,
     allowEmptyString: false,
-    min: 100,
+    min: 1,
   },
   {
     key: 'maxPromptSystemChars',
@@ -204,7 +216,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 80_000,
     allowEmptyString: false,
-    min: 1000,
+    min: 1,
   },
   {
     key: 'maxPromptUserChars',
@@ -214,7 +226,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 200_000,
     allowEmptyString: false,
-    min: 1000,
+    min: 1,
   },
   {
     key: 'maxDocImportChars',
@@ -224,7 +236,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 500_000,
     allowEmptyString: false,
-    min: 1000,
+    min: 1,
   },
   {
     key: 'maxDocExportChars',
@@ -234,7 +246,7 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     kind: 'int',
     defaultValue: 1_000_000,
     allowEmptyString: false,
-    min: 1000,
+    min: 1,
   },
 ] as const
 
@@ -267,6 +279,7 @@ export const EDITABLE_CONFIG_KEYS = [
   'maxPromptChars',
   'maxToolEntries',
   'maxToolReadChars',
+  'maxAiToolSteps',
   'maxChatMessageChars',
   'maxPromptNameChars',
   'maxPromptDescChars',
@@ -282,6 +295,7 @@ export const LIMITS_CONFIG_KEYS = [
   'maxPromptChars',
   'maxToolEntries',
   'maxToolReadChars',
+  'maxAiToolSteps',
   'maxChatMessageChars',
   'maxPromptNameChars',
   'maxPromptDescChars',
@@ -297,6 +311,7 @@ export interface LimitsConfig {
   promptChars: number
   toolEntries: number
   toolReadChars: number
+  aiToolSteps: number
   chatMessageChars: number
   promptNameChars: number
   promptDescChars: number
@@ -313,6 +328,7 @@ const limitsHintCharsField = CONFIG_FIELD_BY_KEY.maxHintChars
 const limitsPromptCharsField = CONFIG_FIELD_BY_KEY.maxPromptChars
 const limitsToolEntriesField = CONFIG_FIELD_BY_KEY.maxToolEntries
 const limitsToolReadCharsField = CONFIG_FIELD_BY_KEY.maxToolReadChars
+const limitsAiToolStepsField = CONFIG_FIELD_BY_KEY.maxAiToolSteps
 const limitsChatMessageCharsField = CONFIG_FIELD_BY_KEY.maxChatMessageChars
 const limitsPromptNameCharsField = CONFIG_FIELD_BY_KEY.maxPromptNameChars
 const limitsPromptDescCharsField = CONFIG_FIELD_BY_KEY.maxPromptDescChars
@@ -322,10 +338,9 @@ const limitsDocImportCharsField = CONFIG_FIELD_BY_KEY.maxDocImportChars
 const limitsDocExportCharsField = CONFIG_FIELD_BY_KEY.maxDocExportChars
 
 export const editableConfigSchema = z.object({
-  aiApiKey: z.string().max(4096),
+  aiApiKey: z.string(),
   aiBaseUrl: z
     .string()
-    .max(2048)
     .refine(
       (value) => {
         const trimmed = value.trim()
@@ -341,65 +356,67 @@ export const editableConfigSchema = z.object({
         message: 'Must be a valid http(s) URL or empty to use provider defaults.',
       }
     ),
-  aiModel: z.string().max(200),
+  aiModel: z.string(),
   yjsPersistenceFlushMs: z
     .number()
     .int()
-    .min(Math.max(yjsPersistenceFlushField.min ?? 1, 100))
-    .max(600000),
+    .min(yjsPersistenceFlushField.min ?? 1),
   yjsVersionIntervalMs: z
     .number()
     .int()
-    .min(Math.max(yjsVersionIntervalField.min ?? 1, 1000))
-    .max(86400000),
+    .min(yjsVersionIntervalField.min ?? 1),
   maxContextChars: z
     .number()
     .int()
-    .min(limitsContextCharsField.min ?? 1000),
+    .min(limitsContextCharsField.min ?? 1),
   maxHintChars: z
     .number()
     .int()
-    .min(limitsHintCharsField.min ?? 100),
+    .min(limitsHintCharsField.min ?? 1),
   maxPromptChars: z
     .number()
     .int()
-    .min(limitsPromptCharsField.min ?? 100),
+    .min(limitsPromptCharsField.min ?? 1),
   maxToolEntries: z
     .number()
     .int()
-    .min(limitsToolEntriesField.min ?? 10),
+    .min(limitsToolEntriesField.min ?? 1),
   maxToolReadChars: z
     .number()
     .int()
-    .min(limitsToolReadCharsField.min ?? 1000),
+    .min(limitsToolReadCharsField.min ?? 1),
+  maxAiToolSteps: z
+    .number()
+    .int()
+    .min(limitsAiToolStepsField.min ?? 1),
   maxChatMessageChars: z
     .number()
     .int()
-    .min(limitsChatMessageCharsField.min ?? 100),
+    .min(limitsChatMessageCharsField.min ?? 1),
   maxPromptNameChars: z
     .number()
     .int()
-    .min(limitsPromptNameCharsField.min ?? 10),
+    .min(limitsPromptNameCharsField.min ?? 1),
   maxPromptDescChars: z
     .number()
     .int()
-    .min(limitsPromptDescCharsField.min ?? 100),
+    .min(limitsPromptDescCharsField.min ?? 1),
   maxPromptSystemChars: z
     .number()
     .int()
-    .min(limitsPromptSystemCharsField.min ?? 1000),
+    .min(limitsPromptSystemCharsField.min ?? 1),
   maxPromptUserChars: z
     .number()
     .int()
-    .min(limitsPromptUserCharsField.min ?? 1000),
+    .min(limitsPromptUserCharsField.min ?? 1),
   maxDocImportChars: z
     .number()
     .int()
-    .min(limitsDocImportCharsField.min ?? 1000),
+    .min(limitsDocImportCharsField.min ?? 1),
   maxDocExportChars: z
     .number()
     .int()
-    .min(limitsDocExportCharsField.min ?? 1000),
+    .min(limitsDocExportCharsField.min ?? 1),
 })
 
 export type EditableConfigInput = z.infer<typeof editableConfigSchema>

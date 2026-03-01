@@ -3,26 +3,23 @@ import {
   readUIMessageStream,
   stepCountIs,
   streamText,
-  tool,
   type UIMessage,
+  type UIMessageChunk,
 } from 'ai'
-import { z } from 'zod/v4'
-import { isPathInsideDirectory, normalizeDocumentPath, parentDocumentPath } from '@plotline/shared'
+import { normalizeDocumentPath } from '@plotline/shared'
 import { getLanguageModel } from '../ai/index.js'
 import { assertPromptProtocolMode, resolveChatPrompt } from '../ai/prompt-engine.js'
+import { configManager } from '../config/manager.js'
 import type { ServiceSet } from '../core/services/types.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
+import { buildReadTools } from './tools.js'
 import {
   buildCurrentFileContext,
-  buildProjectFileIndex,
   createAssistantFailureMessage,
   isAbortError,
-  normalizeProjectPath,
-  projectDocumentToMarkdown,
   readResponseError,
   serializeConversationForPrompt,
   toModelMessages,
-  getToolLimits,
   type PersistedChatThread,
 } from './utils.js'
 
@@ -43,6 +40,10 @@ export interface GenerationOptions {
 }
 
 export interface GenerationCallbacks {
+  onChunk: (event: {
+    generationId: string
+    chunk: UIMessageChunk
+  }) => void
   onProgress: (state: {
     thread: PersistedChatThread
     generating: boolean
@@ -76,6 +77,8 @@ export class GenerationEngine {
 
     let latestAssistantMessage: UIMessage | null = null
     let finalMessages = baseMessages
+    let chunkForwardTask: Promise<void> | null = null
+    let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null = null
 
     try {
       const currentDocument = await this.#services.documents.getForProject(
@@ -105,13 +108,14 @@ export class GenerationEngine {
 
       const model = await getLanguageModel()
       const modelMessages = await convertToModelMessages(toModelMessages(baseMessages))
+      const runtimeLimits = configManager.getConfig().limits
 
       const result = streamText({
         model,
         system: `${rendered.systemPrompt}\n\n${rendered.userPrompt}`,
         messages: modelMessages,
         tools: this.buildTools(scope),
-        stopWhen: stepCountIs(8),
+        stopWhen: stepCountIs(runtimeLimits.aiToolSteps),
         maxOutputTokens: rendered.definition.defaults.maxOutputTokens,
         temperature: rendered.definition.defaults.temperature,
         abortSignal: abortController.signal,
@@ -124,8 +128,34 @@ export class GenerationEngine {
         },
       })
 
+      const [chunkStream, messageStream] = uiMessageStream.tee()
+      chunkReader = chunkStream.getReader()
+      chunkForwardTask = (async () => {
+        const reader = chunkReader
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            try {
+              callbacks.onChunk({
+                generationId,
+                chunk: value,
+              })
+            } catch (error) {
+              console.error('Failed to forward chat UI chunk', error)
+            }
+          }
+        } catch (error) {
+          if (!isAbortError(error) && !abortController.signal.aborted) {
+            console.error('Chat UI chunk forwarding failed', error)
+          }
+        } finally {
+          reader.releaseLock()
+        }
+      })()
+
       for await (const assistantMessage of readUIMessageStream<UIMessage>({
-        stream: uiMessageStream,
+        stream: messageStream,
       })) {
         latestAssistantMessage = assistantMessage
         finalMessages = [...baseMessages, assistantMessage]
@@ -159,6 +189,21 @@ export class GenerationEngine {
           : baseMessages
       }
     } finally {
+      if (chunkReader) {
+        try {
+          await chunkReader.cancel()
+        } catch {
+          // Ignore cancellation errors when stream already closed.
+        }
+      }
+      if (chunkForwardTask) {
+        try {
+          await chunkForwardTask
+        } catch (error) {
+          console.error('Failed while waiting for chat chunk forward task', error)
+        }
+      }
+
       try {
         const saved = await this.#services.chats.save(
           scope.projectId,
@@ -208,119 +253,6 @@ export class GenerationEngine {
   }
 
   private buildTools(scope: ChatScope) {
-    return {
-      list_files: tool({
-        description:
-          'List project files and directories from the project document tree. Use this to discover structure.',
-        inputSchema: z.object({
-          path: z.string().describe('Directory path to inspect. Use "/" for project root.'),
-          recursive: z
-            .boolean()
-            .optional()
-            .describe('Whether to include nested descendants recursively.'),
-        }),
-        execute: async ({ path, recursive = false }) => {
-          const index = await buildProjectFileIndex(
-            scope.projectId,
-            this.#services.documents.listForProject.bind(this.#services.documents)
-          )
-          const normalizedPath = normalizeProjectPath(path)
-
-          if (normalizedPath && index.files.has(normalizedPath)) {
-            throw new Error(`Path "${path}" is a file. Use read_file to inspect file contents.`)
-          }
-
-          if (normalizedPath && !index.directories.has(normalizedPath)) {
-            throw new Error(`Directory "${path}" was not found in this project.`)
-          }
-
-          const matchesRecursivePath = (entryPath: string) => {
-            if (!recursive) {
-              return parentDocumentPath(entryPath) === normalizedPath
-            }
-
-            if (!normalizedPath) {
-              return entryPath.length > 0
-            }
-
-            return isPathInsideDirectory(entryPath, normalizedPath) && entryPath !== normalizedPath
-          }
-
-          const directoryEntries = [...index.directories]
-            .filter((entry) => entry.length > 0)
-            .filter(matchesRecursivePath)
-            .map((entry) => ({ type: 'directory' as const, path: entry }))
-
-          const fileEntries = [...index.files.keys()]
-            .filter(matchesRecursivePath)
-            .map((entry) => ({ type: 'file' as const, path: entry }))
-
-          const allEntries = [...directoryEntries, ...fileEntries].sort((left, right) =>
-            left.path.localeCompare(right.path)
-          )
-          const entries = allEntries.slice(0, getToolLimits().MAX_TOOL_ENTRIES)
-
-          return {
-            path: normalizedPath || '/',
-            recursive,
-            entries,
-            totalEntries: allEntries.length,
-            hasMore: allEntries.length > entries.length,
-          }
-        },
-      }),
-      read_file: tool({
-        description:
-          'Read a project file by path. Optional line bounds allow partial reads using 1-based inclusive line numbers.',
-        inputSchema: z.object({
-          path: z.string().describe('File path to read.'),
-          start_line: z.number().int().min(1).optional(),
-          end_line: z.number().int().min(1).optional(),
-        }),
-        execute: async ({ path, start_line, end_line }) => {
-          const index = await buildProjectFileIndex(
-            scope.projectId,
-            this.#services.documents.listForProject.bind(this.#services.documents)
-          )
-          const normalizedPath = normalizeProjectPath(path)
-          const documentId = index.files.get(normalizedPath)
-
-          if (!documentId) {
-            if (index.directories.has(normalizedPath)) {
-              throw new Error(`Path "${path}" is a directory. Use list_files for directories.`)
-            }
-            throw new Error(`File "${path}" was not found in this project.`)
-          }
-
-          const document = await this.#services.documents.getForProject(scope.projectId, documentId)
-          if (!document) {
-            throw new Error(`File "${path}" is no longer available in this project.`)
-          }
-
-          const fullText = projectDocumentToMarkdown(document.content)
-          const lines = fullText.length > 0 ? fullText.split('\n') : ['']
-          const totalLines = lines.length
-          const start = Math.max(1, Math.min(start_line ?? 1, totalLines))
-          const end = Math.max(start, Math.min(end_line ?? totalLines, totalLines))
-
-          let content = lines.slice(start - 1, end).join('\n')
-          let truncated = false
-          const toolLimits = getToolLimits()
-          if (content.length > toolLimits.MAX_TOOL_READ_CHARS) {
-            content = content.slice(0, toolLimits.MAX_TOOL_READ_CHARS)
-            truncated = true
-          }
-
-          return {
-            path: normalizedPath,
-            start_line: start,
-            end_line: end,
-            total_lines: totalLines,
-            truncated,
-            content,
-          }
-        },
-      }),
-    }
+    return buildReadTools({ scope, services: this.#services })
   }
 }

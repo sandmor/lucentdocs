@@ -1,16 +1,14 @@
 import { type Node as ProseMirrorNode, type Slice } from 'prosemirror-model'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
-
-export type AIMode = 'replace' | 'insert' | 'choices'
+import type { InlineZoneSession } from './inline-ai-session'
 
 export interface AIZone {
   id: string
   from: number
   to: number
-  mode: AIMode
   streaming: boolean
-  choices: string[]
+  session: InlineZoneSession | null
   deletedSlice: string | null
 }
 
@@ -23,8 +21,6 @@ export interface AIWriterState {
   stuck: boolean
   deletedSlice: Slice | null
   deletedFrom: number | null
-  mode: AIMode | null
-  insertIndex: number | null
   originalSelectionFrom: number | null
   originalSelectionTo: number | null
   zones: AIZone[]
@@ -38,28 +34,47 @@ export interface AIWriterActionHandlers {
 
 export const aiWriterPluginKey = new PluginKey<AIWriterState>('ai_writer')
 
-function parseMode(value: unknown): AIMode {
-  if (value === 'replace' || value === 'insert' || value === 'choices') return value
-  return 'insert'
-}
+function parseInlineZoneSession(value: unknown): InlineZoneSession | null {
+  if (typeof value !== 'string' || value.length === 0) return null
 
-function parseChoices(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter((entry): entry is string => typeof entry === 'string')
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    const messagesRaw = Array.isArray(parsed.messages) ? parsed.messages : []
+    const choicesRaw = Array.isArray(parsed.choices) ? parsed.choices : []
+    const contextBefore = typeof parsed.contextBefore === 'string' ? parsed.contextBefore : null
+    const contextAfter = typeof parsed.contextAfter === 'string' ? parsed.contextAfter : null
+
+    const messages = messagesRaw.flatMap((entry) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return []
+      const record = entry as Record<string, unknown>
+      const id = typeof record.id === 'string' ? record.id : null
+      const role = record.role === 'user' || record.role === 'assistant' ? record.role : null
+      const text = typeof record.text === 'string' ? record.text : ''
+      const toolsRaw = Array.isArray(record.tools) ? record.tools : []
+      if (!id || !role) return []
+
+      const tools = toolsRaw.flatMap((tool) => {
+        if (typeof tool !== 'object' || tool === null || Array.isArray(tool)) return []
+        const toolRecord = tool as Record<string, unknown>
+        const toolName = typeof toolRecord.toolName === 'string' ? toolRecord.toolName : null
+        const state =
+          toolRecord.state === 'pending'
+            ? ('pending' as const)
+            : toolRecord.state === 'complete'
+              ? ('complete' as const)
+              : null
+        if (!toolName || !state) return []
+        return [{ toolName, state }]
+      })
+
+      return [{ id, role: role as 'user' | 'assistant', text, tools }]
+    })
+
+    const choices = choicesRaw.filter((entry): entry is string => typeof entry === 'string')
+    return { messages, choices, contextBefore, contextAfter }
+  } catch {
+    return null
   }
-
-  if (typeof value === 'string' && value.length > 0) {
-    try {
-      const parsed = JSON.parse(value) as unknown
-      if (Array.isArray(parsed)) {
-        return parsed.filter((entry): entry is string => typeof entry === 'string')
-      }
-    } catch {
-      return []
-    }
-  }
-
-  return []
 }
 
 function readZoneMarkAttrs(mark: unknown): AIZone | null {
@@ -73,9 +88,8 @@ function readZoneMarkAttrs(mark: unknown): AIZone | null {
     return null
   }
 
-  const mode = parseMode(attrs.mode)
   const streaming = attrs.streaming === true
-  const choices = parseChoices(attrs.choices)
+  const session = parseInlineZoneSession(attrs.session)
   const deletedSlice =
     typeof attrs.deletedSlice === 'string' && attrs.deletedSlice.length > 0
       ? attrs.deletedSlice
@@ -85,9 +99,8 @@ function readZoneMarkAttrs(mark: unknown): AIZone | null {
     id,
     from: 0,
     to: 0,
-    mode,
     streaming,
-    choices,
+    session,
     deletedSlice,
   }
 }
@@ -124,12 +137,8 @@ function collectAIZones(doc: ProseMirrorNode): AIZone[] {
       current.to = Math.max(current.to, to)
       current.streaming = current.streaming || parsed.streaming
 
-      if (current.mode !== parsed.mode) {
-        current.mode = parsed.mode
-      }
-
-      if (parsed.choices.length > 0) {
-        current.choices = parsed.choices
+      if (parsed.session) {
+        current.session = parsed.session
       }
 
       if (!current.deletedSlice && parsed.deletedSlice) {
@@ -155,8 +164,6 @@ function createInactiveState(zones: AIZone[] = []): AIWriterState {
     stuck: false,
     deletedSlice: null,
     deletedFrom: null,
-    mode: null,
-    insertIndex: null,
     originalSelectionFrom: null,
     originalSelectionTo: null,
     zones,
@@ -232,18 +239,8 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
             stuck: false,
             deletedSlice: meta.deletedSlice ?? null,
             deletedFrom: meta.deletedSlice ? meta.pos : null,
-            mode: null,
-            insertIndex: null,
             originalSelectionFrom: meta.selectionFrom ?? meta.pos,
             originalSelectionTo: meta.selectionTo ?? meta.pos,
-          }
-        }
-
-        if (meta?.type === 'mode_detected') {
-          next = {
-            ...next,
-            mode: parseMode(meta.mode),
-            insertIndex: meta.insertIndex ?? null,
           }
         }
 
@@ -304,12 +301,19 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
           next = {
             ...next,
             zones,
-            from: localZone ? localZone.from : mappedFrom,
-            to: localZone ? localZone.to : mappedTo,
+            from: localZone
+              ? mappedFrom !== null
+                ? Math.min(localZone.from, mappedFrom)
+                : localZone.from
+              : mappedFrom,
+            to: localZone
+              ? mappedTo !== null
+                ? Math.max(localZone.to, mappedTo)
+                : localZone.to
+              : mappedTo,
             deletedFrom: mappedDeletedFrom,
             originalSelectionFrom: mappedOriginalSelectionFrom,
             originalSelectionTo: mappedOriginalSelectionTo,
-            mode: localZone ? localZone.mode : next.mode,
             streaming: localZone ? localZone.streaming : next.streaming,
           }
 

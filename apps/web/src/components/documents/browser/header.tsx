@@ -132,7 +132,7 @@ export function BrowserHeader({
           <span key={`${crumb}-${index}`} className="flex shrink-0 items-center gap-0.5">
             <ChevronRight className="size-3 shrink-0" />
             <button
-              className="hover:text-foreground max-w-[100px] truncate"
+              className="hover:text-foreground max-w-25 truncate"
               onClick={() => onGoToCrumb(index)}
             >
               {crumb}

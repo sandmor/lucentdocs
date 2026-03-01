@@ -7,9 +7,8 @@ const extendedMarks = basicSchema.spec.marks.append({
   ai_zone: {
     attrs: {
       id: {},
-      mode: { default: 'insert' },
       streaming: { default: false },
-      choices: { default: null },
+      session: { default: null },
       deletedSlice: { default: null },
     },
     inclusive: false,
@@ -20,9 +19,8 @@ const extendedMarks = basicSchema.spec.marks.append({
           const el = dom as HTMLElement
           return {
             id: el.getAttribute('data-ai-zone-id'),
-            mode: el.getAttribute('data-ai-zone-mode') ?? 'insert',
             streaming: el.getAttribute('data-ai-zone-streaming') === 'true',
-            choices: el.getAttribute('data-ai-zone-choices'),
+            session: el.getAttribute('data-ai-zone-session'),
             deletedSlice: el.getAttribute('data-ai-zone-deleted-slice'),
           }
         },
@@ -31,9 +29,8 @@ const extendedMarks = basicSchema.spec.marks.append({
     toDOM(mark) {
       const attrs = mark.attrs as {
         id: string
-        mode?: string
         streaming?: boolean
-        choices?: string | null
+        session?: string | null
         deletedSlice?: string | null
       }
 
@@ -42,9 +39,8 @@ const extendedMarks = basicSchema.spec.marks.append({
         {
           class: 'ai-generating-text',
           'data-ai-zone-id': attrs.id,
-          'data-ai-zone-mode': attrs.mode ?? 'insert',
           'data-ai-zone-streaming': String(attrs.streaming === true),
-          'data-ai-zone-choices': attrs.choices ?? '',
+          'data-ai-zone-session': attrs.session ?? '',
           'data-ai-zone-deleted-slice': attrs.deletedSlice ?? '',
         },
         0,

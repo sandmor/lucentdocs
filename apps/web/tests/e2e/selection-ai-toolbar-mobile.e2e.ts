@@ -9,13 +9,24 @@ test.use({
 
 async function mockAiStream(context: BrowserContext) {
   await context.route('**/api/ai/stream', async (route) => {
+    const events = [
+      { type: 'start', messageId: 'msg-1' },
+      { type: 'text-start', id: 'txt-1' },
+      { type: 'text-delta', id: 'txt-1', delta: 'mobile' },
+      { type: 'text-end', id: 'txt-1' },
+      { type: 'finish' },
+    ]
+    const sseBody = [...events.map((event) => JSON.stringify(event)), '[DONE]']
+      .map((payload) => `data: ${payload}\n\n`)
+      .join('')
+
     await route.fulfill({
       status: 200,
-      contentType: 'text/plain; charset=utf-8',
+      contentType: 'text/event-stream; charset=utf-8',
       headers: {
-        'X-AI-Mode': 'replace',
+        'x-vercel-ai-ui-message-stream': 'v1',
       },
-      body: '"mobile"\n',
+      body: sseBody,
     })
   })
 }

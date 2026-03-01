@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
-import type { AIMode } from './ai-writer-plugin'
+import type { InlineZoneSession } from './inline-ai-session'
 import {
   useAnimatedPresence,
   useMountAnimationPhase,
@@ -183,12 +183,13 @@ interface AIZoneFloatingControlProps {
   zoneId?: string
   from: number
   to: number
-  mode: AIMode | null
   state: InlineControlState
-  choices: string[]
   stuck: boolean
+  session: InlineZoneSession | null
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
+  onContinuePrompt: (zoneId: string, prompt: string) => boolean
+  onDismissChoices: (zoneId: string) => boolean
 }
 
 export function AIZoneFloatingControl({
@@ -196,12 +197,13 @@ export function AIZoneFloatingControl({
   zoneId,
   from,
   to,
-  mode,
   state,
-  choices,
   stuck,
+  session,
   onAccept,
   onReject,
+  onContinuePrompt,
+  onDismissChoices,
 }: AIZoneFloatingControlProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const animationPhase = useMountAnimationPhase()
@@ -271,7 +273,7 @@ export function AIZoneFloatingControl({
     return () => {
       cleanup()
     }
-  }, [view, zoneId, from, to, mode, state, stuck, choices.length, getZoneAnchorElement])
+  }, [view, zoneId, from, to, state, stuck, session?.choices.length, getZoneAnchorElement])
 
   return createPortal(
     <AIZoneSurface
@@ -279,15 +281,16 @@ export function AIZoneFloatingControl({
       className="ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-desktop fixed z-60 flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
       animationPhase={animationPhase}
       zoneId={zoneId}
-      mode={mode}
       state={state}
-      choices={choices}
       stuck={stuck}
+      session={session}
       from={from}
       to={to}
       view={view}
       onAccept={onAccept}
       onReject={onReject}
+      onContinuePrompt={onContinuePrompt}
+      onDismissChoices={onDismissChoices}
     />,
     document.body
   )

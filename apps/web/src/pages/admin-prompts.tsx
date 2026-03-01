@@ -6,6 +6,7 @@ import { useTheme } from 'next-themes'
 import {
   promptEditableSchema,
   responseProtocolSchema,
+  type LimitsConfig,
   type PromptDefinition,
   type PromptEditable,
   type PromptMode,
@@ -142,10 +143,26 @@ function isSystemTag(
   return tags
 }
 
+function assertPromptWithinLimits(editable: PromptEditable, limits: LimitsConfig): void {
+  if (editable.name.length > limits.promptNameChars) {
+    throw new Error(`Prompt name exceeds limit of ${limits.promptNameChars} characters`)
+  }
+  if (editable.description.length > limits.promptDescChars) {
+    throw new Error(`Prompt description exceeds limit of ${limits.promptDescChars} characters`)
+  }
+  if (editable.systemTemplate.length > limits.promptSystemChars) {
+    throw new Error(`System template exceeds limit of ${limits.promptSystemChars} characters`)
+  }
+  if (editable.userTemplate.length > limits.promptUserChars) {
+    throw new Error(`User template exceeds limit of ${limits.promptUserChars} characters`)
+  }
+}
+
 export function AdminPromptsPage() {
   const navigate = useNavigate()
   const { resolvedTheme } = useTheme()
   const utils = trpc.useUtils()
+  const limitsQuery = trpc.config.limits.useQuery()
   const listQuery = trpc.prompts.list.useQuery()
   const createMutation = trpc.prompts.create.useMutation()
   const updateMutation = trpc.prompts.update.useMutation()
@@ -267,6 +284,10 @@ export function AdminPromptsPage() {
     if (!validated.success) {
       const first = validated.error.issues[0]
       throw new Error(first?.message ?? 'Prompt form is invalid.')
+    }
+    const limits = limitsQuery.data
+    if (limits) {
+      assertPromptWithinLimits(validated.data, limits)
     }
 
     return {
@@ -659,6 +680,7 @@ export function AdminPromptsPage() {
                   <Input
                     id="prompt-name"
                     spellCheck={false}
+                    maxLength={limitsQuery.data?.promptNameChars}
                     value={form.name}
                     onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
                   />
@@ -670,6 +692,7 @@ export function AdminPromptsPage() {
                 <Input
                   id="prompt-description"
                   spellCheck={false}
+                  maxLength={limitsQuery.data?.promptDescChars}
                   value={form.description}
                   onChange={(event) =>
                     setForm((prev) => ({ ...prev, description: event.target.value }))
@@ -699,8 +722,7 @@ export function AdminPromptsPage() {
                     id="prompt-max-output"
                     type="number"
                     step="1"
-                    min="64"
-                    max="4096"
+                    min="1"
                     placeholder="Unset"
                     value={form.maxOutputTokens}
                     onChange={(event) =>
@@ -716,6 +738,7 @@ export function AdminPromptsPage() {
                   id="system-template"
                   className="min-h-52 font-mono text-xs"
                   spellCheck={false}
+                  maxLength={limitsQuery.data?.promptSystemChars}
                   value={form.systemTemplate}
                   onChange={(event) =>
                     setForm((prev) => ({ ...prev, systemTemplate: event.target.value }))
@@ -729,6 +752,7 @@ export function AdminPromptsPage() {
                   id="user-template"
                   className="min-h-52 font-mono text-xs"
                   spellCheck={false}
+                  maxLength={limitsQuery.data?.promptUserChars}
                   value={form.userTemplate}
                   onChange={(event) =>
                     setForm((prev) => ({ ...prev, userTemplate: event.target.value }))

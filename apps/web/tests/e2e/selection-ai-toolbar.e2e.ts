@@ -14,13 +14,24 @@ async function mockAiStream(context: BrowserContext) {
       return
     }
 
+    const events = [
+      { type: 'start', messageId: 'msg-1' },
+      { type: 'text-start', id: 'txt-1' },
+      { type: 'text-delta', id: 'txt-1', delta: 'galaxy' },
+      { type: 'text-end', id: 'txt-1' },
+      { type: 'finish' },
+    ]
+    const sseBody = [...events.map((event) => JSON.stringify(event)), '[DONE]']
+      .map((payload) => `data: ${payload}\n\n`)
+      .join('')
+
     await route.fulfill({
       status: 200,
-      contentType: 'text/plain; charset=utf-8',
+      contentType: 'text/event-stream; charset=utf-8',
       headers: {
-        'X-AI-Mode': 'replace',
+        'x-vercel-ai-ui-message-stream': 'v1',
       },
-      body: '"galaxy"\n',
+      body: sseBody,
     })
   })
 }
@@ -73,7 +84,7 @@ test('selection controls toggle bold and italic marks', async ({ page }) => {
   await expect(page.locator('.ProseMirror em').first()).toHaveText('format me')
 })
 
-test('selection toolbar coexists with AI zone controls without overlap', async ({ page }) => {
+test('selection toolbar is replaced by zone controls while AI zone is active', async ({ page }) => {
   await mockAiStream(page.context())
   await createProject(page, 'Selection Toolbar Collision Avoidance')
 
@@ -88,33 +99,6 @@ test('selection toolbar coexists with AI zone controls without overlap', async (
   const selectionToolbar = page.locator('.ai-selection-toolbar')
   const zoneControls = page.locator('.ai-writer-floating-controls').first()
 
-  await expect(selectionToolbar).toBeVisible()
+  await expect(selectionToolbar).toHaveCount(0)
   await expect(zoneControls).toBeVisible()
-
-  await expect
-    .poll(async () => {
-      const selectionBox = await selectionToolbar.boundingBox()
-      const zoneBox = await zoneControls.boundingBox()
-      if (!selectionBox || !zoneBox) return null
-      return rectanglesOverlap(selectionBox, zoneBox, 8)
-    })
-    .toBeFalsy()
 })
-
-function rectanglesOverlap(
-  left: { x: number; y: number; width: number; height: number },
-  right: { x: number; y: number; width: number; height: number },
-  padding: number
-): boolean {
-  const leftRight = left.x + left.width
-  const leftBottom = left.y + left.height
-  const rightRight = right.x + right.width
-  const rightBottom = right.y + right.height
-
-  return !(
-    leftRight + padding <= right.x ||
-    left.x >= rightRight + padding ||
-    leftBottom + padding <= right.y ||
-    left.y >= rightBottom + padding
-  )
-}

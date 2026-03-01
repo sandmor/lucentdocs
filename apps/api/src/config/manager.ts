@@ -356,6 +356,7 @@ function buildLimitsConfig(rawConfig: PersistedAppConfig): LimitsConfig {
     promptChars: rawConfig.maxPromptChars,
     toolEntries: rawConfig.maxToolEntries,
     toolReadChars: rawConfig.maxToolReadChars,
+    aiToolSteps: rawConfig.maxAiToolSteps,
     chatMessageChars: rawConfig.maxChatMessageChars,
     promptNameChars: rawConfig.maxPromptNameChars,
     promptDescChars: rawConfig.maxPromptDescChars,

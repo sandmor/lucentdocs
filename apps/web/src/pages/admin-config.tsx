@@ -152,6 +152,12 @@ const EDITABLE_FIELD_META: Record<EditableFieldKey, EditableFieldMeta> = {
     label: 'Tool read chars',
     description: 'Max characters read by tools.',
   },
+  maxAiToolSteps: {
+    kind: 'number',
+    id: 'max-ai-tool-steps',
+    label: 'AI tool steps',
+    description: 'Max tool-call steps per AI generation.',
+  },
   maxChatMessageChars: {
     kind: 'number',
     id: 'max-chat-msg',
@@ -211,8 +217,8 @@ const LIMIT_FIELD_ROWS = [
     columnsClassName: 'sm:grid-cols-3',
   },
   {
-    keys: ['maxToolEntries', 'maxToolReadChars', 'maxChatMessageChars'],
-    columnsClassName: 'sm:grid-cols-3',
+    keys: ['maxToolEntries', 'maxToolReadChars', 'maxAiToolSteps', 'maxChatMessageChars'],
+    columnsClassName: 'sm:grid-cols-2',
   },
   {
     keys: [

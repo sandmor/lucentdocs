@@ -5,7 +5,7 @@ import { isValidId } from '@plotline/shared'
 import { projectSyncBus } from '../project-sync.js'
 import { publicProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'
-import type { ChatObserveState } from '../../chat/runtime.js'
+import type { ChatObserveEvent } from '../../chat/runtime.js'
 import { configManager } from '../../config/manager.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
@@ -117,7 +117,7 @@ export const chatRouter = router({
       })
     )
     .subscription(({ ctx, input, signal }) => {
-      return observable<ChatObserveState>((emit) => {
+      return observable<ChatObserveEvent>((emit) => {
         let closed = false
         let unsubscribe: (() => void) | null = null
 

@@ -22,6 +22,8 @@ interface MobileInlineAIDockProps {
   onGenerate: (prompt: string, selection: SelectionRange) => boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
+  onContinuePrompt: (zoneId: string, prompt: string) => boolean
+  onDismissChoices: (zoneId: string) => boolean
   onInteractionChange: (interacting: boolean) => void
 }
 
@@ -42,6 +44,8 @@ export function MobileInlineAIDock({
   onGenerate,
   onAccept,
   onReject,
+  onContinuePrompt,
+  onDismissChoices,
   onInteractionChange,
 }: MobileInlineAIDockProps) {
   const dockRef = useRef<HTMLDivElement>(null)
@@ -195,15 +199,16 @@ export function MobileInlineAIDock({
             className="ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-mobile ai-inline-mobile-panel flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
             animationPhase={presence.phase}
             zoneId={activeMode.zone.zoneId}
-            mode={activeMode.zone.mode}
             state="processing"
-            choices={[]}
             stuck={stuck}
+            session={activeMode.zone.session}
             from={activeMode.zone.from}
             to={activeMode.zone.to}
             view={view}
             onAccept={onAccept}
             onReject={onReject}
+            onContinuePrompt={onContinuePrompt}
+            onDismissChoices={onDismissChoices}
           />
         ) : null}
 
@@ -213,15 +218,16 @@ export function MobileInlineAIDock({
             className="ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-mobile ai-inline-mobile-panel flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
             animationPhase={presence.phase}
             zoneId={activeMode.zone.id}
-            mode={activeMode.zone.mode}
             state={activeMode.zone.streaming ? 'processing' : 'review'}
-            choices={activeMode.zone.choices}
             stuck={false}
+            session={activeMode.zone.session}
             from={activeMode.zone.from}
             to={activeMode.zone.to}
             view={view}
             onAccept={onAccept}
             onReject={onReject}
+            onContinuePrompt={onContinuePrompt}
+            onDismissChoices={onDismissChoices}
           />
         ) : null}
       </div>

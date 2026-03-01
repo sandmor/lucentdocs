@@ -37,12 +37,33 @@ export function selectChoice(
 
   const tr = view.state.tr
   const markType = view.state.schema.marks.ai_zone ?? null
+  const pluginState = aiWriterPluginKey.getState(view.state)
+  const zone =
+    pluginState?.zones.find((entry) => safeFrom < entry.to && safeTo > entry.from) ??
+    pluginState?.zones.find((entry) => entry.from === safeFrom && entry.to === safeTo) ??
+    null
+
   tr.delete(safeFrom, safeTo)
   tr.insert(safeFrom, schema.text(choice))
-  if (markType) {
+  if (markType && zone) {
+    const nextSession = zone.session
+      ? {
+          ...zone.session,
+          choices: [],
+        }
+      : null
     tr.removeMark(safeFrom, safeFrom + choice.length, markType)
+    tr.addMark(
+      safeFrom,
+      safeFrom + choice.length,
+      markType.create({
+        id: zone.id,
+        streaming: false,
+        session: nextSession ? JSON.stringify(nextSession) : null,
+        deletedSlice: zone.deletedSlice,
+      })
+    )
   }
-  tr.setMeta(aiWriterPluginKey, { type: 'accept' })
   tr.setMeta('addToHistory', true)
   view.dispatch(tr)
 }

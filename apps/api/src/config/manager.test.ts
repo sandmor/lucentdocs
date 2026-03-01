@@ -98,26 +98,39 @@ describe('ConfigManager', () => {
       PLOTLINE_DATA_DIR: dataDir,
       AI_MODEL: 'gpt-from-env',
       YJS_PERSISTENCE_FLUSH_MS: '2500',
+      LIMITS_AI_TOOL_STEPS: '11',
     })
 
     const result = manager.updateFileConfig({
       aiModel: 'gpt-from-file',
       yjsPersistenceFlushMs: 7777,
+      maxAiToolSteps: 7,
     })
 
-    expect(result.changedFileKeys.sort()).toEqual(['aiModel', 'yjsPersistenceFlushMs'])
+    expect(result.changedFileKeys.sort()).toEqual([
+      'aiModel',
+      'maxAiToolSteps',
+      'yjsPersistenceFlushMs',
+    ])
     expect(result.changedEffectiveKeys).toEqual([])
-    expect(result.overriddenChangedKeys.sort()).toEqual(['aiModel', 'yjsPersistenceFlushMs'])
+    expect(result.overriddenChangedKeys.sort()).toEqual([
+      'aiModel',
+      'maxAiToolSteps',
+      'yjsPersistenceFlushMs',
+    ])
     expect(result.state.config.ai.model).toBe('gpt-from-env')
     expect(result.state.config.yjs.persistenceFlushIntervalMs).toBe(2500)
+    expect(result.state.config.limits.aiToolSteps).toBe(11)
 
     const persisted = readFileSync(result.state.config.paths.configFile, 'utf8')
     const parsed = TOML.parse(persisted) as {
       ai?: { model?: string }
       yjs?: { persistence_flush_interval_ms?: number }
+      limits?: { ai_tool_steps?: number }
     }
     expect(parsed.ai?.model).toBe('gpt-from-file')
     expect(parsed.yjs?.persistence_flush_interval_ms).toBe(7777)
+    expect(parsed.limits?.ai_tool_steps).toBe(7)
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })

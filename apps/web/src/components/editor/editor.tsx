@@ -20,6 +20,7 @@ export interface EditorHandle {
 }
 
 interface EditorProps {
+  projectId?: string
   documentId: string
   onConnectionChange?: (status: ConnectionStatus) => void
   onEditorViewReady?: (view: EditorView | null) => void
@@ -31,6 +32,7 @@ interface EditorProps {
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   {
+    projectId,
     documentId,
     onConnectionChange,
     onEditorViewReady,
@@ -84,6 +86,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       },
       getIncludeAfterContext() {
         return includeAfterContextRef.current
+      },
+      getToolScope() {
+        return {
+          projectId,
+          documentId,
+        }
       },
     })
     aiControllerRef.current = aiController
@@ -281,6 +289,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       selectionToolbarInteractingRef.current = false
     }
   }, [
+    projectId,
     documentId,
     providerSessionKey,
     showOfflineToast,
@@ -386,6 +395,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         }}
         onReject={(zoneId) => {
           if (viewRef.current) aiControllerRef.current?.rejectAI(viewRef.current, zoneId)
+        }}
+        onContinuePrompt={(zoneId, prompt) => {
+          if (!viewRef.current || !aiControllerRef.current) return false
+          return aiControllerRef.current.continueAIPromptForZone(viewRef.current, zoneId, prompt)
+        }}
+        onDismissChoices={(zoneId) => {
+          if (!viewRef.current || !aiControllerRef.current) return false
+          return aiControllerRef.current.dismissChoicesForZone(viewRef.current, zoneId)
         }}
         onInteractionChange={handleToolbarInteractionChange}
       />

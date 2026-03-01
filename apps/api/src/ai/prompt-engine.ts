@@ -39,10 +39,17 @@ export function resolveSelectionPrompt(
   contextBefore: string,
   contextAfter: string | null,
   prompt: string,
-  selectedText: string | null
+  selectedText: string | null,
+  conversation = ''
 ): RenderedPrompt {
   const definition = promptManager.resolvePromptForMode('prompt')
-  const variables = buildPromptVariables(contextBefore, contextAfter, prompt, selectedText)
+  const variables = buildPromptVariables(
+    contextBefore,
+    contextAfter,
+    prompt,
+    selectedText,
+    conversation
+  )
   return renderPrompt(definition, variables)
 }
 

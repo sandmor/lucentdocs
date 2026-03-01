@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { type UIMessage } from 'ai'
+import { readUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai'
 import {
   User,
   StopCircle,
@@ -19,6 +19,11 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
+import {
+  extractMessageTextFromParts,
+  extractToolPartsFromParts,
+  getMessageParts,
+} from './ai-message-parts'
 
 interface ChatPanelProps {
   editorSelection: { from: number; to: number } | null
@@ -44,6 +49,11 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const activeThreadIdRef = useRef<string | null>(null)
+  const streamAssistantRef = useRef<UIMessage | null>(null)
+  const streamGenerationIdRef = useRef<string | null>(null)
+  const streamChunkControllerRef = useRef<ReadableStreamDefaultController<UIMessageChunk> | null>(
+    null
+  )
 
   const queryEnabled = Boolean(projectId && documentId)
   const documentKey = projectId && documentId ? `${projectId}:${documentId}` : null
@@ -79,6 +89,56 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
     [threads, activeThreadId]
   )
 
+  const stopStreamChunkPump = useCallback(() => {
+    if (streamChunkControllerRef.current) {
+      try {
+        streamChunkControllerRef.current.close()
+      } catch {
+        // ignore double-close races
+      }
+    }
+    streamChunkControllerRef.current = null
+    streamAssistantRef.current = null
+    streamGenerationIdRef.current = null
+  }, [])
+
+  const startStreamChunkPump = useCallback(
+    (generationId: string, seedAssistant: UIMessage | null, chatId: string) => {
+      stopStreamChunkPump()
+      streamAssistantRef.current = seedAssistant
+      streamGenerationIdRef.current = generationId
+
+      const chunkStream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          streamChunkControllerRef.current = controller
+        },
+      })
+
+      void (async () => {
+        let latestAssistant = seedAssistant
+        for await (const nextMessage of readUIMessageStream<UIMessage>({
+          message: latestAssistant ?? undefined,
+          stream: chunkStream,
+          terminateOnError: false,
+          onError: (error) => {
+            console.warn('Failed to read chat UI stream chunk', { error })
+          },
+        })) {
+          if (activeThreadIdRef.current !== chatId) {
+            continue
+          }
+          latestAssistant = nextMessage
+          streamAssistantRef.current = nextMessage
+          setIsGenerating(true)
+          setMessages((previous) => upsertAssistantMessage(previous, nextMessage))
+        }
+      })().catch((error) => {
+        console.warn('Chat stream chunk pump failed', { error })
+      })
+    },
+    [stopStreamChunkPump]
+  )
+
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId
   }, [activeThreadId])
@@ -93,41 +153,42 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       setIsGenerating(false)
       setIsThreadBrowserOpen(false)
       setActiveThreadId(null)
+      stopStreamChunkPump()
     })
 
     return () => {
       cancelled = true
     }
-  }, [documentKey])
+  }, [documentKey, stopStreamChunkPump])
 
   useEffect(() => {
     if (!queryEnabled) return
 
     let cancelled = false
 
-    if (
-      threads.length > 0 &&
-      (!activeThreadId || !threads.some((thread) => thread.id === activeThreadId))
-    ) {
-      queueMicrotask(() => {
-        if (cancelled) return
-        setActiveThreadId(threads[0]!.id)
-        setMessages([])
-      })
-    } else if (threads.length === 0 && activeThreadId !== null) {
+    if (threads.length === 0 && activeThreadId !== null) {
       queueMicrotask(() => {
         if (cancelled) return
         setActiveThreadId(null)
         setMessages([])
         setInput('')
         setIsGenerating(false)
+        stopStreamChunkPump()
+      })
+    } else if (activeThreadId && !threads.some((thread) => thread.id === activeThreadId)) {
+      queueMicrotask(() => {
+        if (cancelled) return
+        setActiveThreadId(null)
+        setMessages([])
+        setIsGenerating(false)
+        stopStreamChunkPump()
       })
     }
 
     return () => {
       cancelled = true
     }
-  }, [activeThreadId, queryEnabled, threads])
+  }, [activeThreadId, queryEnabled, stopStreamChunkPump, threads])
 
   useEffect(() => {
     if (!activeThreadId || !activeThreadQuery.data) return
@@ -138,12 +199,15 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       if (cancelled) return
       setMessages(asUIMessageArray(activeThreadQuery.data.messages))
       setIsGenerating(Boolean(activeThreadQuery.data.generating))
+      if (!activeThreadQuery.data.generating) {
+        stopStreamChunkPump()
+      }
     })
 
     return () => {
       cancelled = true
     }
-  }, [activeThreadId, activeThreadQuery.data])
+  }, [activeThreadId, activeThreadQuery.data, stopStreamChunkPump])
 
   trpc.chat.observeById.useSubscription(
     {
@@ -157,9 +221,24 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
         if (!projectId || !documentId || !activeThreadId) return
         if (event.chatId !== activeThreadIdRef.current) return
 
+        if (event.type === 'stream-chunk') {
+          if (streamGenerationIdRef.current !== event.generationId) {
+            startStreamChunkPump(event.generationId, streamAssistantRef.current, event.chatId)
+          }
+
+          try {
+            streamChunkControllerRef.current?.enqueue(event.chunk)
+          } catch (error) {
+            console.warn('Failed to enqueue chat stream chunk', { error })
+          }
+          return
+        }
+
         if (event.deleted || !event.thread) {
           setIsGenerating(false)
           setMessages([])
+          setActiveThreadId(null)
+          stopStreamChunkPump()
           utils.chat.listByDocument.setData({ projectId, documentId }, (previous) => {
             const current = previous?.threads ?? []
             return { threads: current.filter((thread) => thread.id !== activeThreadId) }
@@ -175,6 +254,17 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
         const nextMessages = asUIMessageArray(event.thread.messages)
         setMessages(nextMessages)
         setIsGenerating(event.generating)
+        const latestAssistant =
+          [...nextMessages].reverse().find((message) => message.role === 'assistant') ?? null
+        streamAssistantRef.current = latestAssistant
+
+        if (event.generating && event.generationId) {
+          if (streamGenerationIdRef.current !== event.generationId) {
+            startStreamChunkPump(event.generationId, latestAssistant, event.chatId)
+          }
+        } else {
+          stopStreamChunkPump()
+        }
 
         const nextThreadSummary: ChatThreadSummary = {
           id: event.thread.id,
@@ -225,7 +315,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   }, [messages])
 
   const createThread = useCallback(async () => {
-    if (!projectId || !documentId) return
+    if (!projectId || !documentId) return null
     try {
       const created = await createThreadMutation.mutateAsync({ projectId, documentId })
       utils.chat.listByDocument.setData({ projectId, documentId }, (previous) => {
@@ -243,13 +333,11 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
           ],
         }
       })
-      setActiveThreadId(created.id)
-      setMessages([])
-      setInput('')
-      setIsGenerating(false)
+      return created.id
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create chat thread'
       toast.error('Chat Error', { description: message })
+      return null
     }
   }, [createThreadMutation, documentId, projectId, utils.chat.listByDocument])
 
@@ -257,8 +345,6 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
     async (threadId: string) => {
       if (!projectId || !documentId) return
       if (isGenerating && threadId === activeThreadId) return
-
-      const remaining = threads.filter((thread) => thread.id !== threadId)
 
       try {
         await deleteThreadMutation.mutateAsync({ projectId, documentId, chatId: threadId })
@@ -271,7 +357,8 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
           setMessages([])
           setInput('')
           setIsGenerating(false)
-          setActiveThreadId(remaining[0]?.id ?? null)
+          setActiveThreadId(null)
+          stopStreamChunkPump()
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to delete chat thread'
@@ -284,7 +371,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       documentId,
       isGenerating,
       projectId,
-      threads,
+      stopStreamChunkPump,
       utils.chat.listByDocument,
     ]
   )
@@ -306,7 +393,17 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
 
   const handleSend = async () => {
     const trimmed = input.trim()
-    if (!trimmed || !projectId || !documentId || !activeThreadId || isGenerating) return
+    if (!trimmed || !projectId || !documentId || isGenerating) return
+
+    let targetChatId = activeThreadId
+    if (!targetChatId) {
+      targetChatId = await createThread()
+      if (!targetChatId) return
+      setActiveThreadId(targetChatId)
+      setMessages([])
+      setIsGenerating(false)
+      stopStreamChunkPump()
+    }
 
     setInput('')
 
@@ -314,7 +411,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       await generateMutation.mutateAsync({
         projectId,
         documentId,
-        chatId: activeThreadId,
+        chatId: targetChatId,
         message: trimmed,
         selectionFrom: editorSelection?.from,
         selectionTo: editorSelection?.to,
@@ -343,15 +440,21 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
               <PenTool className="size-3.5" />
             </div>
             <h3 className="truncate text-sm font-semibold tracking-tight text-foreground">
-              {activeThreadQuery.data?.title ?? activeThread?.title ?? 'AI Chat'}
+              {activeThreadQuery.data?.title ?? activeThread?.title ?? 'New Chat'}
             </h3>
           </div>
           <div className="flex items-center gap-0.5">
             <Button
               variant="ghost"
               size="icon-sm"
-              disabled={!queryEnabled || createThreadMutation.isPending}
-              onClick={() => void createThread()}
+              disabled={!queryEnabled || isGenerating}
+              onClick={() => {
+                setActiveThreadId(null)
+                setMessages([])
+                setInput('')
+                setIsGenerating(false)
+                stopStreamChunkPump()
+              }}
             >
               <Plus className="size-4" />
             </Button>
@@ -389,6 +492,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
                   setActiveThreadId(thread.id)
                   setMessages([])
                   setIsGenerating(false)
+                  stopStreamChunkPump()
                 }}
                 onDelete={() => {
                   void deleteThread(thread.id)
@@ -453,9 +557,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask a question or bounce an idea..."
-            disabled={
-              !queryEnabled || isGenerating || !activeThreadId || generateMutation.isPending
-            }
+            disabled={!queryEnabled || isGenerating || generateMutation.isPending}
             className="min-h-12 max-h-36 resize-none border-0 bg-transparent px-3.5 py-3 pr-12 text-sm leading-relaxed shadow-none focus-visible:ring-0"
           />
           <div className="absolute bottom-2 right-2 flex items-center">
@@ -478,9 +580,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
                 onClick={() => {
                   void handleSend()
                 }}
-                disabled={
-                  !queryEnabled || !activeThreadId || !input.trim() || generateMutation.isPending
-                }
+                disabled={!queryEnabled || !input.trim() || generateMutation.isPending}
                 className="size-8 rounded-lg"
               >
                 <CornerDownLeft className="size-4" />
@@ -649,7 +749,7 @@ function ToolTraceCard({ part }: { part: Record<string, unknown> }) {
       </summary>
 
       <div className="border-t border-border/40 bg-muted/10 p-3">
-        <pre className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-muted-foreground/80 scrollbar-thin">
+        <pre className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap wrap-break-word font-mono text-[10px] leading-relaxed text-muted-foreground/80 scrollbar-thin">
           {JSON.stringify(part, null, 2)}
         </pre>
       </div>
@@ -661,27 +761,28 @@ function asUIMessageArray(value: unknown): UIMessage[] {
   return Array.isArray(value) ? (value as UIMessage[]) : []
 }
 
-function extractMessageText(message: UIMessage): string {
-  const parts = Array.isArray(message.parts) ? message.parts : []
+function upsertAssistantMessage(messages: UIMessage[], assistantMessage: UIMessage): UIMessage[] {
+  if (messages.length === 0) {
+    return [assistantMessage]
+  }
 
-  return parts
-    .flatMap((part) => {
-      if (typeof part !== 'object' || part === null || Array.isArray(part)) return []
-      const record = part as Record<string, unknown>
-      if (record.type !== 'text') return []
-      return typeof record.text === 'string' ? [record.text] : []
-    })
-    .join('')
-    .trim()
+  const existingIndex = messages.findIndex((message) => message.id === assistantMessage.id)
+  if (existingIndex >= 0) {
+    return messages.map((message, index) => (index === existingIndex ? assistantMessage : message))
+  }
+
+  const last = messages[messages.length - 1]
+  if (last?.role === 'assistant') {
+    return [...messages.slice(0, -1), assistantMessage]
+  }
+
+  return [...messages, assistantMessage]
+}
+
+function extractMessageText(message: UIMessage): string {
+  return extractMessageTextFromParts(getMessageParts(message))
 }
 
 function extractToolParts(message: UIMessage): Record<string, unknown>[] {
-  const parts = Array.isArray(message.parts) ? message.parts : []
-  return parts.flatMap((part) => {
-    if (typeof part !== 'object' || part === null || Array.isArray(part)) return []
-    const record = part as Record<string, unknown>
-    if (typeof record.type !== 'string') return []
-    if (record.type === 'dynamic-tool' || record.type.startsWith('tool-')) return [record]
-    return []
-  })
+  return extractToolPartsFromParts(getMessageParts(message))
 }

@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import type { UIMessage } from 'ai'
+import type { UIMessage, UIMessageChunk } from 'ai'
 import type { ServiceSet } from '../core/services/types.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
 import { GenerationEngine, type ChatScope } from './generation-engine.js'
@@ -30,9 +30,24 @@ export interface ChatObserveState {
   thread: PersistedChatThread | null
 }
 
+export interface ChatObserveChunkEvent {
+  type: 'stream-chunk'
+  projectId: string
+  documentId: string
+  chatId: string
+  generationId: string
+  chunk: UIMessageChunk
+}
+
+export interface ChatObserveSnapshotEvent extends ChatObserveState {
+  type: 'snapshot'
+}
+
+export type ChatObserveEvent = ChatObserveSnapshotEvent | ChatObserveChunkEvent
+
 export type { ChatObserveState as ChatObserveStateType }
 
-type ChatStateListener = (state: ChatObserveState) => void
+type ChatStateListener = (event: ChatObserveEvent) => void
 
 interface ActiveGeneration {
   id: string
@@ -41,7 +56,7 @@ interface ActiveGeneration {
 
 export class ChatRuntime {
   #listeners = new Map<string, Set<ChatStateListener>>()
-  #liveStates = new Map<string, ChatObserveState>()
+  #liveStates = new Map<string, ChatObserveSnapshotEvent>()
   #activeGenerations = new Map<string, ActiveGeneration>()
   #generationEngine: GenerationEngine
   #services: ServiceSet
@@ -55,10 +70,18 @@ export class ChatRuntime {
     return this.#activeGenerations.has(key) || (this.#listeners.get(key)?.size ?? 0) > 0
   }
 
-  #emit(state: ChatObserveState): void {
-    const key = toChatKey(state)
+  #toSnapshotEvent(state: ChatObserveState): ChatObserveSnapshotEvent {
+    return {
+      ...state,
+      type: 'snapshot',
+    }
+  }
+
+  #emitSnapshot(state: ChatObserveState): void {
+    const snapshot = this.#toSnapshotEvent(state)
+    const key = toChatKey(snapshot)
     if (this.#shouldRetainState(key)) {
-      this.#liveStates.set(key, state)
+      this.#liveStates.set(key, snapshot)
     } else {
       this.#liveStates.delete(key)
     }
@@ -68,7 +91,39 @@ export class ChatRuntime {
 
     for (const listener of listeners) {
       try {
-        listener(state)
+        listener(snapshot)
+      } catch (error) {
+        console.error('Chat observe listener failed', error)
+      }
+    }
+  }
+
+  #updateSnapshot(state: ChatObserveState): void {
+    const key = toChatKey(state)
+    if (this.#shouldRetainState(key)) {
+      this.#liveStates.set(key, this.#toSnapshotEvent(state))
+    } else {
+      this.#liveStates.delete(key)
+    }
+  }
+
+  #emitStreamChunk(scope: ChatScope, generationId: string, chunk: UIMessageChunk): void {
+    const key = toChatKey(scope)
+    const listeners = this.#listeners.get(key)
+    if (!listeners) return
+
+    const event: ChatObserveChunkEvent = {
+      type: 'stream-chunk',
+      projectId: scope.projectId,
+      documentId: scope.documentId,
+      chatId: scope.chatId,
+      generationId,
+      chunk,
+    }
+
+    for (const listener of listeners) {
+      try {
+        listener(event)
       } catch (error) {
         console.error('Chat observe listener failed', error)
       }
@@ -118,7 +173,7 @@ export class ChatRuntime {
         listener(cachedState)
       } else {
         const state = await this.#loadPersistedState(scope)
-        this.#emit(state)
+        this.#emitSnapshot(state)
       }
     } catch (error) {
       listeners.delete(listener)
@@ -144,7 +199,7 @@ export class ChatRuntime {
 
   async publishPersistedState(scope: ChatScope): Promise<void> {
     const state = await this.#loadPersistedState(scope)
-    this.#emit(state)
+    this.#emitSnapshot(state)
   }
 
   isGenerating(scope: ChatScope): boolean {
@@ -162,7 +217,7 @@ export class ChatRuntime {
     this.cancelGeneration(scope)
     this.#activeGenerations.delete(toChatKey(scope))
 
-    this.#emit(
+    this.#emitSnapshot(
       createObserveState(scope, {
         thread: null,
         generating: false,
@@ -236,7 +291,7 @@ export class ChatRuntime {
         Date.now()
       )
 
-      this.#emit(
+      this.#emitSnapshot(
         createObserveState(input, {
           thread: liveThread,
           generating: true,
@@ -255,8 +310,11 @@ export class ChatRuntime {
           abortController: controller,
         },
         {
+          onChunk: ({ generationId: activeGenerationId, chunk }) => {
+            this.#emitStreamChunk(input, activeGenerationId, chunk)
+          },
           onProgress: (state) => {
-            this.#emit(
+            this.#updateSnapshot(
               createObserveState(input, {
                 thread: state.thread,
                 generating: true,
@@ -270,7 +328,7 @@ export class ChatRuntime {
               this.#activeGenerations.delete(key)
             }
 
-            this.#emit(
+            this.#emitSnapshot(
               createObserveState(input, {
                 thread: result.thread,
                 generating: false,

@@ -23,7 +23,7 @@ const TEMPLATE_REFERENCE_PATTERN = /{{\s*([^{}]+?)\s*}}/g
 
 const MODE_TEMPLATE_VARIABLES: Record<PromptMode, readonly string[]> = {
   continue: ['contextBefore', 'gapMarker', 'contextAfter', 'instruction', 'authorHintSection'],
-  prompt: ['contextBefore', 'gapMarker', 'contextAfter', 'selectedText', 'modeGuidance', 'prompt'],
+  prompt: ['wrappedContext', 'modeGuidance', 'prompt', 'conversation'],
   chat: ['currentFilePath', 'currentFileContent', 'chatInstruction', 'conversation'],
 }
 
@@ -48,34 +48,34 @@ Bad output: "John walked into the room. He froze... The door slammed behind him.
 When continuing text, seamlessly pick up from where the author left off.
 When given a prompt about what to write, produce the requested prose in a style matching the existing text.`
 
-const SYSTEM_PROMPT_STRUCTURED = `You are a skilled fiction writing assistant helping an author edit their novel. Your role is to:
-- Write in a style consistent with the existing text
-- Maintain narrative voice, tone, and pacing
-- Provide creative suggestions that fit the story's direction
+const SYSTEM_PROMPT_STRUCTURED = `You are Plotline's inline AI writing assistant for editing the active AI zone.
 
-RESPONSE FORMAT:
-Return a single structured edit action with one of these modes:
+Behavior goals:
+- Prefer acting through tools, not explanations.
+- On the first response, perform an action immediately whenever possible.
+- Keep writing style aligned with the surrounding narrative voice and pacing.
 
-- mode "replace"
-  Use when the selected text should be rewritten or replaced.
-  Provide "content" with the replacement text.
+TOOLS:
+- read-only tools (project inspection): list_files, read_file
+- zone-write tools:
+  - write_zone: mutate only a range inside the active AI zone using fromOffset/toOffset + content
+  - write_zone_choices: provide multiple alternatives for the active AI zone
 
-- mode "insert"
-  Use when text should be inserted relative to the selection.
-  Provide:
-  - "insertIndex" where 0 inserts before selection, -1 inserts after selection, and positive values insert at that character offset into the selection.
-  - "content" with the text to insert.
+ZONE BOUNDARY MODEL:
+- Treat the active AI zone as the exact text between <selection> and </selection> in story_context.
+- write_zone offsets are relative only to that selected text.
+- You cannot edit any text outside the selected span. This includes nearby words, sentences, and paragraph context.
+- If user asks for broader edits (sentence/paragraph/document) outside the selected span, ask them to expand selection first.
 
-- mode "choices"
-  Use when the author asked for alternatives/options.
-  Provide "choices" as an array of candidate strings.
+STRICT SAFETY:
+- You may only edit the active AI zone via write tools.
+- Never request or imply edits outside the active AI zone.
+- Prefer one decisive write action over long back-and-forth.
 
-RULES:
-- Return only the structured edit action.
-- Always return a JSON object with all keys: mode, insertIndex, content, choices.
-- For fields that do not apply to the chosen mode, set them to null.
-- Never include explanations or markdown.
-- Keep edits concise and stylistically consistent with the surrounding passage.`
+RESPONSE STYLE:
+- If a write tool fully satisfies the request, keep text output minimal.
+- If clarification is required, ask one short follow-up question.
+- Never output markdown code fences for normal replies.`
 
 const SYSTEM_PROMPT_CHAT = `You are Plotline's sidebar AI assistant for software projects.
 
@@ -114,26 +114,19 @@ Task:
 
 const PROMPT_USER_TEMPLATE = `Story context:
 
-<context_before>
-{{contextBefore}}
-</context_before>
-
-{{gapMarker}}
-
-<context_after>
-{{contextAfter}}
-</context_after>
-
-<selected_text>
-{{selectedText}}
-</selected_text>
+<story_context>
+{{wrappedContext}}
+</story_context>
 
 {{modeGuidance}}
 
 The author requests:
 {{prompt}}
 
-Return the appropriate structured edit action.`
+Conversation so far:
+{{conversation}}
+
+Prefer a direct tool action in your first assistant turn.`
 
 const CHAT_USER_TEMPLATE = `Active file path:
 {{currentFilePath}}
@@ -306,27 +299,33 @@ export function buildPromptVariables(
   contextBefore: string,
   contextAfter: string | null,
   prompt: string,
-  selectedText: string | null = null
+  selectedText: string | null = null,
+  conversation = ''
 ): Record<string, string> {
   const safeContextBefore = sanitizeContext(contextBefore)
   const safeContextAfter = sanitizeContext(contextAfter ?? '')
   const safeSelectedText = selectedText ?? ''
+  const wrappedContext = safeSelectedText
+    ? `${safeContextBefore}<selection>${safeSelectedText}</selection>${safeContextAfter}`
+    : `${safeContextBefore}<caret />${safeContextAfter}`
   const modeGuidance = selectedText
     ? `MODE GUIDANCE:
-- If the request asks to replace, rewrite, or improve the selection -> use mode "replace"
-- If the request asks to add content before/after/within the selection -> use mode "insert"
-- If the request asks for alternatives, options, or suggestions -> use mode "choices"`
+  - The selected text is the only writable area.
+  - Use write_zone with fromOffset/toOffset relative to <selection> content only.
+  - For full selection rewrite, replace the whole selected range.
+  - For alternatives/options, use write_zone_choices.
+  - If asked to change surrounding paragraph/context outside selection, ask user to expand selection.`
     : `MODE GUIDANCE:
-- Use mode "insert" when adding text relative to the current cursor location
-- Use mode "choices" when user asks for alternatives`
+   - <selection> may represent the current AI zone text.
+   - Use write_zone for direct insertion or replacement in the selected span only.
+   - Use write_zone_choices when user asks for alternatives.
+   - Never assume write tools can change outside selected text.`
 
   return {
-    contextBefore: safeContextBefore,
-    gapMarker: WRITING_GAP_MARKER,
-    contextAfter: safeContextAfter,
-    selectedText: safeSelectedText,
+    wrappedContext,
     modeGuidance,
     prompt,
+    conversation: conversation.trim() || '(no prior inline conversation)',
   }
 }
 
