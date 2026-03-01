@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
-import type { InlineZoneSession } from './inline-ai-session'
+import type { InlineZoneSession } from '@plotline/shared'
 import {
   useAnimatedPresence,
   useMountAnimationPhase,

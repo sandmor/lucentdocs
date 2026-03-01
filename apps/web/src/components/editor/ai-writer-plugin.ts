@@ -1,14 +1,13 @@
 import { type Node as ProseMirrorNode, type Slice } from 'prosemirror-model'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
-import type { InlineZoneSession } from './inline-ai-session'
 
 export interface AIZone {
   id: string
   from: number
   to: number
   streaming: boolean
-  session: InlineZoneSession | null
+  sessionId: string | null
   deletedSlice: string | null
 }
 
@@ -34,49 +33,6 @@ export interface AIWriterActionHandlers {
 
 export const aiWriterPluginKey = new PluginKey<AIWriterState>('ai_writer')
 
-function parseInlineZoneSession(value: unknown): InlineZoneSession | null {
-  if (typeof value !== 'string' || value.length === 0) return null
-
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>
-    const messagesRaw = Array.isArray(parsed.messages) ? parsed.messages : []
-    const choicesRaw = Array.isArray(parsed.choices) ? parsed.choices : []
-    const contextBefore = typeof parsed.contextBefore === 'string' ? parsed.contextBefore : null
-    const contextAfter = typeof parsed.contextAfter === 'string' ? parsed.contextAfter : null
-
-    const messages = messagesRaw.flatMap((entry) => {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return []
-      const record = entry as Record<string, unknown>
-      const id = typeof record.id === 'string' ? record.id : null
-      const role = record.role === 'user' || record.role === 'assistant' ? record.role : null
-      const text = typeof record.text === 'string' ? record.text : ''
-      const toolsRaw = Array.isArray(record.tools) ? record.tools : []
-      if (!id || !role) return []
-
-      const tools = toolsRaw.flatMap((tool) => {
-        if (typeof tool !== 'object' || tool === null || Array.isArray(tool)) return []
-        const toolRecord = tool as Record<string, unknown>
-        const toolName = typeof toolRecord.toolName === 'string' ? toolRecord.toolName : null
-        const state =
-          toolRecord.state === 'pending'
-            ? ('pending' as const)
-            : toolRecord.state === 'complete'
-              ? ('complete' as const)
-              : null
-        if (!toolName || !state) return []
-        return [{ toolName, state }]
-      })
-
-      return [{ id, role: role as 'user' | 'assistant', text, tools }]
-    })
-
-    const choices = choicesRaw.filter((entry): entry is string => typeof entry === 'string')
-    return { messages, choices, contextBefore, contextAfter }
-  } catch {
-    return null
-  }
-}
-
 function readZoneMarkAttrs(mark: unknown): AIZone | null {
   if (typeof mark !== 'object' || mark === null || Array.isArray(mark)) {
     return null
@@ -88,8 +44,11 @@ function readZoneMarkAttrs(mark: unknown): AIZone | null {
     return null
   }
 
+  const rawSessionId = attrs.sessionId
+  const sessionId =
+    typeof rawSessionId === 'string' && rawSessionId.trim().length > 0 ? rawSessionId : null
+
   const streaming = attrs.streaming === true
-  const session = parseInlineZoneSession(attrs.session)
   const deletedSlice =
     typeof attrs.deletedSlice === 'string' && attrs.deletedSlice.length > 0
       ? attrs.deletedSlice
@@ -100,7 +59,7 @@ function readZoneMarkAttrs(mark: unknown): AIZone | null {
     from: 0,
     to: 0,
     streaming,
-    session,
+    sessionId,
     deletedSlice,
   }
 }
@@ -137,8 +96,8 @@ function collectAIZones(doc: ProseMirrorNode): AIZone[] {
       current.to = Math.max(current.to, to)
       current.streaming = current.streaming || parsed.streaming
 
-      if (parsed.session) {
-        current.session = parsed.session
+      if (!current.sessionId && parsed.sessionId) {
+        current.sessionId = parsed.sessionId
       }
 
       if (!current.deletedSlice && parsed.deletedSlice) {

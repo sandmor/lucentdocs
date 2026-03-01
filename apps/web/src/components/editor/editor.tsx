@@ -1,4 +1,12 @@
-import { useRef, useEffect, forwardRef, useImperativeHandle, useState, useCallback } from 'react'
+import {
+  useRef,
+  useEffect,
+  forwardRef,
+  useImperativeHandle,
+  useState,
+  useCallback,
+  useMemo,
+} from 'react'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { initProseMirrorDoc } from 'y-prosemirror'
@@ -7,10 +15,13 @@ import { schema } from '@plotline/shared'
 import { buildPlugins, type ProsemirrorMapping } from './plugins'
 import { createAIWriterController, type AIWriterController } from './ai-writer'
 import { InlineAIControls } from './inline-ai-controls'
+import { useAIWriterState } from './inline-ai-hooks'
+import type { InlineZoneSession } from '@plotline/shared'
 import { SelectionFakeOverlay } from './selection-fake-overlay'
 import type { SelectionRange } from './selection-types'
 import { emitAIStateChange } from './ai-writer-store'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
+import { trpc } from '@/lib/trpc'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { ArrowRight, Loader2 } from 'lucide-react'
@@ -57,6 +68,46 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
   const [isEditorFocused, setIsEditorFocused] = useState(false)
   const [providerSessionKey, setProviderSessionKey] = useState(0)
+  const [inlineSessionsById, setInlineSessionsById] = useState<Record<string, InlineZoneSession>>(
+    {}
+  )
+  const inlineSessionsRef = useRef<Record<string, InlineZoneSession>>({})
+  const aiState = useAIWriterState(editorView)
+
+  const inlineSessionIds = useMemo(() => {
+    if (!aiState) return []
+
+    const sessionIds = new Set<string>()
+    for (const zone of aiState.zones) {
+      if (!zone.sessionId) continue
+      sessionIds.add(zone.sessionId)
+    }
+    return [...sessionIds].sort((left, right) => left.localeCompare(right))
+  }, [aiState])
+
+  const inlineSessionsQuery = trpc.inline.getSessions.useQuery(
+    {
+      projectId: projectId ?? '',
+      documentId,
+      sessionIds: inlineSessionIds,
+    },
+    {
+      enabled: Boolean(projectId && documentId && inlineSessionIds.length > 0),
+      refetchOnWindowFocus: false,
+    }
+  )
+
+  useEffect(() => {
+    if (!inlineSessionsQuery.data) return
+    setInlineSessionsById((previous) => {
+      const next = {
+        ...previous,
+        ...inlineSessionsQuery.data.sessions,
+      }
+      inlineSessionsRef.current = next
+      return next
+    })
+  }, [inlineSessionsQuery.data])
 
   useEffect(() => {
     includeAfterContextRef.current = includeAfterContext ?? true
@@ -92,6 +143,29 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           projectId,
           documentId,
         }
+      },
+      getSessionById(sessionId) {
+        return inlineSessionsRef.current[sessionId] ?? null
+      },
+      setSessionById(sessionId, session) {
+        setInlineSessionsById((previous) => {
+          const current = previous[sessionId]
+          if (session === null) {
+            if (current === undefined) return previous
+            const next = { ...previous }
+            delete next[sessionId]
+            inlineSessionsRef.current = next
+            return next
+          }
+
+          if (current === session) return previous
+          const next = {
+            ...previous,
+            [sessionId]: session,
+          }
+          inlineSessionsRef.current = next
+          return next
+        })
       },
     })
     aiControllerRef.current = aiController
@@ -286,6 +360,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       setIsGenerating(false)
       setSelectionRange(null)
       setIsEditorFocused(false)
+      inlineSessionsRef.current = {}
+      setInlineSessionsById({})
       selectionToolbarInteractingRef.current = false
     }
   }, [
@@ -405,6 +481,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           return aiControllerRef.current.dismissChoicesForZone(viewRef.current, zoneId)
         }}
         onInteractionChange={handleToolbarInteractionChange}
+        sessionsById={inlineSessionsById}
       />
       <SelectionFakeOverlay
         view={editorView}

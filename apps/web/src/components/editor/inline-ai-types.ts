@@ -1,4 +1,4 @@
-import type { InlineZoneSession } from './inline-ai-session'
+import type { InlineZoneSession } from '@plotline/shared'
 
 export type InlineControlState = 'compose' | 'processing' | 'review'
 export type FormatMarkName = 'strong' | 'em'

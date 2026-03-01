@@ -312,6 +312,10 @@ export const documentsRouter = router({
         closeCode: YJS_RESTORE_CLOSE_CODE,
         closeReason: YJS_RESTORE_CLOSE_REASON,
       })
+      await ctx.inlineRuntime.pruneOrphanSessions({
+        projectId: input.projectId,
+        documentId: input.id,
+      })
 
       return doc
     }),

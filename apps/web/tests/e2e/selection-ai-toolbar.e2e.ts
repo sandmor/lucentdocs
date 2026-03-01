@@ -14,30 +14,17 @@ async function mockAiStream(context: BrowserContext) {
       return
     }
 
-    const events = [
-      { type: 'start', messageId: 'msg-1' },
-      { type: 'text-start', id: 'txt-1' },
-      { type: 'text-delta', id: 'txt-1', delta: 'galaxy' },
-      { type: 'text-end', id: 'txt-1' },
-      { type: 'finish' },
-    ]
-    const sseBody = [...events.map((event) => JSON.stringify(event)), '[DONE]']
-      .map((payload) => `data: ${payload}\n\n`)
-      .join('')
-
     await route.fulfill({
       status: 200,
-      contentType: 'text/event-stream; charset=utf-8',
-      headers: {
-        'x-vercel-ai-ui-message-stream': 'v1',
-      },
-      body: sseBody,
+      contentType: 'text/plain; charset=utf-8',
+      body: 'spark',
     })
   })
 }
 
-test('selection toolbar sends prompt and creates a replace AI zone', async ({ page }) => {
-  await mockAiStream(page.context())
+test('selection toolbar sends prompt and keeps editor unchanged without tool write actions', async ({
+  page,
+}) => {
   await createProject(page, 'Selection Toolbar Prompt')
 
   const editor = page.locator('.ProseMirror')
@@ -58,12 +45,10 @@ test('selection toolbar sends prompt and creates a replace AI zone', async ({ pa
   await promptInput.press(submitShortcut)
 
   await expect(page.locator('.ai-writer-floating-controls')).toBeVisible()
-
-  await expect(page.locator('.ai-generating-text')).toContainText('galaxy')
   await expect(page.locator('.ai-writer-floating-controls[data-state="review"]')).toBeVisible()
   await page.locator('.ai-writer-floating-controls [data-action="accept"]').first().click()
 
-  await expect(editor).toContainText('Hello galaxy')
+  await expect(editor).toContainText('Hello world')
 })
 
 test('selection controls toggle bold and italic marks', async ({ page }) => {

@@ -6,6 +6,7 @@ import {
 } from './inline-ai-desktop-controls'
 import { useAIWriterState, useIsCoarsePointer } from './inline-ai-hooks'
 import { MobileInlineAIDock } from './inline-ai-mobile-dock'
+import type { InlineZoneSession } from '@plotline/shared'
 import type { LoadingAnchor, ReviewZone } from './inline-ai-types'
 import type { SelectionRange } from './selection-types'
 
@@ -18,6 +19,7 @@ interface InlineAIControlsProps {
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
   onInteractionChange: (interacting: boolean) => void
+  sessionsById: Record<string, InlineZoneSession>
 }
 
 export function InlineAIControls({
@@ -29,6 +31,7 @@ export function InlineAIControls({
   onContinuePrompt,
   onDismissChoices,
   onInteractionChange,
+  sessionsById,
 }: InlineAIControlsProps) {
   const state = useAIWriterState(view)
   const isCoarsePointer = useIsCoarsePointer()
@@ -43,7 +46,7 @@ export function InlineAIControls({
         zoneId: activeZone.id,
         from: activeZone.from,
         to: activeZone.to,
-        session: activeZone.session,
+        session: activeZone.sessionId ? (sessionsById[activeZone.sessionId] ?? null) : null,
       }
     }
 
@@ -58,14 +61,22 @@ export function InlineAIControls({
       to: Math.max(from, to),
       session: null,
     }
-  }, [state])
+  }, [state, sessionsById])
 
   const loadingZoneId = activeLoadingAnchor?.zoneId ?? null
 
   const reviewZones: ReviewZone[] = useMemo(() => {
     if (!state) return []
-    return state.zones.filter((zone) => zone.id !== loadingZoneId)
-  }, [state, loadingZoneId])
+    return state.zones
+      .filter((zone) => zone.id !== loadingZoneId)
+      .map((zone) => ({
+        id: zone.id,
+        from: zone.from,
+        to: zone.to,
+        streaming: zone.streaming,
+        session: zone.sessionId ? (sessionsById[zone.sessionId] ?? null) : null,
+      }))
+  }, [state, loadingZoneId, sessionsById])
 
   let activeReviewZone: ReviewZone | null = null
   if (!activeLoadingAnchor && reviewZones.length > 0) {

@@ -32,6 +32,7 @@ function createTprcContext(): AppContext {
     services: container.services,
     yjsRuntime: container.yjsRuntime,
     chatRuntime: container.chatRuntime,
+    inlineRuntime: container.inlineRuntime,
   }
 }
 
@@ -240,7 +241,7 @@ async function startServer() {
   app.use(cookieParser())
 
   registerMetaRoutes(app)
-  registerAiTextStreamRoute(app, container.services)
+  registerAiTextStreamRoute(app)
   registerTrpcRoutes(app)
 
   const vite = await setupWebRuntime(app)

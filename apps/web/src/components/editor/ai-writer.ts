@@ -1,4 +1,4 @@
-import { parseJsonEventStream, readUIMessageStream, uiMessageChunkSchema, type UIMessage } from 'ai'
+import { readUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai'
 import { Slice, type MarkType } from 'prosemirror-model'
 import { TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
@@ -10,9 +10,10 @@ import {
   extractToolPartsFromParts,
   getMessageParts,
 } from './ai-message-parts'
-import type { InlineChatMessage, InlineZoneSession } from './inline-ai-session'
+import type { InlineChatMessage, InlineZoneSession } from '@plotline/shared'
 import { StuckDetector } from './ai-writer-stuck-detector'
 import { parseMarkdownishToSlice } from './markdownish'
+import { getTrpcProxyClient } from '@/lib/trpc'
 
 type StreamingHandler = (streaming: boolean) => void
 
@@ -20,18 +21,20 @@ interface AIWriterControllerOptions {
   onStreamingChange?: StreamingHandler
   getIncludeAfterContext?: () => boolean
   getToolScope?: () => { projectId?: string; documentId?: string }
+  getSessionById?: (sessionId: string) => InlineZoneSession | null
+  setSessionById?: (sessionId: string, session: InlineZoneSession | null) => void
 }
 
 interface AIZoneMarkAttrs {
   id: string
   streaming: boolean
-  session: string | null
+  sessionId: string | null
   deletedSlice: string | null
 }
 
 interface ZoneMarkPatch {
   streaming?: boolean
-  session?: InlineZoneSession | null
+  sessionId?: string | null
   deletedSlice?: string | null
 }
 
@@ -66,6 +69,14 @@ function createInlineMessageId(role: 'user' | 'assistant'): string {
   return `inline-${role}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+function createInlineSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `inline-session-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 function getAIZoneMarkType(view: EditorView): MarkType | null {
   return view.state.schema.marks.ai_zone ?? null
 }
@@ -94,13 +105,13 @@ function createSessionWithPromptContext(
 function createZoneMarkAttrs(
   zoneId: string,
   streaming: boolean,
-  session: InlineZoneSession | null,
+  sessionId: string | null,
   deletedSlice: string | null
 ): AIZoneMarkAttrs {
   return {
     id: zoneId,
     streaming,
-    session: session ? JSON.stringify(session) : null,
+    sessionId,
     deletedSlice,
   }
 }
@@ -167,7 +178,7 @@ function updateZoneMark(
   const attrs = createZoneMarkAttrs(
     zone.id,
     patch.streaming ?? zone.streaming,
-    patch.session === undefined ? zone.session : patch.session,
+    patch.sessionId === undefined ? zone.sessionId : patch.sessionId,
     patch.deletedSlice === undefined ? zone.deletedSlice : patch.deletedSlice
   )
 
@@ -204,18 +215,28 @@ export function createAIWriterController(
       projectId: undefined,
       documentId: undefined,
     }))
+  const getSessionById = options.getSessionById ?? (() => null)
+  const setSessionById = options.setSessionById ?? (() => {})
   let currentView: EditorView | null = null
+  const trpcClient = getTrpcProxyClient()
+
+  const pruneInlineOrphans = () => {
+    const toolScope = getToolScope()
+    if (!toolScope.projectId || !toolScope.documentId) return
+    void trpcClient.inline.pruneOrphans
+      .mutate({
+        projectId: toolScope.projectId,
+        documentId: toolScope.documentId,
+      })
+      .catch(() => {})
+  }
 
   const updateZoneSession = (
-    view: EditorView,
-    zoneId: string,
+    sessionId: string,
     updater: (current: InlineZoneSession) => InlineZoneSession
   ) => {
-    const zone = getAIZones(view).find((entry) => entry.id === zoneId)
-    if (!zone) return
-    updateZoneMark(view, zoneId, {
-      session: updater(zone.session ?? createEmptySession()),
-    })
+    const currentSession = getSessionById(sessionId) ?? createEmptySession()
+    setSessionById(sessionId, updater(currentSession))
   }
 
   const stuckDetector = new StuckDetector({
@@ -315,11 +336,9 @@ export function createAIWriterController(
     view: EditorView,
     payload: PromptStreamPayload,
     zoneId: string,
+    sessionId: string,
     userPrompt: string
   ): Promise<void> {
-    const initialZone = getAIZones(view).find((entry) => entry.id === zoneId)
-    const priorConversation = serializeInlineConversation(initialZone?.session)
-
     abortController?.abort()
     const requestAbortController = new AbortController()
     abortController = requestAbortController
@@ -328,75 +347,78 @@ export function createAIWriterController(
     stuckDetector.reset()
     setStreamingState(true)
 
-    updateZoneSession(view, zoneId, (current) => ({
-      ...current,
-      messages: [
-        ...current.messages,
-        {
-          id: createInlineMessageId('user'),
-          role: 'user',
-          text: userPrompt,
-          tools: [],
-        },
-      ],
-    }))
+    let observeUnsubscribe: { unsubscribe: () => void } | null = null
+    let streamChunkController: ReadableStreamDefaultController<UIMessageChunk> | null = null
+    let streamReadTask: Promise<void> | null = null
+    let activeGenerationId: string | null = null
+    let sessionDraft = getSessionById(sessionId) ?? createEmptySession()
+    let sessionFlushQueued = false
+    let sessionFlushVersion = 0
 
     try {
       const toolScope = getToolScope()
-      const response = await fetch('/api/ai/stream', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ...payload,
-          conversation: priorConversation,
-          projectId: toolScope.projectId,
-          documentId: toolScope.documentId,
-        }),
-        signal: requestAbortController.signal,
-      })
-
-      if (!response.ok) {
-        const message = await readErrorMessage(response)
-        handleAIError(view, message)
-        return
-      }
-
-      if (!response.body) {
-        handleAIError(view, 'No stream returned from AI endpoint')
-        return
-      }
-      const streamVersion = response.headers.get('x-vercel-ai-ui-message-stream')
-      if (streamVersion !== 'v1') {
-        handleAIError(view, 'Inline AI stream format is unsupported by this client')
+      if (!toolScope.projectId || !toolScope.documentId) {
+        handleAIError(view, 'Inline AI streaming requires project and document scope')
         return
       }
 
       let assistantTextBuffer = ''
-      let hasZoneAction = false
       const appliedZoneActionCalls = new Set<string>()
-      let validChunkCount = 0
-      let parseFailureCount = 0
+      let resolveGenerationDone: (() => void) | null = null
+      let rejectGenerationDone: ((error: Error) => void) | null = null
 
-      const applyAssistantTextFallback = () => {
-        if (hasZoneAction) return
-        if (!assistantTextBuffer.trim()) return
-
-        const zone = getAIZones(view).find((entry) => entry.id === zoneId)
-        if (!zone) return
-
-        applyInlineZoneAction(view, zoneId, {
-          type: 'replace_range',
-          fromOffset: 0,
-          toOffset: Math.max(0, zone.to - zone.from),
-          content: assistantTextBuffer,
-        })
-        hasZoneAction = true
+      const flushSessionDraft = () => {
+        setSessionById(sessionId, sessionDraft)
       }
 
-      const upsertAssistantMessage = (
-        updater: (assistant: InlineChatMessage) => InlineChatMessage
+      const queueSessionFlush = () => {
+        if (sessionFlushQueued) return
+        sessionFlushQueued = true
+        const version = ++sessionFlushVersion
+        queueMicrotask(() => {
+          if (!sessionFlushQueued || version !== sessionFlushVersion) return
+          sessionFlushQueued = false
+          flushSessionDraft()
+        })
+      }
+
+      const updateSessionDraft = (
+        updater: (current: InlineZoneSession) => InlineZoneSession,
+        options: { immediate?: boolean } = {}
       ) => {
-        updateZoneSession(view, zoneId, (current) => {
+        sessionDraft = updater(sessionDraft)
+        if (options.immediate) {
+          sessionFlushQueued = false
+          sessionFlushVersion += 1
+          flushSessionDraft()
+          return
+        }
+        queueSessionFlush()
+      }
+
+      updateSessionDraft(
+        (current) => ({
+          ...current,
+          contextBefore: current.contextBefore ?? payload.contextBefore,
+          contextAfter: current.contextAfter ?? payload.contextAfter ?? null,
+          messages: [
+            ...current.messages,
+            {
+              id: createInlineMessageId('user'),
+              role: 'user',
+              text: userPrompt,
+              tools: [],
+            },
+          ],
+        }),
+        { immediate: true }
+      )
+
+      const upsertAssistantMessage = (
+        updater: (assistant: InlineChatMessage) => InlineChatMessage,
+        options: { immediate?: boolean } = {}
+      ) => {
+        updateSessionDraft((current) => {
           const messages = [...current.messages]
           const last = messages[messages.length - 1]
           const assistant: InlineChatMessage =
@@ -418,101 +440,196 @@ export function createAIWriterController(
             ...current,
             messages,
           }
-        })
+        }, options)
       }
 
-      const parsedUiMessageChunkStream = parseJsonEventStream({
-        stream: response.body,
-        schema: uiMessageChunkSchema,
-      }).pipeThrough(
-        new TransformStream({
-          transform(parseResult, controller) {
-            if (parseResult.success) {
-              validChunkCount += 1
-              controller.enqueue(parseResult.value)
-              return
-            }
-            parseFailureCount += 1
-
-            console.warn('Failed to parse inline AI UI stream chunk', {
-              error: parseResult.error,
-              rawValue: parseResult.rawValue,
-            })
-          },
-        })
-      )
-
-      for await (const assistantMessage of readUIMessageStream<UIMessage>({
-        stream: parsedUiMessageChunkStream,
-        onError: (error) => {
-          console.warn('Failed to read inline AI UI message stream', { error })
+      const chunkStream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          streamChunkController = controller
         },
-      })) {
-        if (abortController !== requestAbortController || requestAbortController.signal.aborted) break
-        stuckDetector.onChunk()
+      })
 
-        const parts = getMessageParts(assistantMessage)
-        const nextAssistantText = extractMessageTextFromPartsRaw(parts)
-        if (nextAssistantText !== assistantTextBuffer) {
-          assistantTextBuffer = nextAssistantText
-          upsertAssistantMessage((assistant) => ({
-            ...assistant,
-            text: nextAssistantText,
-          }))
-        }
+      const generationDone = new Promise<void>((resolve, reject) => {
+        resolveGenerationDone = resolve
+        rejectGenerationDone = reject
+      })
 
-        const toolParts = extractToolPartsFromParts(parts)
-        for (const toolPart of toolParts) {
-          const parsedTool = parseInlineToolPart(toolPart)
-          if (!parsedTool) continue
+      streamReadTask = (async () => {
+        let latestAssistant: UIMessage | null = null
+        for await (const assistantMessage of readUIMessageStream<UIMessage>({
+          message: latestAssistant ?? undefined,
+          stream: chunkStream,
+          terminateOnError: false,
+          onError: (error) => {
+            console.warn('Failed to read inline AI UI message stream', { error })
+          },
+        })) {
+          latestAssistant = assistantMessage
+          if (abortController !== requestAbortController || requestAbortController.signal.aborted) {
+            break
+          }
+          stuckDetector.onChunk()
 
-          const { toolName, toolCallId, rawState, chipState } = parsedTool
-          const isZoneWriteTool = toolName === 'write_zone' || toolName === 'write_zone_choices'
-
-          if (isZoneWriteTool && rawState === 'output-available') {
-            const action = parseInlineZoneActionFromToolPart(toolPart)
-            if (action) {
-              const actionKey = `${toolName}:${toolCallId}`
-              if (!appliedZoneActionCalls.has(actionKey)) {
-                appliedZoneActionCalls.add(actionKey)
-                applyInlineZoneAction(view, zoneId, action)
-                hasZoneAction = true
-              }
-            }
-            continue
+          const parts = getMessageParts(assistantMessage)
+          const nextAssistantText = extractMessageTextFromPartsRaw(parts)
+          if (nextAssistantText !== assistantTextBuffer) {
+            assistantTextBuffer = nextAssistantText
+            upsertAssistantMessage(
+              (assistant) => ({
+                ...assistant,
+                text: nextAssistantText,
+              }),
+              { immediate: true }
+            )
           }
 
-          if (isZoneWriteTool) continue
-          upsertAssistantMessage((assistant) => {
-            const nextTools = [...assistant.tools]
-            const existingIndex = nextTools.findIndex((tool) => tool.toolName === toolName)
-            if (existingIndex >= 0) {
-              nextTools[existingIndex] = {
-                ...nextTools[existingIndex],
-                state: chipState,
+          const toolParts = extractToolPartsFromParts(parts)
+          for (const toolPart of toolParts) {
+            const parsedTool = parseInlineToolPart(toolPart)
+            if (!parsedTool) continue
+
+            const { toolName, toolCallId, rawState, chipState } = parsedTool
+            const isZoneWriteTool = toolName === 'write_zone' || toolName === 'write_zone_choices'
+
+            if (isZoneWriteTool && rawState === 'output-available') {
+              const action = parseInlineZoneActionFromToolPart(toolPart)
+              if (action) {
+                const actionKey = `${toolName}:${toolCallId}`
+                if (!appliedZoneActionCalls.has(actionKey)) {
+                  appliedZoneActionCalls.add(actionKey)
+                  applyInlineZoneAction(view, zoneId, sessionId, action)
+                }
               }
-            } else {
-              nextTools.push({
-                toolName,
-                state: chipState,
-              })
+              continue
             }
-            return {
-              ...assistant,
-              tools: nextTools,
-            }
-          })
+
+            if (isZoneWriteTool) continue
+            upsertAssistantMessage((assistant) => {
+              const nextTools = [...assistant.tools]
+              const existingIndex = nextTools.findIndex((tool) => tool.toolName === toolName)
+              if (existingIndex >= 0) {
+                nextTools[existingIndex] = {
+                  ...nextTools[existingIndex],
+                  state: chipState,
+                }
+              } else {
+                nextTools.push({
+                  toolName,
+                  state: chipState,
+                })
+              }
+              return {
+                ...assistant,
+                tools: nextTools,
+              }
+            })
+          }
+
+          const pluginState = aiWriterPluginKey.getState(view.state)
+          if (!pluginState?.active) break
         }
+      })()
 
-        const pluginState = aiWriterPluginKey.getState(view.state)
-        if (!pluginState?.active) break
-      }
+      observeUnsubscribe = trpcClient.inline.observeSession.subscribe(
+        {
+          projectId: toolScope.projectId,
+          documentId: toolScope.documentId,
+          sessionId,
+        },
+        {
+          onData: (event) => {
+            if (requestAbortController.signal.aborted) return
+            if (event.type === 'stream-chunk') {
+              if (!activeGenerationId) {
+                activeGenerationId = event.generationId
+              } else if (activeGenerationId !== event.generationId) {
+                return
+              }
 
-      if (validChunkCount === 0 && parseFailureCount > 0) {
-        throw new Error('Inline AI stream returned invalid event data')
-      }
+              const chunkRecord = event.chunk as Record<string, unknown>
+              if (
+                chunkRecord.type === 'text-delta' &&
+                typeof chunkRecord.delta === 'string' &&
+                chunkRecord.delta.length > 0
+              ) {
+                assistantTextBuffer += chunkRecord.delta
+                upsertAssistantMessage(
+                  (assistant) => ({
+                    ...assistant,
+                    text: assistantTextBuffer,
+                  }),
+                  { immediate: true }
+                )
+              }
 
-      applyAssistantTextFallback()
+              try {
+                streamChunkController?.enqueue(event.chunk)
+              } catch (error) {
+                console.warn('Failed to enqueue inline stream chunk', { error })
+              }
+              return
+            }
+
+            if (!activeGenerationId && event.generating && event.generationId) {
+              activeGenerationId = event.generationId
+            }
+
+            if (event.session) {
+              const isCurrentGenerationSnapshot =
+                activeGenerationId !== null && event.generationId === activeGenerationId
+              if (!isCurrentGenerationSnapshot) {
+                updateSessionDraft(() => event.session!, { immediate: true })
+              }
+            }
+
+            if (activeGenerationId && !event.generating) {
+              resolveGenerationDone?.()
+            }
+          },
+          onError: (error) => {
+            rejectGenerationDone?.(
+              error instanceof Error ? error : new Error('Inline stream subscription failed')
+            )
+          },
+        }
+      )
+
+      requestAbortController.signal.addEventListener(
+        'abort',
+        () => {
+          if (!activeGenerationId) return
+          void trpcClient.inline.cancelGeneration
+            .mutate({
+              projectId: toolScope.projectId!,
+              documentId: toolScope.documentId!,
+              sessionId,
+            })
+            .catch(() => {})
+        },
+        { once: true }
+      )
+
+      await trpcClient.inline.saveSession.mutate({
+        projectId: toolScope.projectId,
+        documentId: toolScope.documentId,
+        sessionId,
+        session: sessionDraft,
+      })
+
+      const started = await trpcClient.inline.startPromptGeneration.mutate({
+        projectId: toolScope.projectId,
+        documentId: toolScope.documentId,
+        sessionId,
+        contextBefore: payload.contextBefore,
+        contextAfter: payload.contextAfter,
+        prompt: payload.prompt,
+        selectedText: payload.selectedText,
+        conversation: serializeInlineConversation(sessionDraft),
+      })
+      activeGenerationId = started.generationId
+
+      await generationDone
+      updateSessionDraft((current) => current, { immediate: true })
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         return
@@ -520,19 +637,58 @@ export function createAIWriterController(
       const message = error instanceof Error ? error.message : 'AI streaming error'
       handleAIError(view, message)
     } finally {
+      observeUnsubscribe?.unsubscribe()
+      if (sessionFlushQueued) {
+        sessionFlushQueued = false
+        sessionFlushVersion += 1
+        setSessionById(sessionId, sessionDraft)
+      }
+      try {
+        ;(streamChunkController as { close: () => void } | null)?.close()
+      } catch {
+        // ignore close races
+      }
+      if (streamReadTask) {
+        try {
+          await streamReadTask
+        } catch (error) {
+          console.warn('Failed to finalize inline stream reader', error)
+        }
+      }
+
       if (requestId === currentRequestId && abortController === requestAbortController) {
+        const toolScope = getToolScope()
+        const finalSession = sessionDraft
+        if (toolScope.projectId && toolScope.documentId && finalSession) {
+          void trpcClient.inline.saveSession
+            .mutate({
+              projectId: toolScope.projectId,
+              documentId: toolScope.documentId,
+              sessionId,
+              session: finalSession,
+            })
+            .catch((saveError) => {
+              console.warn('Failed to persist inline session state', saveError)
+            })
+        }
+
         abortController = null
         setStreamingState(false, view)
       }
     }
   }
 
-  function applyInlineZoneAction(view: EditorView, zoneId: string, action: InlineZoneWriteAction) {
+  function applyInlineZoneAction(
+    view: EditorView,
+    zoneId: string,
+    sessionId: string,
+    action: InlineZoneWriteAction
+  ) {
     const zone = getAIZones(view).find((entry) => entry.id === zoneId)
     if (!zone) return
 
     if (action.type === 'set_choices') {
-      updateZoneSession(view, zoneId, (current) => ({
+      updateZoneSession(sessionId, (current) => ({
         ...current,
         choices: action.choices,
       }))
@@ -567,7 +723,7 @@ export function createAIWriterController(
         tr.addMark(
           nextZoneFrom,
           nextZoneTo,
-          markType.create(createZoneMarkAttrs(zone.id, true, zone.session, zone.deletedSlice))
+          markType.create(createZoneMarkAttrs(zone.id, true, zone.sessionId, zone.deletedSlice))
         )
       }
     }
@@ -659,6 +815,7 @@ export function createAIWriterController(
     const selectedText = from < to ? view.state.doc.textBetween(from, to, '\n\n', '\n') : ''
     const deletedSlice = from < to ? view.state.doc.slice(from, to) : null
     const zoneId = createZoneId()
+    const sessionId = createInlineSessionId()
     const { contextBefore, contextAfter } = getPromptContextForRange(
       view,
       from,
@@ -679,7 +836,7 @@ export function createAIWriterController(
       const zoneAttrs = createZoneMarkAttrs(
         zoneId,
         true,
-        createSessionWithPromptContext(contextBefore, contextAfter ?? null),
+        sessionId,
         deletedSlice ? JSON.stringify(deletedSlice.toJSON()) : null
       )
       const markType = getAIZoneMarkType(view)
@@ -690,6 +847,7 @@ export function createAIWriterController(
     }
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
+    setSessionById(sessionId, createSessionWithPromptContext(contextBefore, contextAfter ?? null))
     streamedText = ''
 
     void streamAIPrompt(
@@ -704,6 +862,7 @@ export function createAIWriterController(
         selectionTo: to,
       },
       zoneId,
+      sessionId,
       trimmedPrompt
     )
 
@@ -722,6 +881,7 @@ export function createAIWriterController(
 
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt) return false
+    const sessionId = zone.sessionId ?? createInlineSessionId()
 
     const tr = view.state.tr
     tr.setMeta(aiWriterPluginKey, {
@@ -737,6 +897,7 @@ export function createAIWriterController(
 
     updateZoneMark(view, zoneId, {
       streaming: true,
+      sessionId,
     })
 
     const selectedText = view.state.doc.textBetween(zone.from, zone.to, '\n\n', '\n')
@@ -746,8 +907,12 @@ export function createAIWriterController(
       zone.to,
       getIncludeAfterContext()
     )
-    const contextBefore = zone.session?.contextBefore ?? fallbackContext.contextBefore
-    const contextAfter = zone.session?.contextAfter ?? fallbackContext.contextAfter ?? null
+    const zoneSession = zone.sessionId ? getSessionById(zone.sessionId) : null
+    const contextBefore = zoneSession?.contextBefore ?? fallbackContext.contextBefore
+    const contextAfter = zoneSession?.contextAfter ?? fallbackContext.contextAfter ?? null
+    if (!zoneSession) {
+      setSessionById(sessionId, createSessionWithPromptContext(contextBefore, contextAfter))
+    }
     void streamAIPrompt(
       view,
       {
@@ -760,6 +925,7 @@ export function createAIWriterController(
         selectionTo: zone.to,
       },
       zoneId,
+      sessionId,
       trimmedPrompt
     )
 
@@ -769,15 +935,29 @@ export function createAIWriterController(
   function dismissChoicesForZone(view: EditorView, zoneId: string): boolean {
     const zone = getAIZones(view).find((entry) => entry.id === zoneId)
     if (!zone) return false
+    if (!zone.sessionId) return false
 
-    if (!zone.session || zone.session.choices.length === 0) {
+    const zoneSession = getSessionById(zone.sessionId)
+    if (!zoneSession || zoneSession.choices.length === 0) {
       return false
     }
 
-    updateZoneSession(view, zoneId, (current) => ({
+    updateZoneSession(zone.sessionId, (current) => ({
       ...current,
       choices: [],
     }))
+    const toolScope = getToolScope()
+    if (toolScope.projectId && toolScope.documentId) {
+      void trpcClient.inline.clearSessionChoices
+        .mutate({
+          projectId: toolScope.projectId,
+          documentId: toolScope.documentId,
+          sessionId: zone.sessionId,
+        })
+        .catch((error) => {
+          console.warn('Failed to clear inline session choices', error)
+        })
+    }
     return true
   }
 
@@ -802,6 +982,7 @@ export function createAIWriterController(
       tr.setMeta(aiWriterPluginKey, { type: 'accept' })
       tr.setMeta('addToHistory', false)
       view.dispatch(tr)
+      pruneInlineOrphans()
       return
     }
 
@@ -809,6 +990,7 @@ export function createAIWriterController(
       const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'accept' })
       tr.setMeta('addToHistory', false)
       view.dispatch(tr)
+      pruneInlineOrphans()
     }
   }
 
@@ -843,6 +1025,7 @@ export function createAIWriterController(
         tr.setMeta(aiWriterPluginKey, { type: 'reject' })
         tr.setMeta('addToHistory', false)
         view.dispatch(tr)
+        pruneInlineOrphans()
       }
       return
     }
@@ -877,9 +1060,29 @@ export function createAIWriterController(
     tr.setMeta(aiWriterPluginKey, { type: 'reject' })
     tr.setMeta('addToHistory', false)
     view.dispatch(tr)
+    pruneInlineOrphans()
   }
 
   function cancelAI(view?: EditorView): void {
+    const targetView = view ?? currentView
+    const activeZone =
+      targetView && aiWriterPluginKey.getState(targetView.state)?.zoneId
+        ? getTargetZone(
+            targetView,
+            aiWriterPluginKey.getState(targetView.state)?.zoneId ?? undefined
+          )
+        : null
+    const toolScope = getToolScope()
+    if (toolScope.projectId && toolScope.documentId && activeZone?.sessionId) {
+      void trpcClient.inline.cancelGeneration
+        .mutate({
+          projectId: toolScope.projectId,
+          documentId: toolScope.documentId,
+          sessionId: activeZone.sessionId,
+        })
+        .catch(() => {})
+    }
+
     abortController?.abort()
     abortController = null
     streamedText = ''
@@ -955,7 +1158,9 @@ interface PromptStreamPayload extends StreamPayload {
   selectionTo: number
 }
 
-function parseInlineZoneActionFromToolPart(part: Record<string, unknown>): InlineZoneWriteAction | null {
+function parseInlineZoneActionFromToolPart(
+  part: Record<string, unknown>
+): InlineZoneWriteAction | null {
   const output =
     typeof part.output === 'object' && part.output !== null && !Array.isArray(part.output)
       ? (part.output as Record<string, unknown>)
@@ -988,8 +1193,7 @@ function parseInlineToolPart(part: Record<string, unknown>): {
   if (!toolName) return null
 
   const rawState = typeof part.state === 'string' ? part.state : 'unknown'
-  const chipState: 'pending' | 'complete' =
-    rawState === 'output-available' ? 'complete' : 'pending'
+  const chipState: 'pending' | 'complete' = rawState === 'output-available' ? 'complete' : 'pending'
   const toolCallId = typeof part.toolCallId === 'string' ? part.toolCallId : toolName
 
   return {
@@ -1050,7 +1254,7 @@ function insertChunk(view: EditorView, generatedText: string): void {
         createZoneMarkAttrs(
           pluginState.zoneId,
           true,
-          activeZone?.session ?? createEmptySession(),
+          activeZone?.sessionId ?? null,
           pluginState.deletedSlice ? JSON.stringify(pluginState.deletedSlice.toJSON()) : null
         )
       )

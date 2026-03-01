@@ -88,3 +88,5 @@ export {
   normalizeInlineZoneChoices,
   parseInlineZoneWriteAction,
 } from './inline-ai.js'
+export type { InlineToolChip, InlineChatMessage, InlineZoneSession } from './inline-ai-session.js'
+export { normalizeInlineZoneSession, normalizeInlineZoneSessionMap } from './inline-ai-session.js'

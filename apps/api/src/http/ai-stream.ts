@@ -1,108 +1,38 @@
 import express, { type Express } from 'express'
-import { stepCountIs, streamText } from 'ai'
 import { z } from 'zod/v4'
-import { isValidId } from '@plotline/shared'
-import {
-  generate,
-  generateStream,
-  createStreamCleaner,
-  cleanText,
-  getLanguageModel,
-} from '../ai/index.js'
-import { type AIMode } from '../ai/response-parser.js'
-import {
-  assertPromptProtocolMode,
-  resolveContinuePrompt,
-  resolveSelectionPrompt,
-} from '../ai/prompt-engine.js'
-import { configManager } from '../config/manager.js'
-import type { ServiceSet } from '../core/services/types.js'
-import {
-  buildInlineZoneWriteTools,
-  buildReadTools,
-  hasValidToolScope,
-} from '../chat/tools.js'
+import { generate, generateStream, createStreamCleaner, cleanText } from '../ai/index.js'
+import { assertPromptProtocolMode, resolveContinuePrompt } from '../ai/prompt-engine.js'
 
-interface AiStreamInput {
-  mode: 'continue' | 'prompt'
+interface ContinueStreamInput {
+  mode: 'continue'
   contextBefore: string
   contextAfter?: string
   hint?: string
-  prompt?: string
-  conversation?: string
-  projectId?: string
-  documentId?: string
-  selectedText?: string
   maxOutputTokens?: number
 }
 
-function buildAiStreamInputSchema() {
-  const limits = configManager.getConfig().limits
-  return z
-    .object({
-      mode: z.enum(['continue', 'prompt']),
-      contextBefore: z.string().max(limits.contextChars),
-      contextAfter: z.string().max(limits.contextChars).optional(),
-      hint: z.string().trim().max(limits.hintChars).optional(),
-      prompt: z.string().trim().max(limits.promptChars).optional(),
-      conversation: z
-        .string()
-        .max(limits.contextChars)
-        .optional(),
-      projectId: z.string().max(128).optional(),
-      documentId: z.string().max(128).optional(),
-      selectedText: z.string().max(limits.contextChars).optional(),
-      maxOutputTokens: z.number().int().min(1).optional(),
-    })
-    .superRefine((value, ctx) => {
-      if (value.mode === 'prompt' && !value.prompt?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['prompt'],
-          message: 'Prompt is required when mode is "prompt".',
-        })
-      }
-      const totalContext = value.contextBefore.length + (value.contextAfter?.length ?? 0)
-      if (totalContext > limits.contextChars) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['contextBefore'],
-          message: `Combined contextBefore and contextAfter length exceeds ${limits.contextChars} characters.`,
-        })
-      }
+const continueStreamInputSchema = z
+  .object({
+    mode: z.literal('continue'),
+    contextBefore: z.string(),
+    contextAfter: z.string().optional(),
+    hint: z.string().trim().optional(),
+    maxOutputTokens: z.number().int().min(1).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const totalContext = value.contextBefore.length + (value.contextAfter?.length ?? 0)
+    if (totalContext > 120_000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['contextBefore'],
+        message: 'Combined contextBefore and contextAfter are too large.',
+      })
+    }
+  }) as z.ZodType<ContinueStreamInput>
 
-      const hasProjectId = Boolean(value.projectId)
-      const hasDocumentId = Boolean(value.documentId)
-      if (hasProjectId !== hasDocumentId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['projectId'],
-          message: 'projectId and documentId must be provided together',
-        })
-      }
-
-      if (value.projectId && !isValidId(value.projectId)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['projectId'],
-          message: 'Invalid projectId format',
-        })
-      }
-
-      if (value.documentId && !isValidId(value.documentId)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['documentId'],
-          message: 'Invalid documentId format',
-        })
-      }
-    }) as z.ZodType<AiStreamInput>
-}
-
-export function registerAiTextStreamRoute(app: Express, services: ServiceSet): void {
+export function registerAiTextStreamRoute(app: Express): void {
   app.post('/api/ai/stream', async (req, res) => {
-    const aiStreamInputSchema = buildAiStreamInputSchema()
-    const parsed = aiStreamInputSchema.safeParse(req.body)
+    const parsed = continueStreamInputSchema.safeParse(req.body)
     if (!parsed.success) {
       res.status(400).json({ message: 'Invalid AI stream payload', issues: parsed.error.issues })
       return
@@ -110,25 +40,8 @@ export function registerAiTextStreamRoute(app: Express, services: ServiceSet): v
 
     const input = parsed.data
     const contextAfter = input.contextAfter ?? null
-    const selectedText = input.selectedText ?? null
 
-    if (input.mode === 'continue') {
-      await handleContinueStream(
-        req,
-        res,
-        input as typeof input & { mode: 'continue' },
-        contextAfter
-      )
-    } else {
-      await handlePromptStream(
-        req,
-        res,
-        input as typeof input & { mode: 'prompt' },
-        contextAfter,
-        selectedText,
-        services
-      )
-    }
+    await handleContinueStream(req, res, input, contextAfter)
   })
 }
 
@@ -143,17 +56,11 @@ async function handleGenericStream(
     onDelta: (
       text: string,
       hasWrittenHeaders: boolean,
-      writeHeaders: (mode?: AIMode, insertIndex?: number) => void,
-      writeContent: (content: string) => void,
-      writeChoice: (choice: string) => void
+      writeHeaders: () => void,
+      writeContent: (content: string) => void
     ) => void
     generateFallback: (signal: AbortSignal) => Promise<string | null>
-    onFallbackDone: (
-      fallbackText: string,
-      writeHeaders: (mode?: AIMode, insertIndex?: number) => void,
-      writeContent: (content: string) => void,
-      writeChoice: (choice: string) => void
-    ) => boolean
+    onFallbackDone: (fallbackText: string, writeHeaders: () => void, writeContent: (content: string) => void) => boolean
     onFlush?: () => string | null
   }
 ) {
@@ -166,29 +73,19 @@ async function handleGenericStream(
 
   let hasWrittenHeaders = false
 
-  const writeHeaders = (mode?: AIMode, insertIndex?: number) => {
+  const writeHeaders = () => {
     if (!hasWrittenHeaders) {
       res.status(200).set({
-        'Content-Type': mode ? 'application/jsonl; charset=utf-8' : 'text/plain; charset=utf-8',
+        'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
-        ...(mode ? { 'X-AI-Mode': mode } : {}),
       })
-      if (insertIndex !== undefined) res.set('X-AI-Insert-Index', String(insertIndex))
       hasWrittenHeaders = true
     }
   }
 
   const writeContent = (content: string) => {
-    if (hasWrittenHeaders && res.getHeader('X-AI-Mode')) {
-      res.write(JSON.stringify(content) + '\n')
-    } else {
-      res.write(content)
-    }
-  }
-
-  const writeChoice = (choice: string) => {
-    res.write(JSON.stringify(choice) + '\n')
+    res.write(content)
   }
 
   try {
@@ -202,7 +99,7 @@ async function handleGenericStream(
 
     for await (const part of result.fullStream) {
       if (part.type === 'text-delta') {
-        options.onDelta(part.text, hasWrittenHeaders, writeHeaders, writeContent, writeChoice)
+        options.onDelta(part.text, hasWrittenHeaders, writeHeaders, writeContent)
         continue
       }
 
@@ -211,10 +108,7 @@ async function handleGenericStream(
           part.error instanceof Error ? part.error.message : 'AI provider returned an error'
         if (!hasWrittenHeaders) {
           const fallbackText = await options.generateFallback(abortController.signal)
-          if (
-            fallbackText &&
-            options.onFallbackDone(fallbackText, writeHeaders, writeContent, writeChoice)
-          ) {
+          if (fallbackText && options.onFallbackDone(fallbackText, writeHeaders, writeContent)) {
             res.end()
             return
           }
@@ -228,10 +122,7 @@ async function handleGenericStream(
 
     if (!hasWrittenHeaders) {
       const fallbackText = await options.generateFallback(abortController.signal)
-      if (
-        fallbackText &&
-        options.onFallbackDone(fallbackText, writeHeaders, writeContent, writeChoice)
-      ) {
+      if (fallbackText && options.onFallbackDone(fallbackText, writeHeaders, writeContent)) {
         res.end()
         return
       }
@@ -256,7 +147,7 @@ async function handleGenericStream(
 async function handleContinueStream(
   req: express.Request,
   res: express.Response,
-  input: AiStreamInput & { mode: 'continue' },
+  input: ContinueStreamInput,
   contextAfter: string | null
 ): Promise<void> {
   const rendered = resolveContinuePrompt(input.contextBefore, contextAfter, input.hint)
@@ -292,86 +183,4 @@ async function handleContinueStream(
     },
     onFlush: () => cleaner.flush(),
   })
-}
-
-async function handlePromptStream(
-  req: express.Request,
-  res: express.Response,
-  input: AiStreamInput & { mode: 'prompt' },
-  contextAfter: string | null,
-  selectedText: string | null,
-  services: ServiceSet
-): Promise<void> {
-  const rendered = resolveSelectionPrompt(
-    input.contextBefore,
-    contextAfter,
-    input.prompt!.trim(),
-    selectedText,
-    input.conversation ?? ''
-  )
-  assertPromptProtocolMode(rendered.definition, 'prompt')
-  const abortController = new AbortController()
-  const abortIfClientDisconnected = () => {
-    if (!res.writableEnded) abortController.abort()
-  }
-  req.on('aborted', abortIfClientDisconnected)
-  res.on('close', abortIfClientDisconnected)
-
-  const writeTools = buildInlineZoneWriteTools({
-    onWriteAction: () => {},
-  })
-
-  const readTools = hasValidToolScope(input)
-    ? buildReadTools({
-        scope: {
-          projectId: input.projectId,
-          documentId: input.documentId,
-        },
-        services,
-      })
-    : {}
-
-  const tools = {
-    ...readTools,
-    ...writeTools,
-  }
-
-  try {
-    const model = await getLanguageModel()
-    const runtimeLimits = configManager.getConfig().limits
-    const result = streamText({
-      model,
-      system: rendered.systemPrompt,
-      prompt: rendered.userPrompt,
-      tools,
-      stopWhen: stepCountIs(runtimeLimits.aiToolSteps),
-      maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
-      temperature: rendered.definition.defaults.temperature,
-      abortSignal: abortController.signal,
-      onError: ({ error }) => {
-        console.error('AI inline prompt stream error', error)
-      },
-    })
-
-    result.pipeUIMessageStreamToResponse(res, {
-      onError: (error) => {
-        const message = error instanceof Error ? error.message : 'Inline AI stream failed'
-        console.error('AI inline prompt UI stream error', error)
-        return message
-      },
-    })
-  } catch (error: unknown) {
-    if (abortController.signal.aborted) {
-      if (!res.headersSent) res.end()
-      return
-    }
-
-    console.error('AI inline prompt stream failed', error)
-    if (!res.headersSent) {
-      const message = error instanceof Error ? error.message : 'Failed to generate inline prompt'
-      res.status(500).json({ message })
-      return
-    }
-    res.end()
-  }
 }

@@ -4,6 +4,7 @@ import type { TransactionPort } from '../core/ports/transaction.port.js'
 import { createSqliteAdapter } from '../infrastructure/sqlite/factory.js'
 import { createYjsRuntime, type YjsRuntime, type YjsRuntimeConfig } from '../yjs/runtime.js'
 import { createChatRuntime, type ChatRuntime } from '../chat/runtime.js'
+import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
 
 export interface AppContainer {
   services: ServiceSet
@@ -11,6 +12,7 @@ export interface AppContainer {
   transaction: TransactionPort
   yjsRuntime: YjsRuntime
   chatRuntime: ChatRuntime
+  inlineRuntime: InlineRuntime
 }
 
 export function createContainer(dbPath: string, yjsConfig: YjsRuntimeConfig): AppContainer {
@@ -25,6 +27,11 @@ export function createContainer(dbPath: string, yjsConfig: YjsRuntimeConfig): Ap
   )
 
   const chatRuntime = createChatRuntime(adapter.services)
+  const inlineRuntime = createInlineRuntime(adapter.services, {
+    documents: adapter.repositories.documents,
+    projectDocuments: adapter.repositories.projectDocuments,
+    yjsDocuments: adapter.repositories.yjsDocuments,
+  })
 
   return {
     services: adapter.services,
@@ -32,5 +39,6 @@ export function createContainer(dbPath: string, yjsConfig: YjsRuntimeConfig): Ap
     transaction: adapter.transaction,
     yjsRuntime,
     chatRuntime,
+    inlineRuntime,
   }
 }

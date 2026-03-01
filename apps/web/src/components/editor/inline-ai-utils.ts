@@ -46,12 +46,6 @@ export function selectChoice(
   tr.delete(safeFrom, safeTo)
   tr.insert(safeFrom, schema.text(choice))
   if (markType && zone) {
-    const nextSession = zone.session
-      ? {
-          ...zone.session,
-          choices: [],
-        }
-      : null
     tr.removeMark(safeFrom, safeFrom + choice.length, markType)
     tr.addMark(
       safeFrom,
@@ -59,7 +53,7 @@ export function selectChoice(
       markType.create({
         id: zone.id,
         streaming: false,
-        session: nextSession ? JSON.stringify(nextSession) : null,
+        sessionId: zone.sessionId ?? null,
         deletedSlice: zone.deletedSlice,
       })
     )

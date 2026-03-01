@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import { createProject, selectEditorText } from './helpers/inline-ai'
 
 test.use({
@@ -7,32 +7,9 @@ test.use({
   isMobile: true,
 })
 
-async function mockAiStream(context: BrowserContext) {
-  await context.route('**/api/ai/stream', async (route) => {
-    const events = [
-      { type: 'start', messageId: 'msg-1' },
-      { type: 'text-start', id: 'txt-1' },
-      { type: 'text-delta', id: 'txt-1', delta: 'mobile' },
-      { type: 'text-end', id: 'txt-1' },
-      { type: 'finish' },
-    ]
-    const sseBody = [...events.map((event) => JSON.stringify(event)), '[DONE]']
-      .map((payload) => `data: ${payload}\n\n`)
-      .join('')
-
-    await route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream; charset=utf-8',
-      headers: {
-        'x-vercel-ai-ui-message-stream': 'v1',
-      },
-      body: sseBody,
-    })
-  })
-}
-
-test('mobile uses bottom dock for selection and zone controls', async ({ page }) => {
-  await mockAiStream(page.context())
+test('mobile uses bottom dock for selection and zone controls without auto replacing text', async ({
+  page,
+}) => {
   await createProject(page, 'Selection Toolbar Mobile Dock')
 
   const editor = page.locator('.ProseMirror')
@@ -61,7 +38,7 @@ test('mobile uses bottom dock for selection and zone controls', async ({ page })
   await expect(zoneControls).toBeVisible()
   await zoneControls.locator('[data-action="accept"]').click()
 
-  await expect(editor).toContainText('Hello mobile')
+  await expect(editor).toContainText('Hello world')
 
   await expect
     .poll(async () => {

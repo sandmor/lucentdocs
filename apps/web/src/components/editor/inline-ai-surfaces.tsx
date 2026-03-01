@@ -5,7 +5,7 @@ import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
-import type { InlineZoneSession } from './inline-ai-session'
+import type { InlineZoneSession } from '@plotline/shared'
 import type { AnimationPhase, FormatMarkName, InlineControlState } from './inline-ai-types'
 import { selectChoice } from './inline-ai-utils'
 
@@ -328,6 +328,7 @@ export function AIZoneSurface({
                     event.preventDefault()
                     event.stopPropagation()
                     selectChoice(view, choice, from, to)
+                    handleDismissChoices()
                   }}
                 >
                   <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground transition-colors group-hover:bg-primary/15 group-hover:text-primary">

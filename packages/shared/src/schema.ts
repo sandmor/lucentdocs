@@ -8,7 +8,7 @@ const extendedMarks = basicSchema.spec.marks.append({
     attrs: {
       id: {},
       streaming: { default: false },
-      session: { default: null },
+      sessionId: { default: null },
       deletedSlice: { default: null },
     },
     inclusive: false,
@@ -20,7 +20,7 @@ const extendedMarks = basicSchema.spec.marks.append({
           return {
             id: el.getAttribute('data-ai-zone-id'),
             streaming: el.getAttribute('data-ai-zone-streaming') === 'true',
-            session: el.getAttribute('data-ai-zone-session'),
+            sessionId: el.getAttribute('data-ai-zone-session-id'),
             deletedSlice: el.getAttribute('data-ai-zone-deleted-slice'),
           }
         },
@@ -30,7 +30,7 @@ const extendedMarks = basicSchema.spec.marks.append({
       const attrs = mark.attrs as {
         id: string
         streaming?: boolean
-        session?: string | null
+        sessionId?: string | null
         deletedSlice?: string | null
       }
 
@@ -40,7 +40,7 @@ const extendedMarks = basicSchema.spec.marks.append({
           class: 'ai-generating-text',
           'data-ai-zone-id': attrs.id,
           'data-ai-zone-streaming': String(attrs.streaming === true),
-          'data-ai-zone-session': attrs.session ?? '',
+          'data-ai-zone-session-id': attrs.sessionId ?? '',
           'data-ai-zone-deleted-slice': attrs.deletedSlice ?? '',
         },
         0,
