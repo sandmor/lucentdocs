@@ -19,6 +19,7 @@ import { createContainer } from './app/container.js'
 
 const appConfig = configManager.getConfig()
 const isProd = appConfig.runtime.isProduction
+const isTestRuntime = appConfig.runtime.nodeEnv === 'test' || process.env.PLOTLINE_TEST_MODE === '1'
 const container = createContainer(appConfig.paths.dbFile, {
   persistenceFlushIntervalMs: appConfig.yjs.persistenceFlushIntervalMs,
   versionSnapshotIntervalMs: appConfig.yjs.versionSnapshotIntervalMs,
@@ -78,7 +79,11 @@ function applyHtmlThemeClass(template: string, theme: 'light' | 'dark'): string 
 async function setupWebRuntime(app: Express): Promise<ViteDevServer | null> {
   if (!isProd) {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: isTestRuntime ? false : undefined,
+        ws: isTestRuntime ? false : undefined,
+      },
       appType: 'custom',
       root: WEB_ROOT,
     })
