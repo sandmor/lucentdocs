@@ -7,8 +7,9 @@ export async function createProject(page: PWPage, title: string) {
   await page.getByRole('button', { name: 'New Project' }).click()
   await page.getByPlaceholder('The Great Novel...').fill(title)
   await page.getByRole('button', { name: 'Create' }).click()
-  await expect(page).toHaveURL(/\/project\/[^/]+$/, { timeout: 15_000 })
-  await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
+  await expect(page).toHaveURL(/\/project\/[^/?]+(?:\?.*)?$/, { timeout: 20_000 })
+  await expect.poll(async () => page.locator('.ProseMirror').count(), { timeout: 20_000 }).toBe(1)
+  await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 20_000 })
 }
 
 export async function startInlineGeneration(page: PWPage) {

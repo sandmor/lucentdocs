@@ -53,7 +53,15 @@ export function EditorPage() {
   } | null>(null)
   const sidebarPanelRef = useRef<PanelImperativeHandle | null>(null)
 
-  const projectQuery = trpc.projects.get.useQuery({ id: id! }, { enabled: !!id })
+  const projectQuery = trpc.projects.get.useQuery(
+    { id: id! },
+    {
+      enabled: !!id,
+      retry: (failureCount) => failureCount < 8,
+      retryDelay: (attempt) => Math.min(200 * 2 ** Math.max(0, attempt - 1), 1200),
+      refetchOnWindowFocus: false,
+    }
+  )
   const documentsQuery = trpc.documents.list.useQuery({ projectId: id! }, { enabled: !!id })
   const visibleDocuments = useMemo(
     () =>
@@ -543,7 +551,7 @@ export function EditorPage() {
     [handleOpenDocument, isMobileMenuOpen]
   )
 
-  if (projectQuery.isLoading) {
+  if (projectQuery.isLoading || (projectQuery.isFetching && !projectQuery.data)) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="text-muted-foreground size-8 animate-spin" />
@@ -551,7 +559,7 @@ export function EditorPage() {
     )
   }
 
-  if (projectQuery.error || !projectQuery.data || !id) {
+  if ((projectQuery.error || !projectQuery.data || !id) && !projectQuery.isFetching) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4">
         <p className="text-destructive">{projectQuery.error?.message ?? 'Project not found'}</p>
@@ -561,6 +569,16 @@ export function EditorPage() {
       </div>
     )
   }
+
+  if (!id || !projectQuery.data) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="text-muted-foreground size-8 animate-spin" />
+      </div>
+    )
+  }
+
+  const project = projectQuery.data
 
   const versions: VersionSnapshotInfo[] = versionsQuery.data ?? []
   const hasDocuments = visibleDocuments.length > 0
@@ -684,9 +702,7 @@ export function EditorPage() {
             />
           </div>
 
-          <span className="text-muted-foreground hidden text-sm lg:inline">
-            {projectQuery.data.title}
-          </span>
+          <span className="text-muted-foreground hidden text-sm lg:inline">{project.title}</span>
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
             <Badge variant={connectionStatus === 'disconnected' ? 'destructive' : 'secondary'}>

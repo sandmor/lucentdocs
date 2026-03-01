@@ -44,6 +44,7 @@ export function HomePage() {
 
   const createMutation = trpc.projects.create.useMutation({
     onSuccess: (project) => {
+      utils.projects.get.setData({ id: project.id }, project)
       setNewTitle('')
       setDialogOpen(false)
       navigate(`/project/${project.id}`)

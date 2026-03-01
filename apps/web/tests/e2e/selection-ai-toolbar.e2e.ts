@@ -41,14 +41,36 @@ test('selection toolbar sends prompt and creates a replace AI zone', async ({ pa
   const promptInput = selectionToolbar.locator('textarea')
   await promptInput.fill('Make this more cosmic')
   await expect(page.locator('.ai-selection-overlay').first()).toBeVisible()
+  await expect(selectionToolbar).toHaveAttribute('data-state', 'compose')
 
   const submitShortcut = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'
   await promptInput.press(submitShortcut)
 
+  await expect(page.locator('.ai-writer-floating-controls')).toBeVisible()
+
   await expect(page.locator('.ai-generating-text')).toContainText('galaxy')
+  await expect(page.locator('.ai-writer-floating-controls[data-state="review"]')).toBeVisible()
   await page.locator('.ai-writer-floating-controls [data-action="accept"]').first().click()
 
   await expect(editor).toContainText('Hello galaxy')
+})
+
+test('selection controls toggle bold and italic marks', async ({ page }) => {
+  await createProject(page, 'Selection Formatting Controls')
+
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('format me')
+  await selectEditorText(page, 'format me')
+
+  const selectionToolbar = page.locator('.ai-selection-toolbar')
+  await expect(selectionToolbar).toBeVisible()
+
+  await selectionToolbar.locator('[data-action="format-bold"]').click()
+  await selectionToolbar.locator('[data-action="format-italic"]').click()
+
+  await expect(page.locator('.ProseMirror strong').first()).toHaveText('format me')
+  await expect(page.locator('.ProseMirror em').first()).toHaveText('format me')
 })
 
 test('selection toolbar coexists with AI zone controls without overlap', async ({ page }) => {

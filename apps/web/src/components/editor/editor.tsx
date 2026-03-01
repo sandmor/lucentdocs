@@ -6,8 +6,7 @@ import { toast } from 'sonner'
 import { schema } from '@plotline/shared'
 import { buildPlugins, type ProsemirrorMapping } from './plugins'
 import { createAIWriterController, type AIWriterController } from './ai-writer'
-import { AIWriterFloatingControls } from './ai-writer-floating-controls'
-import { SelectionAIToolbar } from './selection-ai-toolbar'
+import { InlineAIControls } from './inline-ai-controls'
 import { SelectionFakeOverlay } from './selection-fake-overlay'
 import type { SelectionRange } from './selection-types'
 import { emitAIStateChange } from './ai-writer-store'
@@ -357,24 +356,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           </div>
         </div>
       )}
-      <AIWriterFloatingControls
-        view={editorView}
-        onAccept={(zoneId) => {
-          if (viewRef.current) aiControllerRef.current?.acceptAI(viewRef.current, zoneId)
-        }}
-        onReject={(zoneId) => {
-          if (viewRef.current) aiControllerRef.current?.rejectAI(viewRef.current, zoneId)
-        }}
-      />
-      <SelectionFakeOverlay
+      <InlineAIControls
         view={editorView}
         selection={selectionRange}
-        visible={Boolean(editorView && selectionRange && !isEditorFocused)}
-      />
-      <SelectionAIToolbar
-        view={editorView}
-        selection={selectionRange}
-        isGenerating={isGenerating}
         onGenerate={(prompt, selection) => {
           if (!viewRef.current || !aiControllerRef.current) return false
           const started = aiControllerRef.current.startAIPromptAtRange(
@@ -386,7 +370,6 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           if (!started) return false
 
           selectionToolbarInteractingRef.current = false
-          setSelectionRange(null)
 
           const docSize = viewRef.current.state.doc.content.size
           const collapsePos = Math.max(0, Math.min(selection.to, docSize))
@@ -398,7 +381,18 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
           return true
         }}
+        onAccept={(zoneId) => {
+          if (viewRef.current) aiControllerRef.current?.acceptAI(viewRef.current, zoneId)
+        }}
+        onReject={(zoneId) => {
+          if (viewRef.current) aiControllerRef.current?.rejectAI(viewRef.current, zoneId)
+        }}
         onInteractionChange={handleToolbarInteractionChange}
+      />
+      <SelectionFakeOverlay
+        view={editorView}
+        selection={selectionRange}
+        visible={Boolean(editorView && selectionRange && !isEditorFocused)}
       />
     </div>
   )
