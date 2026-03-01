@@ -41,7 +41,10 @@ export function EditorPage() {
   const [titleInput, setTitleInput] = useState('')
   const [editorSessionKey, setEditorSessionKey] = useState(0)
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>('explorer')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return window.innerWidth >= 1024
+  })
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isDesktop, setIsDesktop] = useState(() => {
     if (typeof window === 'undefined') return true
@@ -698,11 +701,13 @@ export function EditorPage() {
               onKeyDown={handleTitleKeyDown}
               autoComplete="off"
               disabled={!currentDocumentId || documentQuery.isLoading || !!documentQuery.error}
-              className="max-w-xs border-none bg-transparent text-sm sm:text-base font-semibold shadow-none focus-visible:ring-0"
+              className="w-full max-w-[180px] sm:max-w-xs border-none bg-transparent text-sm sm:text-base font-semibold shadow-none focus-visible:ring-0"
             />
           </div>
 
-          <span className="text-muted-foreground hidden text-sm lg:inline">{project.title}</span>
+          <span className="text-muted-foreground hidden text-sm lg:inline truncate max-w-[200px]">
+            {project.title}
+          </span>
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
             <Badge variant={connectionStatus === 'disconnected' ? 'destructive' : 'secondary'}>
@@ -741,7 +746,7 @@ export function EditorPage() {
       <div className="flex min-h-0 flex-1">
         {isDesktop ? (
           <div className="flex flex-1 min-h-0">
-            {/* Icon bar — always visible */}
+            {/* Icon bar — always visible, sits outside the resizable group (fixed 48px / w-12) */}
             <SidebarIconBar
               activePanel={sidebarPanel}
               onPanelChange={setSidebarPanel}
@@ -749,16 +754,21 @@ export function EditorPage() {
               onToggleSidebar={toggleSidebar}
             />
 
-            {/* Resizable panel group */}
+            {/*
+              Resizable panel group — sizes are in the group's remaining width
+              (after the fixed 48px icon bar).
+              In react-resizable-panels v4, bare numbers = pixels and
+              strings like "25%" = percentages.
+            */}
             <ResizablePanelGroup orientation="horizontal" className="flex-1">
-              {/* Sidebar panel — collapsible */}
+              {/* Sidebar content panel — collapsible, separate from the icon bar */}
               <ResizablePanel
                 panelRef={sidebarPanelRef}
-                defaultSize={300}
-                minSize={15}
-                maxSize={450}
+                defaultSize={isSidebarOpen ? '25%' : '0%'}
+                minSize="10%"
+                maxSize="40%"
                 collapsible
-                collapsedSize={0}
+                collapsedSize="0%"
                 onResize={(size) => {
                   setIsSidebarOpen(size.asPercentage > 1)
                 }}
@@ -776,7 +786,7 @@ export function EditorPage() {
               <ResizableHandle withHandle />
 
               {/* Editor panel */}
-              <ResizablePanel defaultSize={75}>{mainContent}</ResizablePanel>
+              <ResizablePanel defaultSize="75%">{mainContent}</ResizablePanel>
             </ResizablePanelGroup>
           </div>
         ) : (

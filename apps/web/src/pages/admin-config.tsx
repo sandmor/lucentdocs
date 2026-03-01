@@ -392,22 +392,25 @@ export function AdminConfigPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-4xl px-6 py-12">
-        <div className="mb-10 flex items-end justify-between">
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 py-6 sm:py-12">
+        <div className="mb-6 sm:mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <Button variant="ghost" size="sm" className="-ml-2 mb-3" onClick={() => navigate('/')}>
               <ArrowLeft data-icon="inline-start" />
               Projects
             </Button>
-            <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-            <p className="text-muted-foreground mt-1">Manage Plotline's configuration.</p>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Settings</h1>
+            <p className="text-muted-foreground mt-1 text-sm sm:text-base">
+              Manage Plotline's configuration.
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
             <Button
               type="button"
               variant="outline"
-              size="lg"
+              size="sm"
+              className="sm:size-auto sm:px-3 sm:py-2"
               form="config-form"
               disabled={!form.formState.isDirty || updateMutation.isPending}
               onClick={handleDiscard}
@@ -417,7 +420,8 @@ export function AdminConfigPage() {
             </Button>
             <Button
               type="submit"
-              size="lg"
+              size="sm"
+              className="sm:size-auto sm:px-3 sm:py-2"
               form="config-form"
               disabled={!form.formState.isDirty || updateMutation.isPending}
             >

@@ -9,7 +9,6 @@ const TEST_BASE_URL = `http://${TEST_URL_HOST}:${TEST_PORT}`
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: '**/*.e2e.ts',
-  globalSetup: './tests/global-setup.ts',
   timeout: 30_000,
   expect: {
     timeout: 8_000,
@@ -22,7 +21,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `cd ../api && PLOTLINE_TEST_MODE=1 NODE_ENV=test PLOTLINE_DATA_DIR=${TEST_DATA_DIR} HOST=${TEST_HOST} PORT=${TEST_PORT} bun run start`,
+    command: `cd ../api && PLOTLINE_TEST_MODE=1 PLOTLINE_TEST_DATA_DIR=${TEST_DATA_DIR} bun src/test/reset-data-dir.ts && PLOTLINE_TEST_MODE=1 NODE_ENV=test PLOTLINE_TEST_DATA_DIR=${TEST_DATA_DIR} PLOTLINE_DATA_DIR=${TEST_DATA_DIR} HOST=${TEST_HOST} PORT=${TEST_PORT} bun run start`,
     url: TEST_BASE_URL,
     reuseExistingServer: false,
     timeout: 120_000,

@@ -145,7 +145,13 @@
   outline: none;
   min-height: 70vh;
   line-height: 1.8;
-  font-size: 1.0625rem;
+  font-size: 1rem;
+}
+
+@media (min-width: 640px) {
+  .ProseMirror {
+    font-size: 1.0625rem;
+  }
 }
 
 .ProseMirror p {
@@ -162,15 +168,29 @@
 }
 
 .ProseMirror h1 {
-  font-size: 1.75rem;
-}
-
-.ProseMirror h2 {
   font-size: 1.5rem;
 }
 
+.ProseMirror h2 {
+  font-size: 1.3rem;
+}
+
 .ProseMirror h3 {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
+}
+
+@media (min-width: 640px) {
+  .ProseMirror h1 {
+    font-size: 1.75rem;
+  }
+
+  .ProseMirror h2 {
+    font-size: 1.5rem;
+  }
+
+  .ProseMirror h3 {
+    font-size: 1.25rem;
+  }
 }
 
 .ProseMirror blockquote {

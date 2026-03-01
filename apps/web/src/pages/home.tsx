@@ -64,27 +64,39 @@ export function HomePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-4xl px-6 py-12">
-        <div className="mb-10 flex items-end justify-between">
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 py-6 sm:py-12">
+        <div className="mb-8 sm:mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Plotline</h1>
-            <p className="text-muted-foreground mt-1">Your stories, your way.</p>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Plotline</h1>
+            <p className="text-muted-foreground mt-1 text-sm sm:text-base">
+              Your stories, your way.
+            </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="lg" onClick={() => navigate('/admin/config')}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="sm:size-auto sm:px-3 sm:py-2"
+              onClick={() => navigate('/admin/config')}
+            >
               <SlidersHorizontal data-icon="inline-start" />
-              Settings
+              <span className="hidden sm:inline">Settings</span>
             </Button>
-            <Button variant="outline" size="lg" onClick={() => navigate('/admin/prompts')}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="sm:size-auto sm:px-3 sm:py-2"
+              onClick={() => navigate('/admin/prompts')}
+            >
               <MessagesSquare data-icon="inline-start" />
-              Prompts
+              <span className="hidden sm:inline">Prompts</span>
             </Button>
 
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger
                 render={
-                  <Button size="lg">
+                  <Button size="sm" className="sm:size-auto sm:px-3 sm:py-2">
                     <Plus data-icon="inline-start" />
                     New Project
                   </Button>

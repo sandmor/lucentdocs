@@ -407,54 +407,54 @@ export function AdminPromptsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-7xl px-6 py-12">
-        <div className="mb-10 flex items-end justify-between">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-12">
+        <div className="mb-6 sm:mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <Button variant="ghost" size="sm" className="-ml-2 mb-3" onClick={() => navigate('/')}>
               <ArrowLeft data-icon="inline-start" />
               Projects
             </Button>
-            <h1 className="text-3xl font-bold tracking-tight">Prompts</h1>
-            <p className="text-muted-foreground mt-1">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Prompts</h1>
+            <p className="text-muted-foreground mt-1 text-sm sm:text-base">
               Manage prompt templates and bind defaults by slot.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
-              size="lg"
+              size="sm"
               disabled={isBusy}
               onClick={() => startCreate('continue')}
             >
               <FilePlus2 data-icon="inline-start" />
-              New Continue
+              <span className="hidden sm:inline">New</span> Continue
             </Button>
             <Button
               variant="outline"
-              size="lg"
+              size="sm"
               disabled={isBusy}
               onClick={() => startCreate('prompt')}
             >
               <FilePlus2 data-icon="inline-start" />
-              New Selection
+              <span className="hidden sm:inline">New</span> Selection
             </Button>
             <Button
               variant="outline"
-              size="lg"
+              size="sm"
               disabled={isBusy}
               onClick={() => startCreate('chat')}
             >
               <FilePlus2 data-icon="inline-start" />
-              New Chat
+              <span className="hidden sm:inline">New</span> Chat
             </Button>
-            <Button size="lg" disabled={isBusy} onClick={savePrompt}>
+            <Button size="sm" disabled={isBusy} onClick={savePrompt}>
               <Save data-icon="inline-start" />
               {createMutation.isPending || updateMutation.isPending ? 'Saving...' : 'Save'}
             </Button>
             <Button
               variant="outline"
-              size="lg"
+              size="sm"
               disabled={
                 isBusy ||
                 creatingMode !== null ||
@@ -469,7 +469,7 @@ export function AdminPromptsPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="grid gap-6 lg:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
           <div className="grid gap-6">
             <Card>
               <CardHeader>
