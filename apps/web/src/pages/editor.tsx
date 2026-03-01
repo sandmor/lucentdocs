@@ -25,6 +25,87 @@ import { parseProjectSyncEvent } from '@/lib/project-sync-events'
 import type { PanelImperativeHandle } from 'react-resizable-panels'
 import { cn } from '@/lib/utils'
 
+const DESKTOP_SIDEBAR_STORAGE_KEY_PREFIX = 'plotline:editor:desktop-sidebar:'
+const DESKTOP_SIDEBAR_DEFAULT_WIDTH_PERCENTAGE = 25
+const DESKTOP_SIDEBAR_MIN_WIDTH_PERCENTAGE = 10
+const DESKTOP_SIDEBAR_MAX_WIDTH_PERCENTAGE = 40
+const DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE = 1
+const DESKTOP_SIDEBAR_PANEL_ID = 'desktop-sidebar'
+
+interface PersistedDesktopSidebarState {
+  isOpen: boolean
+  widthPercentage: number
+}
+
+function getDesktopSidebarStorageKey(projectId: string): string {
+  return `${DESKTOP_SIDEBAR_STORAGE_KEY_PREFIX}${projectId}`
+}
+
+function clampDesktopSidebarWidth(widthPercentage: number): number {
+  return Math.min(
+    DESKTOP_SIDEBAR_MAX_WIDTH_PERCENTAGE,
+    Math.max(DESKTOP_SIDEBAR_MIN_WIDTH_PERCENTAGE, widthPercentage)
+  )
+}
+
+function getDefaultDesktopSidebarOpen(): boolean {
+  if (typeof window === 'undefined') return true
+  return window.innerWidth >= 1024
+}
+
+function readPersistedDesktopSidebarState(
+  projectId: string | undefined
+): PersistedDesktopSidebarState | null {
+  if (!projectId || typeof window === 'undefined') return null
+
+  try {
+    const raw = window.localStorage.getItem(getDesktopSidebarStorageKey(projectId))
+    if (!raw) return null
+
+    const parsed = JSON.parse(raw) as { isOpen?: unknown; widthPercentage?: unknown }
+    if (typeof parsed.isOpen !== 'boolean') return null
+    if (typeof parsed.widthPercentage !== 'number' || !Number.isFinite(parsed.widthPercentage)) {
+      return null
+    }
+
+    return {
+      isOpen: parsed.isOpen,
+      widthPercentage: clampDesktopSidebarWidth(parsed.widthPercentage),
+    }
+  } catch {
+    return null
+  }
+}
+
+function writePersistedDesktopSidebarState(
+  projectId: string,
+  state: PersistedDesktopSidebarState
+): void {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(
+      getDesktopSidebarStorageKey(projectId),
+      JSON.stringify({
+        isOpen: state.isOpen,
+        widthPercentage: clampDesktopSidebarWidth(state.widthPercentage),
+      })
+    )
+  } catch {
+    // Ignore storage write errors (e.g. quota or privacy mode restrictions).
+  }
+}
+
+function resolveDesktopSidebarState(projectId: string | undefined): PersistedDesktopSidebarState {
+  const persistedState = readPersistedDesktopSidebarState(projectId)
+  if (persistedState) return persistedState
+
+  return {
+    isOpen: getDefaultDesktopSidebarOpen(),
+    widthPercentage: DESKTOP_SIDEBAR_DEFAULT_WIDTH_PERCENTAGE,
+  }
+}
+
 export function EditorPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -35,16 +116,20 @@ export function EditorPage() {
   const autoOpenAttemptedProjectRef = useRef<string | null>(null)
   const persistedDefaultSignatureRef = useRef<string | null>(null)
   const lastHandledSyncEventIdRef = useRef<string | null>(null)
+  const initialDesktopSidebarStateRef = useRef<PersistedDesktopSidebarState | null>(null)
+  const initialDesktopSidebarState =
+    initialDesktopSidebarStateRef.current ??
+    (initialDesktopSidebarStateRef.current = resolveDesktopSidebarState(id))
 
   const [includeAfterContext, setIncludeAfterContext] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
   const [titleInput, setTitleInput] = useState('')
   const [editorSessionKey, setEditorSessionKey] = useState(0)
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>('explorer')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    if (typeof window === 'undefined') return true
-    return window.innerWidth >= 1024
-  })
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => initialDesktopSidebarState.isOpen)
+  const [desktopSidebarWidthPercentage, setDesktopSidebarWidthPercentage] = useState(
+    () => initialDesktopSidebarState.widthPercentage
+  )
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isDesktop, setIsDesktop] = useState(() => {
     if (typeof window === 'undefined') return true
@@ -55,6 +140,7 @@ export function EditorPage() {
     to: number
   } | null>(null)
   const sidebarPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const [sidebarStateReadyProjectId, setSidebarStateReadyProjectId] = useState<string | null>(null)
 
   const projectQuery = trpc.projects.get.useQuery(
     { id: id! },
@@ -417,6 +503,53 @@ export function EditorPage() {
     return () => mediaQuery.removeEventListener('change', sync)
   }, [])
 
+  useEffect(() => {
+    if (!id) {
+      setSidebarStateReadyProjectId(null)
+      return
+    }
+
+    setSidebarStateReadyProjectId(null)
+
+    const nextSidebarState = resolveDesktopSidebarState(id)
+    setIsSidebarOpen(nextSidebarState.isOpen)
+    setDesktopSidebarWidthPercentage(nextSidebarState.widthPercentage)
+    setSidebarStateReadyProjectId(id)
+  }, [id])
+
+  useEffect(() => {
+    if (!isDesktop) return
+    if (!id) return
+    if (sidebarStateReadyProjectId !== id) return
+
+    writePersistedDesktopSidebarState(id, {
+      isOpen: isSidebarOpen,
+      widthPercentage: desktopSidebarWidthPercentage,
+    })
+  }, [desktopSidebarWidthPercentage, id, isDesktop, isSidebarOpen, sidebarStateReadyProjectId])
+
+  useEffect(() => {
+    if (!isDesktop) return
+    if (!id) return
+    if (sidebarStateReadyProjectId !== id) return
+
+    const panel = sidebarPanelRef.current
+    if (!panel) return
+
+    const { asPercentage } = panel.getSize()
+    if (isSidebarOpen) {
+      const targetSize = clampDesktopSidebarWidth(desktopSidebarWidthPercentage)
+      if (Math.abs(asPercentage - targetSize) > 0.5) {
+        panel.resize(`${targetSize}%`)
+      }
+      return
+    }
+
+    if (asPercentage > DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE) {
+      panel.collapse()
+    }
+  }, [desktopSidebarWidthPercentage, id, isDesktop, isSidebarOpen, sidebarStateReadyProjectId])
+
   const handleConnectionChange = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status)
   }, [])
@@ -534,13 +667,34 @@ export function EditorPage() {
     const panel = sidebarPanelRef.current
     if (!panel) return
     const { asPercentage } = panel.getSize()
-    if (asPercentage <= 1) {
-      panel.expand()
+    if (asPercentage <= DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE) {
+      panel.resize(`${clampDesktopSidebarWidth(desktopSidebarWidthPercentage)}%`)
       setIsSidebarOpen(true)
     } else {
+      setDesktopSidebarWidthPercentage((prevWidth) => {
+        const nextWidth = clampDesktopSidebarWidth(asPercentage)
+        if (Math.abs(prevWidth - nextWidth) < 0.1) return prevWidth
+        return nextWidth
+      })
       panel.collapse()
       setIsSidebarOpen(false)
     }
+  }, [desktopSidebarWidthPercentage])
+
+  const handleDesktopLayoutChanged = useCallback((layout: Record<string, number>) => {
+    const sidebarSize = layout[DESKTOP_SIDEBAR_PANEL_ID]
+    if (typeof sidebarSize !== 'number' || !Number.isFinite(sidebarSize)) return
+
+    const nextIsOpen = sidebarSize > DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE
+    setIsSidebarOpen((previous) => (previous === nextIsOpen ? previous : nextIsOpen))
+
+    if (!nextIsOpen) return
+
+    const nextWidth = clampDesktopSidebarWidth(sidebarSize)
+    setDesktopSidebarWidthPercentage((previous) => {
+      if (Math.abs(previous - nextWidth) < 0.1) return previous
+      return nextWidth
+    })
   }, [])
 
   const handleMobileOpenDocument = useCallback(
@@ -746,7 +900,6 @@ export function EditorPage() {
       <div className="flex min-h-0 flex-1">
         {isDesktop ? (
           <div className="flex flex-1 min-h-0">
-            {/* Icon bar — always visible, sits outside the resizable group (fixed 48px / w-12) */}
             <SidebarIconBar
               activePanel={sidebarPanel}
               onPanelChange={setSidebarPanel}
@@ -754,24 +907,23 @@ export function EditorPage() {
               onToggleSidebar={toggleSidebar}
             />
 
-            {/*
-              Resizable panel group — sizes are in the group's remaining width
-              (after the fixed 48px icon bar).
-              In react-resizable-panels v4, bare numbers = pixels and
-              strings like "25%" = percentages.
-            */}
-            <ResizablePanelGroup orientation="horizontal" className="flex-1">
-              {/* Sidebar content panel — collapsible, separate from the icon bar */}
+            <ResizablePanelGroup
+              orientation="horizontal"
+              className="flex-1"
+              onLayoutChanged={handleDesktopLayoutChanged}
+            >
               <ResizablePanel
+                id={DESKTOP_SIDEBAR_PANEL_ID}
                 panelRef={sidebarPanelRef}
-                defaultSize={isSidebarOpen ? '25%' : '0%'}
-                minSize="10%"
-                maxSize="40%"
+                defaultSize={
+                  isSidebarOpen
+                    ? `${clampDesktopSidebarWidth(desktopSidebarWidthPercentage)}%`
+                    : '0%'
+                }
+                minSize={`${DESKTOP_SIDEBAR_MIN_WIDTH_PERCENTAGE}%`}
+                maxSize={`${DESKTOP_SIDEBAR_MAX_WIDTH_PERCENTAGE}%`}
                 collapsible
                 collapsedSize="0%"
-                onResize={(size) => {
-                  setIsSidebarOpen(size.asPercentage > 1)
-                }}
                 className="transition-[flex-basis] duration-300 ease-in-out"
               >
                 <div
@@ -786,7 +938,16 @@ export function EditorPage() {
               <ResizableHandle withHandle />
 
               {/* Editor panel */}
-              <ResizablePanel defaultSize="75%">{mainContent}</ResizablePanel>
+              <ResizablePanel
+                id="desktop-main"
+                defaultSize={
+                  isSidebarOpen
+                    ? `${100 - clampDesktopSidebarWidth(desktopSidebarWidthPercentage)}%`
+                    : '100%'
+                }
+              >
+                {mainContent}
+              </ResizablePanel>
             </ResizablePanelGroup>
           </div>
         ) : (
