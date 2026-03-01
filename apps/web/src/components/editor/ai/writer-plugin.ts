@@ -14,6 +14,7 @@ export interface AIZone {
 export interface AIWriterState {
   active: boolean
   zoneId: string | null
+  sessionId: string | null
   from: number | null
   to: number | null
   streaming: boolean
@@ -117,6 +118,7 @@ function createInactiveState(zones: AIZone[] = []): AIWriterState {
   return {
     active: false,
     zoneId: null,
+    sessionId: null,
     from: null,
     to: null,
     streaming: false,
@@ -192,6 +194,7 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
             ...next,
             active: true,
             zoneId: typeof meta.zoneId === 'string' ? meta.zoneId : null,
+            sessionId: typeof meta.sessionId === 'string' ? meta.sessionId : null,
             from: meta.pos,
             to: meta.pos,
             streaming: true,
@@ -280,7 +283,7 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
             next.active &&
             next.zoneId &&
             !localZone &&
-            (next.streaming === false || meta?.type === 'accept' || meta?.type === 'reject')
+            (meta?.type === 'accept' || meta?.type === 'reject' || meta?.type === 'stop')
           ) {
             next = createInactiveState(zones)
           }

@@ -1,16 +1,16 @@
 import { useMemo } from 'react'
 import type { EditorView } from 'prosemirror-view'
-import { AIZoneFloatingControl, SelectionComposeFloatingControl } from './inline/desktop-controls'
-import { useAIWriterState, useIsCoarsePointer } from './inline/hooks'
-import { MobileInlineAIDock } from './inline/mobile-dock'
+import { AIZoneFloatingControl, SelectionComposeFloatingControl } from './desktop-controls'
+import { useAIWriterState, useIsCoarsePointer } from './hooks'
+import { MobileInlineAIDock } from './mobile-dock'
 import type { InlineZoneSession } from '@plotline/shared'
-import type { ReviewZone } from './inline/types'
+import type { ReviewZone } from './types'
 import {
   resolveActiveLoadingAnchor,
   resolveActiveReviewZone,
   resolveReviewZones,
-} from './inline/state-selectors'
-import type { SelectionRange } from './selection/types'
+} from './state-selectors'
+import type { SelectionRange } from '../selection/types'
 
 interface InlineAIControlsProps {
   view: EditorView | null

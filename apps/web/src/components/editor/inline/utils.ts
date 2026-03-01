@@ -1,9 +1,9 @@
 import { schema } from '@plotline/shared'
 import type { MarkType } from 'prosemirror-model'
 import type { EditorView } from 'prosemirror-view'
-import { aiWriterPluginKey } from './ai-writer-plugin'
-import type { FormatMarkName } from './inline-ai-types'
-import type { SelectionRange } from './selection-types'
+import { aiWriterPluginKey } from '../ai/writer-plugin'
+import type { FormatMarkName } from './types'
+import type { SelectionRange } from '../selection/types'
 
 export const COLLISION_PADDING = 8
 

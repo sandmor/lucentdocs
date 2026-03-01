@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
 import type { InlineZoneSession } from '@plotline/shared'
-import type { AnimationPhase, FormatMarkName, InlineControlState } from './inline-ai-types'
-import { selectChoice } from './inline-ai-utils'
+import type { AnimationPhase, FormatMarkName, InlineControlState } from './types'
+import { selectChoice } from './utils'
 
 interface SelectionComposeSurfaceProps {
   rootRef: { current: HTMLDivElement | null }

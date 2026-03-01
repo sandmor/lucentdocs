@@ -6,10 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
-import { asUIMessageArray } from './chat-panel/message-utils'
-import type { ChatThreadSummary } from './chat/types'
-import { ChatBubble, EmptyChatState, ThreadRow } from './chat-panel/ui'
-import { useChatStreamPump } from './chat-panel/use-stream-pump'
+import { asUIMessageArray } from './message-utils'
+import type { ChatThreadSummary } from './types'
+import { ChatBubble, EmptyChatState, ThreadRow } from './ui'
+import { useChatStreamPump } from './use-stream-pump'
 
 interface ChatPanelProps {
   editorSelection: { from: number; to: number } | null

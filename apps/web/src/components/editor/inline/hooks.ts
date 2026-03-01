@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from 'react'
 import { toggleMark } from 'prosemirror-commands'
 import type { EditorView } from 'prosemirror-view'
-import type { AIWriterState } from './ai-writer-plugin'
-import { getAIStateSnapshot, subscribeAIState } from './ai-writer-store'
-import type { AnimationPhase, FormatMarkName } from './inline-ai-types'
-import { isMarkActive, resolveMarkType } from './inline-ai-utils'
-import type { SelectionRange } from './selection-types'
+import type { AIWriterState } from '../ai/writer-plugin'
+import { getAIStateSnapshot, subscribeAIState } from '../ai/writer-store'
+import type { AnimationPhase, FormatMarkName } from './types'
+import { isMarkActive, resolveMarkType } from './utils'
+import type { SelectionRange } from '../selection/types'
 
 export function useAIWriterState(view: EditorView | null): AIWriterState | null {
   return useSyncExternalStore(

@@ -9,7 +9,7 @@ import * as Y from 'yjs'
 import { ySyncPlugin, yUndoPlugin, undo as yUndo, redo as yRedo } from 'y-prosemirror'
 import type { Node as PMNode } from 'prosemirror-model'
 import { schema } from '@plotline/shared'
-import { createAIWriterPlugin, type AIWriterActionHandlers } from './ai-writer-plugin'
+import { createAIWriterPlugin, type AIWriterActionHandlers } from '../ai/writer-plugin'
 
 export type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>
 

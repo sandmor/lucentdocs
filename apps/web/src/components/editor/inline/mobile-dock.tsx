@@ -7,10 +7,10 @@ import {
   useAnimatedPresence,
   useSelectionComposeController,
   useVisualViewportBottomOffset,
-} from './inline-ai-hooks'
-import { AIZoneSurface, SelectionComposeSurface } from './inline-ai-surfaces'
-import type { LoadingAnchor, ReviewZone } from './inline-ai-types'
-import type { SelectionRange } from './selection-types'
+} from './hooks'
+import { AIZoneSurface, SelectionComposeSurface } from './surfaces'
+import type { LoadingAnchor, ReviewZone } from './types'
+import type { SelectionRange } from '../selection/types'
 
 interface MobileInlineAIDockProps {
   view: EditorView

@@ -3,7 +3,7 @@
  * Kept in a separate file to satisfy react-refresh (only-export-components).
  */
 import type { EditorView } from 'prosemirror-view'
-import { aiWriterPluginKey, type AIWriterState } from './ai-writer-plugin'
+import { aiWriterPluginKey, type AIWriterState } from './writer-plugin'
 
 type AIStateListener = (state: AIWriterState | null) => void
 const aiStateListeners = new Map<EditorView, Set<AIStateListener>>()

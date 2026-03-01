@@ -1,30 +1,20 @@
-import {
-  useRef,
-  useEffect,
-  forwardRef,
-  useImperativeHandle,
-  useState,
-  useCallback,
-  useMemo,
-} from 'react'
+import { useRef, useEffect, forwardRef, useImperativeHandle, useState, useCallback } from 'react'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { initProseMirrorDoc } from 'y-prosemirror'
 import { toast } from 'sonner'
 import { schema } from '@plotline/shared'
-import { buildPlugins, type ProsemirrorMapping } from './plugins'
-import { createAIWriterController, type AIWriterController } from './ai-writer'
-import { InlineAIControls } from './inline-ai-controls'
-import { useAIWriterState } from './inline-ai-hooks'
-import type { InlineZoneSession } from '@plotline/shared'
-import { SelectionFakeOverlay } from './selection-fake-overlay'
-import type { SelectionRange } from './selection-types'
-import { emitAIStateChange } from './ai-writer-store'
+import { buildPlugins, type ProsemirrorMapping } from './prosemirror/plugins'
+import { createAIWriterController, type AIWriterController } from './ai/writer'
+import { InlineAIControls } from './inline/controls'
+import { useAIWriterState } from './inline/hooks'
+import { SelectionFakeOverlay } from './selection/fake-overlay'
+import type { SelectionRange } from './selection/types'
+import { emitAIStateChange } from './ai/writer-store'
+import { EditorToolbar } from './layout/toolbar'
+import { hasActiveDomSelection } from './selection/dom-selection'
+import { useInlineSessions } from './inline/use-sessions'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
-import { trpc } from '@/lib/trpc'
-import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
-import { ArrowRight, Loader2 } from 'lucide-react'
 
 export interface EditorHandle {
   startAIContinuation: (at_doc_end: boolean) => void
@@ -68,46 +58,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
   const [isEditorFocused, setIsEditorFocused] = useState(false)
   const [providerSessionKey, setProviderSessionKey] = useState(0)
-  const [inlineSessionsById, setInlineSessionsById] = useState<Record<string, InlineZoneSession>>(
-    {}
-  )
-  const inlineSessionsRef = useRef<Record<string, InlineZoneSession>>({})
   const aiState = useAIWriterState(editorView)
-
-  const inlineSessionIds = useMemo(() => {
-    if (!aiState) return []
-
-    const sessionIds = new Set<string>()
-    for (const zone of aiState.zones) {
-      if (!zone.sessionId) continue
-      sessionIds.add(zone.sessionId)
-    }
-    return [...sessionIds].sort((left, right) => left.localeCompare(right))
-  }, [aiState])
-
-  const inlineSessionsQuery = trpc.inline.getSessions.useQuery(
-    {
-      projectId: projectId ?? '',
-      documentId,
-      sessionIds: inlineSessionIds,
-    },
-    {
-      enabled: Boolean(projectId && documentId && inlineSessionIds.length > 0),
-      refetchOnWindowFocus: false,
-    }
-  )
-
-  useEffect(() => {
-    if (!inlineSessionsQuery.data) return
-    setInlineSessionsById((previous) => {
-      const next = {
-        ...previous,
-        ...inlineSessionsQuery.data.sessions,
-      }
-      inlineSessionsRef.current = next
-      return next
-    })
-  }, [inlineSessionsQuery.data])
+  const { inlineSessionsById, inlineSessionsRef, setInlineSessionsById } = useInlineSessions({
+    projectId,
+    documentId,
+    aiState,
+  })
 
   useEffect(() => {
     includeAfterContextRef.current = includeAfterContext ?? true
@@ -368,6 +324,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     projectId,
     documentId,
     providerSessionKey,
+    inlineSessionsRef,
+    setInlineSessionsById,
     showOfflineToast,
     dismissOfflineToast,
     onConnectionChange,
@@ -397,39 +355,18 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
   return (
     <div className="relative">
-      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-border/80 bg-card/60 px-3 py-2 backdrop-blur">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            if (!viewRef.current) return
-            aiControllerRef.current?.startAIContinuation(viewRef.current, true)
-          }}
-          disabled={isGenerating}
-        >
-          {isGenerating ? (
-            <Loader2 className="animate-spin" data-icon="inline-start" />
-          ) : (
-            <ArrowRight data-icon="inline-start" />
-          )}
-          Continue writing
-        </Button>
-
-        <div className="ml-auto flex items-center gap-2">
-          <Switch
-            id="include-after-context"
-            checked={includeAfterContext ?? true}
-            onCheckedChange={(value) => {
-              includeAfterContextRef.current = Boolean(value)
-              onIncludeAfterContextChange?.(Boolean(value))
-            }}
-            disabled={isGenerating}
-          />
-          <label htmlFor="include-after-context" className="text-xs text-muted-foreground">
-            Include text after cursor
-          </label>
-        </div>
-      </div>
+      <EditorToolbar
+        isGenerating={isGenerating}
+        includeAfterContext={includeAfterContext ?? true}
+        onToggleIncludeAfterContext={(value) => {
+          includeAfterContextRef.current = value
+          onIncludeAfterContextChange?.(value)
+        }}
+        onContinueWriting={() => {
+          if (!viewRef.current) return
+          aiControllerRef.current?.startAIContinuation(viewRef.current, true)
+        }}
+      />
 
       <div ref={containerRef} className={className} />
       {isLoading && (
@@ -491,15 +428,3 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     </div>
   )
 })
-
-function hasActiveDomSelection(view: EditorView): boolean {
-  if (typeof window === 'undefined') return false
-
-  const selection = window.getSelection()
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-    return false
-  }
-
-  const range = selection.getRangeAt(0)
-  return view.dom.contains(range.commonAncestorContainer)
-}

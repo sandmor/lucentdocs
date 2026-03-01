@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { EditorView } from 'prosemirror-view'
-import type { SelectionRange } from './selection-types'
+import type { SelectionRange } from './types'
 
 interface SelectionFakeOverlayProps {
   view: EditorView | null

@@ -2,20 +2,16 @@ import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
 import type { InlineZoneSession } from '@plotline/shared'
-import {
-  useAnimatedPresence,
-  useMountAnimationPhase,
-  useSelectionComposeController,
-} from './inline-ai-hooks'
-import { AIZoneSurface, SelectionComposeSurface } from './inline-ai-surfaces'
-import type { InlineControlState } from './inline-ai-types'
+import { useAnimatedPresence, useMountAnimationPhase, useSelectionComposeController } from './hooks'
+import { AIZoneSurface, SelectionComposeSurface } from './surfaces'
+import type { InlineControlState } from './types'
 import {
   applyPosition,
   COLLISION_PADDING,
   getSelectionRect,
   resolveCollisionPosition,
-} from './inline-ai-utils'
-import type { SelectionRange } from './selection-types'
+} from './utils'
+import type { SelectionRange } from '../selection/types'
 import type { EditorView } from 'prosemirror-view'
 
 interface SelectionComposeFloatingControlProps {
