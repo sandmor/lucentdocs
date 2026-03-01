@@ -125,16 +125,17 @@ export class InlineSessionMetadataStore {
     scope: InlineScope,
     requestedSessionIds?: readonly string[]
   ): Promise<Record<string, InlineZoneSession> | null> {
-    const pruned = await this.pruneOrphans(scope)
-    if (!pruned) return null
+    const scopedDocument = await this.#loadScopedDocument(scope)
+    if (!scopedDocument) return null
+    const sessions = readInlineSessions(scopedDocument.metadata)
 
     if (!requestedSessionIds || requestedSessionIds.length === 0) {
-      return pruned.sessions
+      return sessions
     }
 
     const requestedSet = new Set(requestedSessionIds)
     const filtered: Record<string, InlineZoneSession> = {}
-    for (const [sessionId, session] of Object.entries(pruned.sessions)) {
+    for (const [sessionId, session] of Object.entries(sessions)) {
       if (!requestedSet.has(sessionId)) continue
       filtered[sessionId] = session
     }
@@ -148,50 +149,20 @@ export class InlineSessionMetadataStore {
       return false
     }
 
-    const pruned = await this.pruneOrphans(scope, { retainSessionIds: [sessionId] })
-    if (!pruned) return false
+    const scopedDocument = await this.#loadScopedDocument(scope)
+    if (!scopedDocument) return false
+    const currentSessions = readInlineSessions(scopedDocument.metadata)
 
     const nextSessions: Record<string, InlineZoneSession> = {
-      ...pruned.sessions,
+      ...currentSessions,
       [sessionId]: normalizedSession,
     }
 
-    if (mapHasSameKeysAndValues(pruned.sessions, nextSessions)) {
+    if (mapHasSameKeysAndValues(currentSessions, nextSessions)) {
       return true
     }
 
-    const document = await this.#repos.documents.findById(scope.documentId)
-    if (!document) return false
-
-    const nextMetadata = writeInlineSessions(document.metadata, nextSessions)
-    await this.#repos.documents.update(scope.documentId, {
-      metadata: nextMetadata,
-      updatedAt: Date.now(),
-    })
-
-    return true
-  }
-
-  async clearSessionChoices(scope: InlineScope, sessionId: string): Promise<boolean> {
-    const pruned = await this.pruneOrphans(scope)
-    if (!pruned) return false
-
-    const session = pruned.sessions[sessionId]
-    if (!session) return false
-    if (session.choices.length === 0) return true
-
-    const nextSessions: Record<string, InlineZoneSession> = {
-      ...pruned.sessions,
-      [sessionId]: {
-        ...session,
-        choices: [],
-      },
-    }
-
-    const document = await this.#repos.documents.findById(scope.documentId)
-    if (!document) return false
-
-    const nextMetadata = writeInlineSessions(document.metadata, nextSessions)
+    const nextMetadata = writeInlineSessions(scopedDocument.metadata, nextSessions)
     await this.#repos.documents.update(scope.documentId, {
       metadata: nextMetadata,
       updatedAt: Date.now(),
@@ -201,20 +172,20 @@ export class InlineSessionMetadataStore {
   }
 
   async pruneOrphans(
-    scope: InlineScope,
-    options: { retainSessionIds?: readonly string[] } = {}
+    scope: InlineScope
   ): Promise<PruneResult | null> {
     const scopedDocument = await this.#loadScopedDocument(scope)
     if (!scopedDocument) return null
 
-    const retainSessionIds = new Set(options.retainSessionIds ?? [])
-    const referencedSessionIds = await this.#collectReferencedSessionIds(scope.documentId)
-    for (const retained of retainSessionIds) {
-      if (!retained) continue
-      referencedSessionIds.add(retained)
+    const currentSessions = readInlineSessions(scopedDocument.metadata)
+    if (Object.keys(currentSessions).length === 0) {
+      return {
+        sessions: currentSessions,
+        removedSessionIds: [],
+      }
     }
 
-    const currentSessions = readInlineSessions(scopedDocument.metadata)
+    const referencedSessionIds = await this.#collectReferencedSessionIds(scope.documentId)
     const nextSessions: Record<string, InlineZoneSession> = {}
     const removedSessionIds: string[] = []
 

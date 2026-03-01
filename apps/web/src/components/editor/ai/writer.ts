@@ -4,21 +4,13 @@ import { EditorView } from 'prosemirror-view'
 import { toast } from 'sonner'
 import type { InlineZoneWriteAction } from '@plotline/shared'
 import { aiWriterPluginKey, getAIZones } from './writer-plugin'
-import {
-  extractMessageTextFromPartsRaw,
-  extractToolPartsFromParts,
-  getMessageParts,
-} from './message-parts'
-import type { InlineChatMessage, InlineZoneSession } from '@plotline/shared'
+import { extractToolPartsFromParts, getMessageParts } from './message-parts'
+import type { InlineZoneSession } from '@plotline/shared'
 import { StuckDetector } from './stuck-detector'
 import { parseMarkdownishToSlice } from '../prosemirror/markdownish'
-import {
-  getDocumentContext,
-  getPromptContextForRange,
-  serializeInlineConversation,
-} from './writer/context'
-import { createInlineMessageId, createInlineSessionId, createZoneId } from './writer/ids'
-import { createEmptySession, createSessionWithPromptContext } from './writer/session-state'
+import { getDocumentContext, getPromptContextForRange } from './writer/context'
+import { createInlineSessionId, createZoneId } from './writer/ids'
+import { createEmptySession } from './writer/session-state'
 import { insertChunk, readErrorMessage } from './writer/stream'
 import { parseInlineToolPart, parseInlineZoneActionFromToolPart } from './writer/tool-parts'
 import {
@@ -172,8 +164,7 @@ export function createAIWriterController(
     view: EditorView,
     payload: PromptStreamPayload,
     zoneId: string,
-    sessionId: string,
-    userPrompt: string
+    sessionId: string
   ): Promise<void> {
     abortController?.abort()
     const requestAbortController = new AbortController()
@@ -187,9 +178,6 @@ export function createAIWriterController(
     let streamChunkController: ReadableStreamDefaultController<UIMessageChunk> | null = null
     let streamReadTask: Promise<void> | null = null
     let activeGenerationId: string | null = null
-    let sessionDraft = getSessionById(sessionId) ?? createEmptySession()
-    let sessionFlushQueued = false
-    let sessionFlushVersion = 0
 
     try {
       const toolScope = getToolScope()
@@ -198,86 +186,9 @@ export function createAIWriterController(
         return
       }
 
-      let assistantTextBuffer = ''
       const appliedZoneActionCalls = new Set<string>()
       let resolveGenerationDone: (() => void) | null = null
       let rejectGenerationDone: ((error: Error) => void) | null = null
-
-      const flushSessionDraft = () => {
-        setSessionById(sessionId, sessionDraft)
-      }
-
-      const queueSessionFlush = () => {
-        if (sessionFlushQueued) return
-        sessionFlushQueued = true
-        const version = ++sessionFlushVersion
-        queueMicrotask(() => {
-          if (!sessionFlushQueued || version !== sessionFlushVersion) return
-          sessionFlushQueued = false
-          flushSessionDraft()
-        })
-      }
-
-      const updateSessionDraft = (
-        updater: (current: InlineZoneSession) => InlineZoneSession,
-        options: { immediate?: boolean } = {}
-      ) => {
-        sessionDraft = updater(sessionDraft)
-        if (options.immediate) {
-          sessionFlushQueued = false
-          sessionFlushVersion += 1
-          flushSessionDraft()
-          return
-        }
-        queueSessionFlush()
-      }
-
-      updateSessionDraft(
-        (current) => ({
-          ...current,
-          contextBefore: current.contextBefore ?? payload.contextBefore,
-          contextAfter: current.contextAfter ?? payload.contextAfter ?? null,
-          messages: [
-            ...current.messages,
-            {
-              id: createInlineMessageId('user'),
-              role: 'user',
-              text: userPrompt,
-              tools: [],
-            },
-          ],
-        }),
-        { immediate: true }
-      )
-
-      const upsertAssistantMessage = (
-        updater: (assistant: InlineChatMessage) => InlineChatMessage,
-        options: { immediate?: boolean } = {}
-      ) => {
-        updateSessionDraft((current) => {
-          const messages = [...current.messages]
-          const last = messages[messages.length - 1]
-          const assistant: InlineChatMessage =
-            last?.role === 'assistant'
-              ? last
-              : {
-                id: createInlineMessageId('assistant'),
-                role: 'assistant',
-                text: '',
-                tools: [],
-              }
-          const nextAssistant = updater(assistant)
-          if (last?.role === 'assistant') {
-            messages[messages.length - 1] = nextAssistant
-          } else {
-            messages.push(nextAssistant)
-          }
-          return {
-            ...current,
-            messages,
-          }
-        }, options)
-      }
 
       const chunkStream = new ReadableStream<UIMessageChunk>({
         start(controller) {
@@ -307,24 +218,12 @@ export function createAIWriterController(
           stuckDetector.onChunk()
 
           const parts = getMessageParts(assistantMessage)
-          const nextAssistantText = extractMessageTextFromPartsRaw(parts)
-          if (nextAssistantText !== assistantTextBuffer) {
-            assistantTextBuffer = nextAssistantText
-            upsertAssistantMessage(
-              (assistant) => ({
-                ...assistant,
-                text: nextAssistantText,
-              }),
-              { immediate: true }
-            )
-          }
-
           const toolParts = extractToolPartsFromParts(parts)
           for (const toolPart of toolParts) {
             const parsedTool = parseInlineToolPart(toolPart)
             if (!parsedTool) continue
 
-            const { toolName, toolCallId, rawState, chipState } = parsedTool
+            const { toolName, toolCallId, rawState } = parsedTool
             const isZoneWriteTool = toolName === 'write_zone' || toolName === 'write_zone_choices'
 
             if (isZoneWriteTool && rawState === 'output-available') {
@@ -338,27 +237,6 @@ export function createAIWriterController(
               }
               continue
             }
-
-            if (isZoneWriteTool) continue
-            upsertAssistantMessage((assistant) => {
-              const nextTools = [...assistant.tools]
-              const existingIndex = nextTools.findIndex((tool) => tool.toolName === toolName)
-              if (existingIndex >= 0) {
-                nextTools[existingIndex] = {
-                  ...nextTools[existingIndex],
-                  state: chipState,
-                }
-              } else {
-                nextTools.push({
-                  toolName,
-                  state: chipState,
-                })
-              }
-              return {
-                ...assistant,
-                tools: nextTools,
-              }
-            })
           }
 
           const pluginState = aiWriterPluginKey.getState(view.state)
@@ -382,15 +260,6 @@ export function createAIWriterController(
                 return
               }
 
-              const chunkRecord = event.chunk as Record<string, unknown>
-              if (
-                chunkRecord.type === 'text-delta' &&
-                typeof chunkRecord.delta === 'string' &&
-                chunkRecord.delta.length > 0
-              ) {
-                // Let the streamReadTask handle the text updates entirely to avoid thrashing and race conditions
-              }
-
               try {
                 streamChunkController?.enqueue(event.chunk)
               } catch (error) {
@@ -403,10 +272,7 @@ export function createAIWriterController(
               activeGenerationId = event.generationId
             }
 
-            if (event.session) {
-              if (activeGenerationId !== null) return
-              updateSessionDraft(() => event.session!, { immediate: true })
-            }
+            setSessionById(sessionId, event.session ?? null)
 
             if (activeGenerationId && !event.generating) {
               resolveGenerationDone?.()
@@ -435,13 +301,6 @@ export function createAIWriterController(
         { once: true }
       )
 
-      await trpcClient.inline.saveSession.mutate({
-        projectId: toolScope.projectId,
-        documentId: toolScope.documentId,
-        sessionId,
-        session: sessionDraft,
-      })
-
       const started = await trpcClient.inline.startPromptGeneration.mutate({
         projectId: toolScope.projectId,
         documentId: toolScope.documentId,
@@ -450,12 +309,10 @@ export function createAIWriterController(
         contextAfter: payload.contextAfter,
         prompt: payload.prompt,
         selectedText: payload.selectedText,
-        conversation: serializeInlineConversation(sessionDraft),
       })
       activeGenerationId = started.generationId
 
       await generationDone
-      updateSessionDraft((current) => current, { immediate: true })
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         return
@@ -464,11 +321,6 @@ export function createAIWriterController(
       handleAIError(view, message)
     } finally {
       observeUnsubscribe?.unsubscribe()
-      if (sessionFlushQueued) {
-        sessionFlushQueued = false
-        sessionFlushVersion += 1
-        setSessionById(sessionId, sessionDraft)
-      }
       try {
         ; (streamChunkController as { close: () => void } | null)?.close()
       } catch {
@@ -483,21 +335,6 @@ export function createAIWriterController(
       }
 
       if (requestId === currentRequestId && abortController === requestAbortController) {
-        const toolScope = getToolScope()
-        const finalSession = sessionDraft
-        if (toolScope.projectId && toolScope.documentId && finalSession) {
-          void trpcClient.inline.saveSession
-            .mutate({
-              projectId: toolScope.projectId,
-              documentId: toolScope.documentId,
-              sessionId,
-              session: finalSession,
-            })
-            .catch((saveError) => {
-              console.warn('Failed to persist inline session state', saveError)
-            })
-        }
-
         abortController = null
         setStreamingState(false, view)
       }
@@ -674,7 +511,6 @@ export function createAIWriterController(
     }
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
-    setSessionById(sessionId, createSessionWithPromptContext(contextBefore, contextAfter ?? null))
     streamedText = ''
 
     void streamAIPrompt(
@@ -689,8 +525,7 @@ export function createAIWriterController(
         selectionTo: to,
       },
       zoneId,
-      sessionId,
-      trimmedPrompt
+      sessionId
     )
 
     return true
@@ -738,9 +573,6 @@ export function createAIWriterController(
     const zoneSession = zone.sessionId ? getSessionById(zone.sessionId) : null
     const contextBefore = zoneSession?.contextBefore ?? fallbackContext.contextBefore
     const contextAfter = zoneSession?.contextAfter ?? fallbackContext.contextAfter ?? null
-    if (!zoneSession) {
-      setSessionById(sessionId, createSessionWithPromptContext(contextBefore, contextAfter))
-    }
     void streamAIPrompt(
       view,
       {
@@ -753,8 +585,7 @@ export function createAIWriterController(
         selectionTo: zone.to,
       },
       zoneId,
-      sessionId,
-      trimmedPrompt
+      sessionId
     )
 
     return true
@@ -774,18 +605,6 @@ export function createAIWriterController(
       ...current,
       choices: [],
     }))
-    const toolScope = getToolScope()
-    if (toolScope.projectId && toolScope.documentId) {
-      void trpcClient.inline.clearSessionChoices
-        .mutate({
-          projectId: toolScope.projectId,
-          documentId: toolScope.documentId,
-          sessionId: zone.sessionId,
-        })
-        .catch((error) => {
-          console.warn('Failed to clear inline session choices', error)
-        })
-    }
     return true
   }
 

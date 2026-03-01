@@ -1,13 +1,17 @@
 import { observable } from '@trpc/server/observable'
 import { nanoid } from 'nanoid'
-import { stepCountIs, type UIMessageChunk } from 'ai'
+import { readUIMessageStream, stepCountIs, streamText, type UIMessage, type UIMessageChunk } from 'ai'
+import type {
+  InlineChatMessage,
+  InlineToolChip,
+  InlineZoneSession,
+  InlineZoneWriteAction,
+} from '@plotline/shared'
 import type { ServiceSet } from '../core/services/types.js'
 import { getLanguageModel } from '../ai/index.js'
 import { assertPromptProtocolMode, resolveSelectionPrompt } from '../ai/prompt-engine.js'
 import { configManager } from '../config/manager.js'
 import { buildInlineZoneWriteTools, buildReadTools, hasValidToolScope } from '../chat/tools.js'
-import { streamText } from 'ai'
-import type { InlineZoneSession } from '@plotline/shared'
 import {
   createInlineSessionMetadataStore,
   type InlineScope,
@@ -42,13 +46,18 @@ export interface StartInlineGenerationInput extends InlineScope {
   contextAfter?: string
   prompt: string
   selectedText?: string
-  conversation?: string
   maxOutputTokens?: number
 }
 
 interface ActiveGeneration {
   id: string
   controller: AbortController
+}
+
+interface ParsedInlineToolPart {
+  toolName: string
+  rawState: string
+  chipState: 'pending' | 'complete'
 }
 
 function isTestRuntime(): boolean {
@@ -89,6 +98,176 @@ function createObserveState(
   }
 }
 
+function createEmptySession(): InlineZoneSession {
+  return {
+    messages: [],
+    choices: [],
+    contextBefore: null,
+    contextAfter: null,
+  }
+}
+
+function createInlineMessageId(role: 'user' | 'assistant'): string {
+  return `inline-${role}-${nanoid()}`
+}
+
+function createUserMessage(text: string): InlineChatMessage {
+  return {
+    id: createInlineMessageId('user'),
+    role: 'user',
+    text,
+    tools: [],
+  }
+}
+
+function serializeInlineConversation(session: InlineZoneSession): string {
+  if (session.messages.length === 0) {
+    return ''
+  }
+
+  return session.messages
+    .map((message) => {
+      const role = message.role === 'assistant' ? 'Assistant' : 'User'
+      const text = message.text.trim()
+      if (!text) return ''
+      return `${role}: ${text}`
+    })
+    .filter((line) => line.length > 0)
+    .join('\n')
+}
+
+function getMessageParts(message: unknown): unknown[] {
+  if (typeof message !== 'object' || message === null || Array.isArray(message)) {
+    return []
+  }
+
+  const record = message as Record<string, unknown>
+  return Array.isArray(record.parts) ? record.parts : []
+}
+
+function extractMessageTextFromPartsRaw(parts: unknown[]): string {
+  return parts
+    .flatMap((part) => {
+      if (typeof part !== 'object' || part === null || Array.isArray(part)) return []
+      const record = part as Record<string, unknown>
+      if (record.type !== 'text') return []
+      return typeof record.text === 'string' ? [record.text] : []
+    })
+    .join('')
+}
+
+function extractToolPartsFromParts(parts: unknown[]): Record<string, unknown>[] {
+  return parts.flatMap((part) => {
+    if (typeof part !== 'object' || part === null || Array.isArray(part)) return []
+    const record = part as Record<string, unknown>
+    if (typeof record.type !== 'string') return []
+    if (record.type === 'dynamic-tool' || record.type.startsWith('tool-')) return [record]
+    return []
+  })
+}
+
+function parseInlineToolPart(part: Record<string, unknown>): ParsedInlineToolPart | null {
+  const partType = typeof part.type === 'string' ? part.type : ''
+  const toolName =
+    partType === 'dynamic-tool'
+      ? typeof part.toolName === 'string'
+        ? part.toolName
+        : null
+      : partType.startsWith('tool-')
+        ? partType.replace(/^tool-/, '')
+        : null
+  if (!toolName) return null
+
+  const rawState = typeof part.state === 'string' ? part.state : 'unknown'
+  const chipState: 'pending' | 'complete' = rawState === 'output-available' ? 'complete' : 'pending'
+
+  return {
+    toolName,
+    rawState,
+    chipState,
+  }
+}
+
+function extractAssistantTools(parts: unknown[]): InlineToolChip[] {
+  const tools: InlineToolChip[] = []
+
+  for (const part of extractToolPartsFromParts(parts)) {
+    const parsed = parseInlineToolPart(part)
+    if (!parsed) continue
+    if (parsed.toolName === 'write_zone' || parsed.toolName === 'write_zone_choices') continue
+
+    const existingIndex = tools.findIndex((tool) => tool.toolName === parsed.toolName)
+    if (existingIndex >= 0) {
+      tools[existingIndex] = {
+        ...tools[existingIndex],
+        state: parsed.chipState,
+      }
+    } else {
+      tools.push({
+        toolName: parsed.toolName,
+        state: parsed.chipState,
+      })
+    }
+  }
+
+  return tools
+}
+
+function upsertAssistantMessage(session: InlineZoneSession, message: UIMessage): InlineZoneSession {
+  const parts = getMessageParts(message)
+  const assistantText = extractMessageTextFromPartsRaw(parts)
+  const tools = extractAssistantTools(parts)
+
+  const messages = [...session.messages]
+  const last = messages[messages.length - 1]
+  const fallbackId = last?.role === 'assistant' ? last.id : createInlineMessageId('assistant')
+  const assistantId =
+    typeof message.id === 'string' && message.id.trim().length > 0 ? message.id : fallbackId
+
+  const assistant: InlineChatMessage = {
+    id: assistantId,
+    role: 'assistant',
+    text: assistantText,
+    tools,
+  }
+
+  if (last?.role === 'assistant') {
+    messages[messages.length - 1] = assistant
+  } else {
+    messages.push(assistant)
+  }
+
+  return {
+    ...session,
+    messages,
+  }
+}
+
+function applyWriteActions(
+  session: InlineZoneSession,
+  pendingActions: InlineZoneWriteAction[]
+): InlineZoneSession {
+  if (pendingActions.length === 0) return session
+
+  let nextChoices = session.choices
+  for (const action of pendingActions) {
+    if (action.type === 'set_choices') {
+      nextChoices = action.choices
+    }
+  }
+
+  pendingActions.length = 0
+
+  if (nextChoices === session.choices) {
+    return session
+  }
+
+  return {
+    ...session,
+    choices: [...nextChoices],
+  }
+}
+
 export class InlineRuntimeError extends Error {
   readonly code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT'
 
@@ -107,6 +286,7 @@ export class InlineRuntime {
   #listeners = new Map<string, Set<InlineListener>>()
   #liveStates = new Map<string, InlineObserveSnapshotEvent>()
   #activeGenerations = new Map<string, ActiveGeneration>()
+  #activePrunes = new Map<string, Promise<void>>()
 
   constructor(
     services: ServiceSet,
@@ -114,6 +294,17 @@ export class InlineRuntime {
   ) {
     this.#services = services
     this.#store = createInlineSessionMetadataStore(repos)
+  }
+
+  #shouldRetainState(key: string): boolean {
+    return this.#activeGenerations.has(key) || (this.#listeners.get(key)?.size ?? 0) > 0
+  }
+
+  #toSnapshotEvent(state: InlineObserveState): InlineObserveSnapshotEvent {
+    return {
+      ...state,
+      type: 'snapshot',
+    }
   }
 
   async getSessions(
@@ -131,35 +322,30 @@ export class InlineRuntime {
     return sessions
   }
 
-  async saveSession(
-    scope: InlineScope,
-    sessionId: string,
-    session: InlineZoneSession
-  ): Promise<void> {
-    const saved = await this.#store.saveSession(scope, sessionId, session)
-    if (!saved) {
-      throw new InlineRuntimeError(
-        'NOT_FOUND',
-        `Document ${scope.documentId} not found in project ${scope.projectId}`
-      )
+  async pruneOrphanSessions(scope: InlineScope): Promise<void> {
+    const pruneKey = `${scope.projectId}:${scope.documentId}`
+    const inFlight = this.#activePrunes.get(pruneKey)
+    if (inFlight) {
+      await inFlight
+      return
     }
 
-    await this.publishPersistedState({ ...scope, sessionId })
-  }
+    const task = (async () => {
+      const pruned = await this.#store.pruneOrphans(scope)
+      if (!pruned) return
+      if (pruned.removedSessionIds.length === 0) return
 
-  async clearSessionChoices(scope: InlineScope, sessionId: string): Promise<void> {
-    const cleared = await this.#store.clearSessionChoices(scope, sessionId)
-    if (!cleared) return
-    await this.publishPersistedState({ ...scope, sessionId })
-  }
+      for (const sessionId of pruned.removedSessionIds) {
+        const state = await this.#loadPersistedState({ ...scope, sessionId })
+        this.#emitSnapshot(state)
+      }
+    })()
 
-  async pruneOrphanSessions(scope: InlineScope): Promise<void> {
-    const pruned = await this.#store.pruneOrphans(scope)
-    if (!pruned) return
-    if (pruned.removedSessionIds.length === 0) return
-
-    for (const sessionId of pruned.removedSessionIds) {
-      await this.publishPersistedState({ ...scope, sessionId })
+    this.#activePrunes.set(pruneKey, task)
+    try {
+      await task
+    } finally {
+      this.#activePrunes.delete(pruneKey)
     }
   }
 
@@ -219,11 +405,6 @@ export class InlineRuntime {
     return true
   }
 
-  async publishPersistedState(scope: InlineScope & { sessionId: string }): Promise<void> {
-    const state = await this.#loadPersistedState(scope)
-    this.#emitSnapshot(state)
-  }
-
   async startGeneration(input: StartInlineGenerationInput): Promise<{ generationId: string }> {
     const key = toInlineKey(input)
     if (this.#activeGenerations.has(key)) {
@@ -247,6 +428,30 @@ export class InlineRuntime {
       )
     }
 
+    const persistedSession = await this.#store.getSession(input, input.sessionId)
+    if (persistedSession === undefined) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `Document ${input.documentId} not found in project ${input.projectId}`
+      )
+    }
+
+    const baseSession = persistedSession ?? createEmptySession()
+    const sessionWithUserMessage: InlineZoneSession = {
+      ...baseSession,
+      contextBefore: baseSession.contextBefore ?? input.contextBefore,
+      contextAfter: baseSession.contextAfter ?? input.contextAfter ?? null,
+      messages: [...baseSession.messages, createUserMessage(prompt)],
+    }
+
+    const userMessageSaved = await this.#store.saveSession(input, input.sessionId, sessionWithUserMessage)
+    if (!userMessageSaved) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `Document ${input.documentId} not found in project ${input.projectId}`
+      )
+    }
+
     const generationId = nanoid()
     const controller = new AbortController()
     this.#activeGenerations.set(key, {
@@ -254,14 +459,15 @@ export class InlineRuntime {
       controller,
     })
 
-    const currentState = await this.#loadPersistedState(input)
-    this.#emitSnapshot({
-      ...currentState,
-      generating: true,
-      generationId,
-    })
+    this.#emitSnapshot(
+      createObserveState(input, {
+        session: sessionWithUserMessage,
+        generating: true,
+        generationId,
+      })
+    )
 
-    void this.#runGeneration(input, generationId, controller)
+    void this.#runGeneration(input, generationId, controller, sessionWithUserMessage, prompt)
 
     return { generationId }
   }
@@ -306,27 +512,35 @@ export class InlineRuntime {
   async #runGeneration(
     input: StartInlineGenerationInput,
     generationId: string,
-    controller: AbortController
+    controller: AbortController,
+    baseSession: InlineZoneSession,
+    prompt: string
   ): Promise<void> {
     const key = toInlineKey(input)
+    let finalSession = baseSession
+    let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null = null
+    let chunkForwardTask: Promise<void> | null = null
+    const pendingWriteActions: InlineZoneWriteAction[] = []
 
     try {
       if (isTestRuntime()) {
-        await this.#runTestGeneration(input, generationId, controller)
+        finalSession = await this.#runTestGeneration(input, generationId, controller, baseSession)
         return
       }
 
       const rendered = resolveSelectionPrompt(
-        input.contextBefore,
-        input.contextAfter ?? null,
-        input.prompt,
+        baseSession.contextBefore ?? input.contextBefore,
+        baseSession.contextAfter ?? input.contextAfter ?? null,
+        prompt,
         input.selectedText ?? null,
-        input.conversation ?? ''
+        serializeInlineConversation(baseSession)
       )
       assertPromptProtocolMode(rendered.definition, 'prompt')
 
       const writeTools = buildInlineZoneWriteTools({
-        onWriteAction: () => {},
+        onWriteAction: (action) => {
+          pendingWriteActions.push(action)
+        },
       })
 
       const readTools = hasValidToolScope(input)
@@ -357,44 +571,113 @@ export class InlineRuntime {
         abortSignal: controller.signal,
       })
 
-      const chunkStream = result.toUIMessageStream({
+      const uiStream = result.toUIMessageStream({
         onError: (error) => {
           console.error('AI inline prompt stream error', error)
           return error instanceof Error ? error.message : 'Inline AI stream failed'
         },
       })
 
-      const reader = chunkStream.getReader()
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          this.#emitStreamChunk(input, generationId, value)
+      const [chunkStream, messageStream] = uiStream.tee()
+      chunkReader = chunkStream.getReader()
+      chunkForwardTask = (async () => {
+        const reader = chunkReader
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            this.#emitStreamChunk(input, generationId, value)
+          }
+        } finally {
+          reader.releaseLock()
         }
-      } finally {
-        reader.releaseLock()
+      })()
+
+      let latestAssistant: UIMessage | null = null
+      for await (const assistantMessage of readUIMessageStream<UIMessage>({
+        message: latestAssistant ?? undefined,
+        stream: messageStream,
+        terminateOnError: false,
+        onError: (error) => {
+          console.warn('Failed to read inline AI UI message stream', { error })
+        },
+      })) {
+        latestAssistant = assistantMessage
+        finalSession = applyWriteActions(finalSession, pendingWriteActions)
+        finalSession = upsertAssistantMessage(finalSession, assistantMessage)
+        this.#emitSnapshot(
+          createObserveState(input, {
+            session: finalSession,
+            generating: true,
+            generationId,
+          })
+        )
       }
+
+      finalSession = applyWriteActions(finalSession, pendingWriteActions)
+
     } catch (error) {
       if (!(error instanceof Error && error.name === 'AbortError')) {
         console.error('Inline prompt generation failed', error)
       }
     } finally {
+      finalSession = applyWriteActions(finalSession, pendingWriteActions)
+
+      if (chunkReader) {
+        try {
+          await chunkReader.cancel()
+        } catch {
+          // Ignore cancellation errors when stream already closed.
+        }
+      }
+      if (chunkForwardTask) {
+        try {
+          await chunkForwardTask
+        } catch (error) {
+          console.error('Failed while waiting for inline chunk forward task', error)
+        }
+      }
+
       const active = this.#activeGenerations.get(key)
       if (active?.id === generationId) {
         this.#activeGenerations.delete(key)
       }
 
-      await this.publishPersistedState(input)
+      let sessionForSnapshot: InlineZoneSession | null = finalSession
+      try {
+        const saved = await this.#store.saveSession(input, input.sessionId, finalSession)
+        if (!saved) {
+          const persisted = await this.#store.getSession(input, input.sessionId)
+          if (persisted === undefined) {
+            console.warn(
+              `Inline session ${input.sessionId} is no longer available for ${input.projectId}/${input.documentId}`
+            )
+            sessionForSnapshot = null
+          } else {
+            sessionForSnapshot = persisted
+          }
+        }
+      } catch (error) {
+        console.error('Failed to persist inline session state', error)
+      }
+
+      this.#emitSnapshot(
+        createObserveState(input, {
+          session: sessionForSnapshot,
+          generating: false,
+          generationId: null,
+        })
+      )
     }
   }
 
   async #runTestGeneration(
     input: StartInlineGenerationInput,
     generationId: string,
-    controller: AbortController
-  ): Promise<void> {
-    if (controller.signal.aborted) return
+    controller: AbortController,
+    baseSession: InlineZoneSession
+  ): Promise<InlineZoneSession> {
+    if (controller.signal.aborted) return baseSession
 
     const messageId = `test-inline-${generationId}`
     const textId = `test-inline-text-${generationId}`
@@ -424,9 +707,21 @@ export class InlineRuntime {
     ]
 
     for (const chunk of chunks) {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted) return baseSession
       this.#emitStreamChunk(input, generationId, chunk)
       await Promise.resolve()
+    }
+
+    const assistantMessage: InlineChatMessage = {
+      id: messageId,
+      role: 'assistant',
+      text: generated,
+      tools: [],
+    }
+
+    return {
+      ...baseSession,
+      messages: [...baseSession.messages, assistantMessage],
     }
   }
 
@@ -450,13 +745,10 @@ export class InlineRuntime {
   }
 
   #emitSnapshot(state: InlineObserveState): void {
-    const snapshot: InlineObserveSnapshotEvent = {
-      ...state,
-      type: 'snapshot',
-    }
+    const snapshot = this.#toSnapshotEvent(state)
 
     const key = toInlineKey(state)
-    if (this.#activeGenerations.has(key) || (this.#listeners.get(key)?.size ?? 0) > 0) {
+    if (this.#shouldRetainState(key)) {
       this.#liveStates.set(key, snapshot)
     } else {
       this.#liveStates.delete(key)
