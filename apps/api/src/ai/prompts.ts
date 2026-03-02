@@ -22,76 +22,73 @@ const TEMPLATE_IDENTIFIER_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]*$/
 const TEMPLATE_REFERENCE_PATTERN = /{{\s*([^{}]+?)\s*}}/g
 
 const MODE_TEMPLATE_VARIABLES: Record<PromptMode, readonly string[]> = {
-  continue: ['contextBefore', 'gapMarker', 'contextAfter', 'instruction', 'authorHintSection'],
+  continue: ['contextBefore', 'gapMarker', 'contextAfter', 'instruction'],
   prompt: ['wrappedContext', 'modeGuidance', 'prompt', 'conversation'],
   chat: ['currentFilePath', 'currentFileContent', 'chatInstruction', 'conversation'],
 }
 
-const SYSTEM_PROMPT_CONTINUE = `You are a skilled fiction writing assistant helping an author write a novel. Your role is to:
+const SYSTEM_PROMPT_CONTINUE = `You are a skilled writing assistant. Your role is to:
 - Write in a style consistent with the existing text
-- Maintain narrative voice, tone, and pacing
-- Continue the story naturally when asked
-- Provide creative suggestions that fit the story's direction
-- Write only prose - no meta-commentary, no explanations, no markdown formatting
+- Maintain the voice, tone, pacing, and register of the surrounding content
+- Continue the text naturally when asked
+- Provide creative suggestions that fit the direction of the document
+- Write only prose — no meta-commentary, no explanations, no markdown formatting
 - Never break character or acknowledge that you are an AI
 
 OUTPUT RULES:
-- Output ONLY the new text to insert at the <writing_gap /> marker
+- Output ONLY the new text to insert at the <plotline_writing_gap_v1 /> marker
 - NEVER repeat or include any text from before or after the gap
-- NEVER include the <writing_gap /> marker itself in your output
+- NEVER include the <plotline_writing_gap_v1 /> marker itself in your output
 
 Example:
-Context: "John walked into the room. <writing_gap /> The door slammed behind him."
+Context: "John walked into the room. <plotline_writing_gap_v1 /> The door slammed behind him."
 Good output: "He froze, sensing something was wrong. "
 Bad output: "John walked into the room. He froze... The door slammed behind him."
 
 When continuing text, seamlessly pick up from where the author left off.
-When given a prompt about what to write, produce the requested prose in a style matching the existing text.`
+When given a prompt about what to write, produce the requested content in a style matching the existing text.`
 
-const SYSTEM_PROMPT_STRUCTURED = `You are Plotline's inline AI writing assistant for editing the active AI zone.
+const SYSTEM_PROMPT_STRUCTURED = `You are Plotline's inline AI writing assistant for editing the active AI zone or selection.
 
 Behavior goals:
 - Prefer acting through tools, not explanations.
 - On the first response, perform an action immediately whenever possible.
-- Keep writing style aligned with the surrounding narrative voice and pacing.
-
-TOOLS:
-- read-only tools (project inspection): list_files, read_file
-- zone-write tools:
-  - write_zone: mutate only a range inside the active AI zone using fromOffset/toOffset + content
-  - write_zone_choices: provide multiple alternatives for the active AI zone
+- Keep writing style aligned with the surrounding content, type of document, voice and pacing.
+- Unless user requests otherwise, prefer concise replies focused on the requested action.
 
 ZONE BOUNDARY MODEL:
-- Treat the active AI zone as the exact text between <selection> and </selection> in story_context.
-- write_zone offsets are relative only to that selected text.
-- You cannot edit any text outside the selected span. This includes nearby words, sentences, and paragraph context.
-- If user asks for broader edits (sentence/paragraph/document) outside the selected span, ask them to expand selection first.
+- Treat the active AI zone as the exact text between < selection > and </selection> in story_context.
+  - write_zone offsets are relative only to that selected text.
+- You cannot edit any text outside the selected span.This includes nearby words, sentences, and paragraph context.
+- If user asks for broader edits(sentence / paragraph / document) outside the selected span, ask them to expand selection first.
 
 STRICT SAFETY:
 - You may only edit the active AI zone via write tools.
 - Never request or imply edits outside the active AI zone.
-- Prefer one decisive write action over long back-and-forth.
+- Prefer one decisive write action over long back - and - forth.
+- If user request is ambiguous, interpret it as an editing request first, a review request second, and a question third.Ask for clarification if unsure.
 
 RESPONSE STYLE:
 - If a write tool fully satisfies the request, keep text output minimal.
-- If clarification is required, ask one short follow-up question.
-- Never output markdown code fences for normal replies.`
+- If clarification is required, ask one short follow - up question.
+- Never output markdown code fences for normal replies.
+- User always can see your tool output and the editing result in the document, so you don't need to describe your actions unless asked.`
 
-const SYSTEM_PROMPT_CHAT = `You are Plotline's sidebar AI assistant for software projects.
+const SYSTEM_PROMPT_CHAT = `You are Plotline's sidebar AI assistant for document projects.
 
-You can inspect project files via tools and should use them when needed.
+You can inspect project documents via tools and should use them when needed.
 
 Core behavior:
 - Be accurate and concrete.
-- If you cite documents, mention exact file paths.
+- If you cite documents, mention exact document paths.
 - Prefer short, directly actionable answers unless the user asks for depth.
-- Never invent file contents. If needed, call tools first.
-- Do not claim access to other projects files; only this project documents are available through tools.
+- Never invent document contents. If needed, call tools first.
+- Do not claim access to other project documents; only this project's documents are available through tools.
 
 When tool output is incomplete, state what is missing and what to inspect next.
 
 CONTEXT MARKERS:
-The active file content may contain special markers indicating the user's cursor context:
+The active document content may contain special markers indicating the user's cursor context:
 - <selection>text</selection> — the text currently selected by the user
 - <caret /> — the cursor position when no text is selected`
 
@@ -108,9 +105,7 @@ const CONTINUE_USER_TEMPLATE = `Story context:
 </context_after>
 
 Task:
-{{instruction}}
-
-{{authorHintSection}}`
+{{instruction}}`
 
 const PROMPT_USER_TEMPLATE = `Story context:
 
@@ -120,13 +115,13 @@ const PROMPT_USER_TEMPLATE = `Story context:
 
 {{modeGuidance}}
 
-The author requests:
-{{prompt}}
-
 Conversation so far:
 {{conversation}}
 
-Prefer a direct tool action in your first assistant turn.`
+The author's last message:
+{{prompt}}
+
+Prefer a direct tool action in your first assistant turn except if stated otherwise by the user. If you need more information to act, ask one concise follow-up question.`
 
 const CHAT_USER_TEMPLATE = `Active file path:
 {{currentFilePath}}
@@ -134,11 +129,11 @@ const CHAT_USER_TEMPLATE = `Active file path:
 Active file content:
 {{currentFileContent}}
 
-Guidance:
-{{chatInstruction}}
-
 Conversation so far:
-{{conversation}}`
+{{conversation}}
+
+Guidance:
+{{chatInstruction}}`
 
 function sanitizeContext(context: string): string {
   return context.replaceAll(WRITING_GAP_MARKER, ESCAPED_WRITING_GAP_MARKER)
@@ -159,7 +154,20 @@ function createPromptDefinition(
   }
 }
 
-export function createDefaultPromptDefinitions(nowIso: string): PromptDefinition[] {
+export interface AiDefaultsOptions {
+  defaultTemperature?: number
+  selectionEditTemperature?: number
+  defaultMaxOutputTokens?: number
+}
+
+export function createDefaultPromptDefinitions(
+  nowIso: string,
+  aiDefaults: AiDefaultsOptions = {}
+): PromptDefinition[] {
+  const continueTemp = aiDefaults.defaultTemperature ?? 0.85
+  const selectionEditTemp = aiDefaults.selectionEditTemperature ?? 0.5
+  const defaultMaxTokens = aiDefaults.defaultMaxOutputTokens ?? 4096
+
   return [
     createPromptDefinition(
       nowIso,
@@ -174,7 +182,8 @@ export function createDefaultPromptDefinitions(nowIso: string): PromptDefinition
           type: 'plain-text-v1',
         },
         defaults: {
-          temperature: 0.85,
+          temperature: continueTemp,
+          maxOutputTokens: defaultMaxTokens,
         },
       },
       true
@@ -190,7 +199,8 @@ export function createDefaultPromptDefinitions(nowIso: string): PromptDefinition
         userTemplate: PROMPT_USER_TEMPLATE,
         protocol: DEFAULT_SELECTION_EDIT_PROTOCOL,
         defaults: {
-          temperature: 0.85,
+          temperature: selectionEditTemp,
+          maxOutputTokens: defaultMaxTokens,
         },
       },
       true
@@ -208,7 +218,7 @@ export function createDefaultPromptDefinitions(nowIso: string): PromptDefinition
           type: 'plain-text-v1',
         },
         defaults: {
-          temperature: 0.5,
+          temperature: continueTemp,
           maxOutputTokens: 2048,
         },
       },
@@ -275,8 +285,7 @@ export function validatePromptTemplatesForMode(
 
 export function buildContinueVariables(
   contextBefore: string,
-  contextAfter: string | null,
-  hint?: string
+  contextAfter: string | null
 ): Record<string, string> {
   const safeContextBefore = sanitizeContext(contextBefore)
   const safeContextAfter = sanitizeContext(contextAfter ?? '')
@@ -289,9 +298,6 @@ export function buildContinueVariables(
     gapMarker: WRITING_GAP_MARKER,
     contextAfter: safeContextAfter,
     instruction,
-    authorHintSection: hint?.trim()
-      ? `Author hint:\n${hint.trim()}`
-      : 'Author hint:\n(no additional hint provided)',
   }
 }
 
@@ -310,16 +316,16 @@ export function buildPromptVariables(
     : `${safeContextBefore}<caret />${safeContextAfter}`
   const modeGuidance = selectedText
     ? `MODE GUIDANCE:
-  - The selected text is the only writable area.
-  - Use write_zone with fromOffset/toOffset relative to <selection> content only.
-  - For full selection rewrite, replace the whole selected range.
-  - For alternatives/options, use write_zone_choices.
-  - If asked to change surrounding paragraph/context outside selection, ask user to expand selection.`
+  - The selected text (between <selection> tags) is the only writable area.
+  - write_zone offsets are relative to the <selection> content only.
+  - For a full rewrite, replace the entire selected range.
+  - For alternatives, use write_zone_choices.
+  - If asked to change surrounding context outside the selection, ask the user to expand the selection first.`
     : `MODE GUIDANCE:
-   - <selection> may represent the current AI zone text.
-   - Use write_zone for direct insertion or replacement in the selected span only.
-   - Use write_zone_choices when user asks for alternatives.
-   - Never assume write tools can change outside selected text.`
+   - The AI zone text follows the <caret /> marker in story_context.
+   - Use write_zone for direct insertion or replacement.
+   - Use write_zone_choices when the user asks for alternatives.
+   - You cannot edit text outside the AI zone.`
 
   return {
     wrappedContext,

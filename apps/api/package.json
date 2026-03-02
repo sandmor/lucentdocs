@@ -24,6 +24,7 @@
     "nanoid": "^5.1.6",
     "prosemirror-markdown": "^1.13.2",
     "prosemirror-model": "^1.25.4",
+    "prosemirror-transform": "^1.10.5",
     "sirv": "^3.0.2",
     "superjson": "^2.2.6",
     "vite": "^7.3.1",

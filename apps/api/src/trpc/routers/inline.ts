@@ -84,6 +84,7 @@ export const inlineRouter = router({
         prompt: z.string(),
         selectedText: z.string().optional(),
         maxOutputTokens: z.number().int().min(1).optional(),
+        requesterClientName: idSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {

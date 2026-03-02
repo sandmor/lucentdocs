@@ -7,7 +7,6 @@ interface ContinueStreamInput {
   mode: 'continue'
   contextBefore: string
   contextAfter?: string
-  hint?: string
   maxOutputTokens?: number
 }
 
@@ -16,7 +15,6 @@ const continueStreamInputSchema = z
     mode: z.literal('continue'),
     contextBefore: z.string(),
     contextAfter: z.string().optional(),
-    hint: z.string().trim().optional(),
     maxOutputTokens: z.number().int().min(1).optional(),
   })
   .superRefine((value, ctx) => {
@@ -60,7 +58,11 @@ async function handleGenericStream(
       writeContent: (content: string) => void
     ) => void
     generateFallback: (signal: AbortSignal) => Promise<string | null>
-    onFallbackDone: (fallbackText: string, writeHeaders: () => void, writeContent: (content: string) => void) => boolean
+    onFallbackDone: (
+      fallbackText: string,
+      writeHeaders: () => void,
+      writeContent: (content: string) => void
+    ) => boolean
     onFlush?: () => string | null
   }
 ) {
@@ -150,7 +152,7 @@ async function handleContinueStream(
   input: ContinueStreamInput,
   contextAfter: string | null
 ): Promise<void> {
-  const rendered = resolveContinuePrompt(input.contextBefore, contextAfter, input.hint)
+  const rendered = resolveContinuePrompt(input.contextBefore, contextAfter)
   assertPromptProtocolMode(rendered.definition, 'continue')
 
   const cleaner = createStreamCleaner(input.contextBefore, contextAfter)

@@ -14,7 +14,14 @@ import { router, publicProcedure } from '../index.js'
 
 type EditableConfigKey = (typeof EDITABLE_CONFIG_KEYS)[number]
 
-const AI_RUNTIME_KEYS = ['aiApiKey', 'aiBaseUrl', 'aiModel'] as const
+const AI_RUNTIME_KEYS = [
+  'aiApiKey',
+  'aiBaseUrl',
+  'aiModel',
+  'aiDefaultTemperature',
+  'aiSelectionEditTemperature',
+  'aiDefaultMaxOutputTokens',
+] as const
 const YJS_RUNTIME_KEYS = ['yjsPersistenceFlushMs', 'yjsVersionIntervalMs'] as const
 
 interface ConfigFieldPayload {
@@ -72,10 +79,12 @@ export const configRouter = router({
       aiApiKey: input.aiApiKey.trim(),
       aiBaseUrl: input.aiBaseUrl.trim(),
       aiModel: input.aiModel.trim(),
+      aiDefaultTemperature: input.aiDefaultTemperature,
+      aiSelectionEditTemperature: input.aiSelectionEditTemperature,
+      aiDefaultMaxOutputTokens: input.aiDefaultMaxOutputTokens,
       yjsPersistenceFlushMs: input.yjsPersistenceFlushMs,
       yjsVersionIntervalMs: input.yjsVersionIntervalMs,
       maxContextChars: input.maxContextChars,
-      maxHintChars: input.maxHintChars,
       maxPromptChars: input.maxPromptChars,
       maxToolEntries: input.maxToolEntries,
       maxToolReadChars: input.maxToolReadChars,

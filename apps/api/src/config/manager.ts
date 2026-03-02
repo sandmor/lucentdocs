@@ -38,6 +38,9 @@ export interface ResolvedAiConfig {
   baseURL: string
   apiKey: string
   model: string
+  defaultTemperature: number
+  selectionEditTemperature: number
+  defaultMaxOutputTokens: number
 }
 
 export interface AppConfig {
@@ -101,6 +104,14 @@ function readEnvInt(env: NodeJS.ProcessEnv, key: string): number | undefined {
   return Number.isInteger(parsed) ? parsed : undefined
 }
 
+function readEnvFloat(env: NodeJS.ProcessEnv, key: string): number | undefined {
+  if (!hasEnvValue(env, key)) return undefined
+  const value = env[key]
+  if (typeof value !== 'string') return undefined
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 function normalizeDataDir(value: string | undefined): string {
   const trimmed = value?.trim()
   return trimmed ? trimmed : DEFAULT_DATA_DIR
@@ -151,6 +162,16 @@ function normalizeConfigValue(
     return trimmed
   }
 
+  if (field.kind === 'float') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return Number(field.defaultValue)
+    }
+    if (field.min !== undefined && value < field.min) return Number(field.defaultValue)
+    if (field.max !== undefined && value > field.max) return Number(field.defaultValue)
+    return value
+  }
+
+  // int
   if (typeof value !== 'number' || !Number.isInteger(value)) {
     return Number(field.defaultValue)
   }
@@ -179,6 +200,14 @@ function parseConfigValue(
     return trimmed
   }
 
+  if (field.kind === 'float') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+    if (field.min !== undefined && value < field.min) return undefined
+    if (field.max !== undefined && value > field.max) return undefined
+    return value
+  }
+
+  // int
   if (typeof value !== 'number' || !Number.isInteger(value)) return undefined
   if (field.min !== undefined && value < field.min) return undefined
   if (field.max !== undefined && value > field.max) return undefined
@@ -227,6 +256,14 @@ function readConfigFromEnv(env: NodeJS.ProcessEnv): Partial<PersistedAppConfig> 
   for (const field of CONFIG_FIELD_DEFINITIONS) {
     if (field.kind === 'string') {
       const raw = readEnvString(env, field.envVar, { allowEmpty: field.allowEmptyString })
+      if (raw === undefined) continue
+      const value = parseConfigValue(field.key, raw)
+      if (value !== undefined) envRecord[field.key] = value
+      continue
+    }
+
+    if (field.kind === 'float') {
+      const raw = readEnvFloat(env, field.envVar)
       if (raw === undefined) continue
       const value = parseConfigValue(field.key, raw)
       if (value !== undefined) envRecord[field.key] = value
@@ -321,12 +358,19 @@ function resolveAiConfig(config: PersistedAppConfig): ResolvedAiConfig {
   const defaultModel = config.aiModel || DEFAULT_AI_MODEL
   const provider = guessProviderFromDomain(config.aiBaseUrl, defaultModel)
 
+  const shared = {
+    defaultTemperature: config.aiDefaultTemperature,
+    selectionEditTemperature: config.aiSelectionEditTemperature,
+    defaultMaxOutputTokens: config.aiDefaultMaxOutputTokens,
+  }
+
   if (provider === 'anthropic') {
     return {
       provider,
       apiKey: config.aiApiKey,
       baseURL: config.aiBaseUrl || DEFAULT_ANTHROPIC_BASE_URL,
       model: config.aiModel || DEFAULT_ANTHROPIC_MODEL,
+      ...shared,
     }
   }
 
@@ -335,6 +379,7 @@ function resolveAiConfig(config: PersistedAppConfig): ResolvedAiConfig {
     apiKey: config.aiApiKey,
     baseURL: config.aiBaseUrl || DEFAULT_OPENAI_BASE_URL,
     model: defaultModel,
+    ...shared,
   }
 }
 
@@ -352,7 +397,6 @@ function freezeResolvedConfig(config: AppConfig): AppConfig {
 function buildLimitsConfig(rawConfig: PersistedAppConfig): LimitsConfig {
   return {
     contextChars: rawConfig.maxContextChars,
-    hintChars: rawConfig.maxHintChars,
     promptChars: rawConfig.maxPromptChars,
     toolEntries: rawConfig.maxToolEntries,
     toolReadChars: rawConfig.maxToolReadChars,

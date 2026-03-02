@@ -1,9 +1,10 @@
-import { schema } from '@plotline/shared'
 import type { MarkType } from 'prosemirror-model'
 import type { EditorView } from 'prosemirror-view'
 import { aiWriterPluginKey } from '../ai/writer-plugin'
 import type { FormatMarkName } from './types'
 import type { SelectionRange } from '../selection/types'
+import { parseMarkdownishToSlice } from '../prosemirror/markdownish'
+import { replaceZoneContent } from '../ai/writer/zone-marks'
 
 export const COLLISION_PADDING = 8
 
@@ -36,28 +37,32 @@ export function selectChoice(
   if (safeFrom >= safeTo) return
 
   const tr = view.state.tr
-  const markType = view.state.schema.marks.ai_zone ?? null
   const pluginState = aiWriterPluginKey.getState(view.state)
   const zone =
-    pluginState?.zones.find((entry) => safeFrom < entry.to && safeTo > entry.from) ??
-    pluginState?.zones.find((entry) => entry.from === safeFrom && entry.to === safeTo) ??
+    pluginState?.zones.find((entry) => safeFrom < entry.nodeTo && safeTo > entry.nodeFrom) ??
+    pluginState?.zones.find((entry) => entry.nodeFrom === safeFrom && entry.nodeTo === safeTo) ??
     null
 
-  tr.delete(safeFrom, safeTo)
-  tr.insert(safeFrom, schema.text(choice))
-  if (markType && zone) {
-    tr.removeMark(safeFrom, safeFrom + choice.length, markType)
-    tr.addMark(
-      safeFrom,
-      safeFrom + choice.length,
-      markType.create({
-        id: zone.id,
-        streaming: false,
-        sessionId: zone.sessionId ?? null,
-        deletedSlice: zone.deletedSlice,
-      })
-    )
+  if (!zone) return
+
+  const $from = view.state.doc.resolve(zone.nodeFrom)
+  const $to = view.state.doc.resolve(zone.nodeTo)
+  const replacement = parseMarkdownishToSlice(choice, {
+    openStart: $from.parent.inlineContent,
+    openEnd: $to.parent.inlineContent,
+  })
+
+  if (
+    replaceZoneContent(view, zone.id, replacement, {
+      streaming: false,
+      addToHistory: true,
+    })
+  ) {
+    return
   }
+
+  tr.delete(safeFrom, safeTo)
+  tr.insertText(choice, safeFrom)
   tr.setMeta('addToHistory', true)
   view.dispatch(tr)
 }

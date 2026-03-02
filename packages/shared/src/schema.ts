@@ -3,15 +3,19 @@ import { schema as basicSchema } from 'prosemirror-schema-basic'
 import { addListNodes } from 'prosemirror-schema-list'
 
 const listNodes = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block')
-const extendedMarks = basicSchema.spec.marks.append({
+const extendedNodes = listNodes.append({
   ai_zone: {
+    inline: true,
+    group: 'inline',
+    content: 'inline*',
+    marks: '_',
+    selectable: false,
     attrs: {
       id: {},
       streaming: { default: false },
       sessionId: { default: null },
-      deletedSlice: { default: null },
+      originalSlice: { default: null },
     },
-    inclusive: false,
     parseDOM: [
       {
         tag: 'span[data-ai-zone-id]',
@@ -21,17 +25,17 @@ const extendedMarks = basicSchema.spec.marks.append({
             id: el.getAttribute('data-ai-zone-id'),
             streaming: el.getAttribute('data-ai-zone-streaming') === 'true',
             sessionId: el.getAttribute('data-ai-zone-session-id'),
-            deletedSlice: el.getAttribute('data-ai-zone-deleted-slice'),
+            originalSlice: el.getAttribute('data-ai-zone-original-slice'),
           }
         },
       },
     ],
-    toDOM(mark) {
-      const attrs = mark.attrs as {
+    toDOM(node) {
+      const attrs = node.attrs as {
         id: string
         streaming?: boolean
         sessionId?: string | null
-        deletedSlice?: string | null
+        originalSlice?: string | null
       }
 
       return [
@@ -41,7 +45,7 @@ const extendedMarks = basicSchema.spec.marks.append({
           'data-ai-zone-id': attrs.id,
           'data-ai-zone-streaming': String(attrs.streaming === true),
           'data-ai-zone-session-id': attrs.sessionId ?? '',
-          'data-ai-zone-deleted-slice': attrs.deletedSlice ?? '',
+          'data-ai-zone-original-slice': attrs.originalSlice ?? '',
         },
         0,
       ]
@@ -50,6 +54,6 @@ const extendedMarks = basicSchema.spec.marks.append({
 })
 
 export const schema: Schema = new Schema({
-  nodes: listNodes,
-  marks: extendedMarks,
+  nodes: extendedNodes,
+  marks: basicSchema.spec.marks,
 })

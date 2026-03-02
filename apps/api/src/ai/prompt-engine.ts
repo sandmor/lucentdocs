@@ -27,11 +27,10 @@ function renderPrompt(
 
 export function resolveContinuePrompt(
   contextBefore: string,
-  contextAfter: string | null,
-  hint?: string
+  contextAfter: string | null
 ): RenderedPrompt {
   const definition = promptManager.resolvePromptForMode('continue')
-  const variables = buildContinueVariables(contextBefore, contextAfter, hint)
+  const variables = buildContinueVariables(contextBefore, contextAfter)
   return renderPrompt(definition, variables)
 }
 

@@ -11,7 +11,7 @@ describe('prompt template validation', () => {
       validatePromptTemplatesForMode(
         'continue',
         'System {{contextBefore}} {{gapMarker}}',
-        'User {{instruction}} {{authorHintSection}} {{contextAfter}}'
+        'User {{instruction}} {{contextAfter}}'
       )
     ).not.toThrow()
   })

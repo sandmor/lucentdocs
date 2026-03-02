@@ -8,10 +8,12 @@ export interface PersistedAppConfig {
   aiApiKey: string
   aiBaseUrl: string
   aiModel: string
+  aiDefaultTemperature: number
+  aiSelectionEditTemperature: number
+  aiDefaultMaxOutputTokens: number
   yjsPersistenceFlushMs: number
   yjsVersionIntervalMs: number
   maxContextChars: number
-  maxHintChars: number
   maxPromptChars: number
   maxToolEntries: number
   maxToolReadChars: number
@@ -27,7 +29,7 @@ export interface PersistedAppConfig {
 
 export type PersistedConfigKey = keyof PersistedAppConfig
 export type PersistedConfigSection = 'app' | 'server' | 'ai' | 'yjs' | 'limits'
-export type ConfigValueKind = 'string' | 'int'
+export type ConfigValueKind = 'string' | 'int' | 'float'
 
 export interface ConfigFieldDefinition {
   key: PersistedConfigKey
@@ -99,6 +101,38 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     allowEmptyString: true,
   },
   {
+    key: 'aiDefaultTemperature',
+    section: 'ai',
+    tomlKey: 'default_temperature',
+    envVar: 'AI_DEFAULT_TEMPERATURE',
+    kind: 'float',
+    defaultValue: 1.0,
+    allowEmptyString: false,
+    min: 0,
+    max: 2,
+  },
+  {
+    key: 'aiSelectionEditTemperature',
+    section: 'ai',
+    tomlKey: 'selection_edit_temperature',
+    envVar: 'AI_SELECTION_EDIT_TEMPERATURE',
+    kind: 'float',
+    defaultValue: 1.0,
+    allowEmptyString: false,
+    min: 0,
+    max: 2,
+  },
+  {
+    key: 'aiDefaultMaxOutputTokens',
+    section: 'ai',
+    tomlKey: 'default_max_output_tokens',
+    envVar: 'AI_DEFAULT_MAX_OUTPUT_TOKENS',
+    kind: 'int',
+    defaultValue: 4096,
+    allowEmptyString: false,
+    min: 1,
+  },
+  {
     key: 'yjsPersistenceFlushMs',
     section: 'yjs',
     tomlKey: 'persistence_flush_interval_ms',
@@ -125,16 +159,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     envVar: 'LIMITS_CONTEXT_CHARS',
     kind: 'int',
     defaultValue: 1_000_000,
-    allowEmptyString: false,
-    min: 1,
-  },
-  {
-    key: 'maxHintChars',
-    section: 'limits',
-    tomlKey: 'hint_chars',
-    envVar: 'LIMITS_HINT_CHARS',
-    kind: 'int',
-    defaultValue: 10_000,
     allowEmptyString: false,
     min: 1,
   },
@@ -272,10 +296,12 @@ export const EDITABLE_CONFIG_KEYS = [
   'aiApiKey',
   'aiBaseUrl',
   'aiModel',
+  'aiDefaultTemperature',
+  'aiSelectionEditTemperature',
+  'aiDefaultMaxOutputTokens',
   'yjsPersistenceFlushMs',
   'yjsVersionIntervalMs',
   'maxContextChars',
-  'maxHintChars',
   'maxPromptChars',
   'maxToolEntries',
   'maxToolReadChars',
@@ -291,7 +317,6 @@ export const EDITABLE_CONFIG_KEYS = [
 
 export const LIMITS_CONFIG_KEYS = [
   'maxContextChars',
-  'maxHintChars',
   'maxPromptChars',
   'maxToolEntries',
   'maxToolReadChars',
@@ -307,7 +332,6 @@ export const LIMITS_CONFIG_KEYS = [
 
 export interface LimitsConfig {
   contextChars: number
-  hintChars: number
   promptChars: number
   toolEntries: number
   toolReadChars: number
@@ -324,7 +348,6 @@ export interface LimitsConfig {
 const yjsPersistenceFlushField = CONFIG_FIELD_BY_KEY.yjsPersistenceFlushMs
 const yjsVersionIntervalField = CONFIG_FIELD_BY_KEY.yjsVersionIntervalMs
 const limitsContextCharsField = CONFIG_FIELD_BY_KEY.maxContextChars
-const limitsHintCharsField = CONFIG_FIELD_BY_KEY.maxHintChars
 const limitsPromptCharsField = CONFIG_FIELD_BY_KEY.maxPromptChars
 const limitsToolEntriesField = CONFIG_FIELD_BY_KEY.maxToolEntries
 const limitsToolReadCharsField = CONFIG_FIELD_BY_KEY.maxToolReadChars
@@ -337,26 +360,40 @@ const limitsPromptUserCharsField = CONFIG_FIELD_BY_KEY.maxPromptUserChars
 const limitsDocImportCharsField = CONFIG_FIELD_BY_KEY.maxDocImportChars
 const limitsDocExportCharsField = CONFIG_FIELD_BY_KEY.maxDocExportChars
 
+const aiDefaultTempField = CONFIG_FIELD_BY_KEY.aiDefaultTemperature
+const aiSelEditTempField = CONFIG_FIELD_BY_KEY.aiSelectionEditTemperature
+const aiDefaultMaxTokensField = CONFIG_FIELD_BY_KEY.aiDefaultMaxOutputTokens
+
 export const editableConfigSchema = z.object({
   aiApiKey: z.string(),
-  aiBaseUrl: z
-    .string()
-    .refine(
-      (value) => {
-        const trimmed = value.trim()
-        if (!trimmed) return true
-        try {
-          const parsed = new URL(trimmed)
-          return parsed.protocol === 'http:' || parsed.protocol === 'https:'
-        } catch {
-          return false
-        }
-      },
-      {
-        message: 'Must be a valid http(s) URL or empty to use provider defaults.',
+  aiBaseUrl: z.string().refine(
+    (value) => {
+      const trimmed = value.trim()
+      if (!trimmed) return true
+      try {
+        const parsed = new URL(trimmed)
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      } catch {
+        return false
       }
-    ),
+    },
+    {
+      message: 'Must be a valid http(s) URL or empty to use provider defaults.',
+    }
+  ),
   aiModel: z.string(),
+  aiDefaultTemperature: z
+    .number()
+    .min(aiDefaultTempField.min ?? 0)
+    .max(aiDefaultTempField.max ?? 2),
+  aiSelectionEditTemperature: z
+    .number()
+    .min(aiSelEditTempField.min ?? 0)
+    .max(aiSelEditTempField.max ?? 2),
+  aiDefaultMaxOutputTokens: z
+    .number()
+    .int()
+    .min(aiDefaultMaxTokensField.min ?? 1),
   yjsPersistenceFlushMs: z
     .number()
     .int()
@@ -369,10 +406,6 @@ export const editableConfigSchema = z.object({
     .number()
     .int()
     .min(limitsContextCharsField.min ?? 1),
-  maxHintChars: z
-    .number()
-    .int()
-    .min(limitsHintCharsField.min ?? 1),
   maxPromptChars: z
     .number()
     .int()

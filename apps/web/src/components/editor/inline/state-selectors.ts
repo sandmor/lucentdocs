@@ -12,8 +12,8 @@ export function resolveActiveLoadingAnchor(
   if (activeZone) {
     return {
       zoneId: activeZone.id,
-      from: activeZone.from,
-      to: activeZone.to,
+      from: activeZone.nodeFrom,
+      to: activeZone.nodeTo,
       session: activeZone.sessionId ? (sessionsById[activeZone.sessionId] ?? null) : null,
     }
   }
@@ -41,8 +41,8 @@ export function resolveReviewZones(
     .filter((zone) => zone.id !== loadingZoneId)
     .map((zone) => ({
       id: zone.id,
-      from: zone.from,
-      to: zone.to,
+      from: zone.nodeFrom,
+      to: zone.nodeTo,
       streaming: zone.streaming,
       session: zone.sessionId ? (sessionsById[zone.sessionId] ?? null) : null,
     }))

@@ -13,12 +13,22 @@ import {
 } from '@plotline/shared'
 import { configManager } from '../config/manager.js'
 import {
+  type AiDefaultsOptions,
   createDefaultPromptBindings,
   createDefaultPromptDefinitions,
   modeForSlot,
   slotForMode,
   validatePromptTemplatesForMode,
 } from './prompts.js'
+
+function getAiDefaults(): AiDefaultsOptions {
+  const ai = configManager.getConfig().ai
+  return {
+    defaultTemperature: ai.defaultTemperature,
+    selectionEditTemperature: ai.selectionEditTemperature,
+    defaultMaxOutputTokens: ai.defaultMaxOutputTokens,
+  }
+}
 
 const PROMPTS_FILE_NAME = 'prompts.json'
 const STORE_VERSION = 1
@@ -88,7 +98,7 @@ function ensureDefaultPromptsAndBindings(store: PromptStore): PromptStore {
   const defaults = createDefaultPromptBindings()
   const prompts = [...store.prompts]
 
-  for (const systemPrompt of createDefaultPromptDefinitions(new Date().toISOString())) {
+  for (const systemPrompt of createDefaultPromptDefinitions(new Date().toISOString(), getAiDefaults())) {
     if (!prompts.some((prompt) => prompt.id === systemPrompt.id)) {
       prompts.push(systemPrompt)
     }
@@ -290,7 +300,7 @@ class PromptManager {
     const nowIso = new Date().toISOString()
     this.store = normalizeStore({
       version: STORE_VERSION,
-      prompts: createDefaultPromptDefinitions(nowIso),
+      prompts: createDefaultPromptDefinitions(nowIso, getAiDefaults()),
       bindings: createDefaultPromptBindings(),
     })
     this.persist()

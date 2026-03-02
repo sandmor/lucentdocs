@@ -1,25 +1,22 @@
-import { readUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai'
 import { TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { toast } from 'sonner'
-import type { InlineZoneWriteAction } from '@plotline/shared'
 import { aiWriterPluginKey, getAIZones } from './writer-plugin'
-import { extractToolPartsFromParts, getMessageParts } from './message-parts'
 import type { InlineZoneSession } from '@plotline/shared'
 import { StuckDetector } from './stuck-detector'
-import { parseMarkdownishToSlice } from '../prosemirror/markdownish'
 import { getDocumentContext, getPromptContextForRange } from './writer/context'
 import { createInlineSessionId, createZoneId } from './writer/ids'
 import { createEmptySession } from './writer/session-state'
 import { insertChunk, readErrorMessage } from './writer/stream'
-import { parseInlineToolPart, parseInlineZoneActionFromToolPart } from './writer/tool-parts'
 import {
-  createZoneMarkAttrs,
-  deserializeDeletedSlice,
-  getAIZoneMarkType,
+  createEmptyZoneSlice,
+  createZoneNodeAttrs,
+  deserializeOriginalSlice,
   getTargetZone,
   selectionOverlapsAIZone,
-  updateZoneMark,
+  unwrapZoneNodes,
+  updateZoneNode,
+  wrapSliceWithZoneNodes,
 } from './writer/zone-marks'
 import type {
   AIWriterController,
@@ -43,8 +40,9 @@ export function createAIWriterController(
       projectId: undefined,
       documentId: undefined,
     }))
+  const getRequesterClientName = options.getRequesterClientName ?? (() => null)
   const getSessionById = options.getSessionById ?? (() => null)
-  const setSessionById = options.setSessionById ?? (() => { })
+  const setSessionById = options.setSessionById ?? (() => {})
   let currentView: EditorView | null = null
   const trpcClient = getTrpcProxyClient()
 
@@ -56,7 +54,7 @@ export function createAIWriterController(
         projectId: toolScope.projectId,
         documentId: toolScope.documentId,
       })
-      .catch(() => { })
+      .catch(() => {})
   }
 
   const updateZoneSession = (
@@ -88,7 +86,7 @@ export function createAIWriterController(
       const pluginState = aiWriterPluginKey.getState(view.state)
       const updated =
         pluginState?.zoneId !== null && pluginState?.zoneId !== undefined
-          ? updateZoneMark(view, pluginState.zoneId, { streaming: false }, 'streaming_stop')
+          ? updateZoneNode(view, pluginState.zoneId, { streaming: false }, 'streaming_stop')
           : false
 
       if (!updated) {
@@ -163,7 +161,6 @@ export function createAIWriterController(
   async function streamAIPrompt(
     view: EditorView,
     payload: PromptStreamPayload,
-    zoneId: string,
     sessionId: string
   ): Promise<void> {
     abortController?.abort()
@@ -175,8 +172,6 @@ export function createAIWriterController(
     setStreamingState(true)
 
     let observeUnsubscribe: { unsubscribe: () => void } | null = null
-    let streamChunkController: ReadableStreamDefaultController<UIMessageChunk> | null = null
-    let streamReadTask: Promise<void> | null = null
     let activeGenerationId: string | null = null
 
     try {
@@ -186,63 +181,13 @@ export function createAIWriterController(
         return
       }
 
-      const appliedZoneActionCalls = new Set<string>()
       let resolveGenerationDone: (() => void) | null = null
       let rejectGenerationDone: ((error: Error) => void) | null = null
-
-      const chunkStream = new ReadableStream<UIMessageChunk>({
-        start(controller) {
-          streamChunkController = controller
-        },
-      })
 
       const generationDone = new Promise<void>((resolve, reject) => {
         resolveGenerationDone = resolve
         rejectGenerationDone = reject
       })
-
-      streamReadTask = (async () => {
-        let latestAssistant: UIMessage | null = null
-        for await (const assistantMessage of readUIMessageStream<UIMessage>({
-          message: latestAssistant ?? undefined,
-          stream: chunkStream,
-          terminateOnError: false,
-          onError: (error) => {
-            console.warn('Failed to read inline AI UI message stream', { error })
-          },
-        })) {
-          latestAssistant = assistantMessage
-          if (abortController !== requestAbortController || requestAbortController.signal.aborted) {
-            break
-          }
-          stuckDetector.onChunk()
-
-          const parts = getMessageParts(assistantMessage)
-          const toolParts = extractToolPartsFromParts(parts)
-          for (const toolPart of toolParts) {
-            const parsedTool = parseInlineToolPart(toolPart)
-            if (!parsedTool) continue
-
-            const { toolName, toolCallId, rawState } = parsedTool
-            const isZoneWriteTool = toolName === 'write_zone' || toolName === 'write_zone_choices'
-
-            if (isZoneWriteTool && rawState === 'output-available') {
-              const action = parseInlineZoneActionFromToolPart(toolPart)
-              if (action) {
-                const actionKey = `${toolName}:${toolCallId}`
-                if (!appliedZoneActionCalls.has(actionKey)) {
-                  appliedZoneActionCalls.add(actionKey)
-                  applyInlineZoneAction(view, zoneId, sessionId, action)
-                }
-              }
-              continue
-            }
-          }
-
-          const pluginState = aiWriterPluginKey.getState(view.state)
-          if (!pluginState?.active) break
-        }
-      })()
 
       observeUnsubscribe = trpcClient.inline.observeSession.subscribe(
         {
@@ -253,26 +198,15 @@ export function createAIWriterController(
         {
           onData: (event) => {
             if (requestAbortController.signal.aborted) return
-            if (event.type === 'stream-chunk') {
-              if (!activeGenerationId) {
-                activeGenerationId = event.generationId
-              } else if (activeGenerationId !== event.generationId) {
-                return
-              }
-
-              try {
-                streamChunkController?.enqueue(event.chunk)
-              } catch (error) {
-                console.warn('Failed to enqueue inline stream chunk', { error })
-              }
-              return
-            }
 
             if (!activeGenerationId && event.generating && event.generationId) {
               activeGenerationId = event.generationId
             }
 
             setSessionById(sessionId, event.session ?? null)
+            if (event.generating) {
+              stuckDetector.onChunk()
+            }
 
             if (activeGenerationId && !event.generating) {
               resolveGenerationDone?.()
@@ -296,7 +230,7 @@ export function createAIWriterController(
               documentId: toolScope.documentId!,
               sessionId,
             })
-            .catch(() => { })
+            .catch(() => {})
         },
         { once: true }
       )
@@ -309,6 +243,7 @@ export function createAIWriterController(
         contextAfter: payload.contextAfter,
         prompt: payload.prompt,
         selectedText: payload.selectedText,
+        requesterClientName: getRequesterClientName() ?? undefined,
       })
       activeGenerationId = started.generationId
 
@@ -321,18 +256,6 @@ export function createAIWriterController(
       handleAIError(view, message)
     } finally {
       observeUnsubscribe?.unsubscribe()
-      try {
-        ; (streamChunkController as { close: () => void } | null)?.close()
-      } catch {
-        // ignore close races
-      }
-      if (streamReadTask) {
-        try {
-          await streamReadTask
-        } catch (error) {
-          console.warn('Failed to finalize inline stream reader', error)
-        }
-      }
 
       if (requestId === currentRequestId && abortController === requestAbortController) {
         abortController = null
@@ -341,68 +264,13 @@ export function createAIWriterController(
     }
   }
 
-  function applyInlineZoneAction(
-    view: EditorView,
-    zoneId: string,
-    sessionId: string,
-    action: InlineZoneWriteAction
-  ) {
-    const zone = getAIZones(view).find((entry) => entry.id === zoneId)
-    if (!zone) return
-
-    if (action.type === 'set_choices') {
-      updateZoneSession(sessionId, (current) => ({
-        ...current,
-        choices: action.choices,
-      }))
-      updateZoneMark(view, zoneId, {
-        streaming: true,
-      })
-      return
-    }
-
-    const zoneLength = zone.to - zone.from
-    const fromOffset = Math.max(0, Math.min(action.fromOffset, zoneLength))
-    const toOffset = Math.max(fromOffset, Math.min(action.toOffset, zoneLength))
-    const replaceFrom = zone.from + fromOffset
-    const replaceTo = zone.from + toOffset
-
-    const fromResolved = view.state.doc.resolve(replaceFrom)
-    const toResolved = view.state.doc.resolve(replaceTo)
-    const replacement = parseMarkdownishToSlice(action.content, {
-      openStart: fromResolved.parent.inlineContent,
-      openEnd: toResolved.parent.inlineContent,
-    })
-
-    const tr = view.state.tr
-    tr.replaceRange(replaceFrom, replaceTo, replacement)
-
-    const markType = getAIZoneMarkType(view)
-    if (markType) {
-      const nextZoneFrom = tr.mapping.map(zone.from, -1)
-      const nextZoneTo = tr.mapping.map(zone.to, 1)
-      if (nextZoneTo > nextZoneFrom) {
-        tr.removeMark(nextZoneFrom, nextZoneTo, markType)
-        tr.addMark(
-          nextZoneFrom,
-          nextZoneTo,
-          markType.create(createZoneMarkAttrs(zone.id, true, zone.sessionId, zone.deletedSlice))
-        )
-      }
-    }
-
-    tr.setMeta(aiWriterPluginKey, { type: 'chunk' })
-    tr.setMeta('addToHistory', false)
-    view.dispatch(tr)
-  }
-
   function handleAIError(view: EditorView, message: string): void {
     toast.error('AI generation failed', { description: message })
 
     const pluginState = aiWriterPluginKey.getState(view.state)
     const isEmpty = !pluginState?.active || pluginState.from === pluginState.to
 
-    if (isEmpty && pluginState?.active && pluginState.deletedSlice) {
+    if (isEmpty && pluginState?.active && pluginState.originalSlice) {
       rejectAI(view, pluginState.zoneId ?? undefined)
     } else if (isEmpty) {
       stopAI(view)
@@ -427,7 +295,25 @@ export function createAIWriterController(
       return
     }
 
-    const pos = at_doc_end ? view.state.doc.content.size : view.state.selection.to
+    const requestedPos = at_doc_end ? view.state.doc.content.size : view.state.selection.to
+    const resolvedPos = Math.max(0, Math.min(requestedPos, view.state.doc.content.size))
+    let pos = resolvedPos
+    if (!view.state.doc.resolve(pos).parent.inlineContent) {
+      let lastInlinePos: number | null = null
+      view.state.doc.descendants((node, nodePos) => {
+        if (node.isTextblock && node.inlineContent) {
+          lastInlinePos = nodePos + node.nodeSize - 1
+        }
+        return true
+      })
+
+      if (lastInlinePos === null) {
+        toast.error('AI continuation is only available inside text content')
+        return
+      }
+
+      pos = lastInlinePos
+    }
     const selection = view.state.selection
     if (!(selection.empty && selection.from === pos)) {
       const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, pos))
@@ -436,10 +322,23 @@ export function createAIWriterController(
     }
 
     const zoneId = createZoneId()
+    const zoneAttrs = createZoneNodeAttrs(zoneId, true, null, null)
+    const zoneSlice = createEmptyZoneSlice(view, zoneAttrs)
+    if (!zoneSlice) {
+      toast.error('AI zones are not available in this editor schema')
+      return
+    }
 
     const tr = view.state.tr
-    tr.setMeta(aiWriterPluginKey, { type: 'start', pos, zoneId })
-    tr.setMeta('addToHistory', false)
+    try {
+      tr.replaceRange(pos, pos, zoneSlice)
+    } catch {
+      toast.error('Unable to insert AI zone at the current cursor position')
+      return
+    }
+    const zoneStart = tr.mapping.map(pos, -1)
+    tr.setMeta(aiWriterPluginKey, { type: 'start', pos: zoneStart, zoneId })
+    tr.setMeta('addToHistory', true)
     view.dispatch(tr)
     streamedText = ''
 
@@ -469,14 +368,17 @@ export function createAIWriterController(
     const clampedTo = Math.max(0, Math.min(selectionTo, docSize))
     const from = Math.min(clampedFrom, clampedTo)
     const to = Math.max(clampedFrom, clampedTo)
+    if (from >= to) {
+      return false
+    }
 
     if (selectionOverlapsAIZone(view, from, to)) {
       toast.error('Selection overlaps an active AI zone. Select different text and try again.')
       return false
     }
 
-    const selectedText = from < to ? view.state.doc.textBetween(from, to, '\n\n', '\n') : ''
-    const deletedSlice = from < to ? view.state.doc.slice(from, to) : null
+    const selectedText = view.state.doc.textBetween(from, to, '\n\n', '\n')
+    const originalSlice = view.state.doc.slice(from, to)
     const zoneId = createZoneId()
     const sessionId = createInlineSessionId()
     const { contextBefore, contextAfter } = getPromptContextForRange(
@@ -486,29 +388,35 @@ export function createAIWriterController(
       getIncludeAfterContext()
     )
 
+    const zoneSlice =
+      originalSlice &&
+      wrapSliceWithZoneNodes(
+        view,
+        originalSlice,
+        createZoneNodeAttrs(zoneId, true, sessionId, JSON.stringify(originalSlice.toJSON()))
+      )
+    if (!zoneSlice) {
+      toast.error('Unable to create AI zone for the current selection')
+      return false
+    }
     const tr = view.state.tr
+    try {
+      tr.replaceRange(from, to, zoneSlice)
+    } catch {
+      toast.error('Unable to create AI zone for the current selection')
+      return false
+    }
+    const zoneStart = tr.mapping.map(from, -1)
     tr.setMeta(aiWriterPluginKey, {
       type: 'start',
-      pos: from,
+      pos: zoneStart,
       zoneId,
       sessionId,
-      deletedSlice,
+      originalSlice,
+      originalFrom: from,
       selectionFrom: from,
       selectionTo: to,
     })
-    if (from < to) {
-      const zoneAttrs = createZoneMarkAttrs(
-        zoneId,
-        true,
-        sessionId,
-        deletedSlice ? JSON.stringify(deletedSlice.toJSON()) : null
-      )
-      const markType = getAIZoneMarkType(view)
-      if (markType) {
-        tr.removeMark(from, to, markType)
-        tr.addMark(from, to, markType.create(zoneAttrs))
-      }
-    }
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
     streamedText = ''
@@ -524,7 +432,6 @@ export function createAIWriterController(
         selectionFrom: from,
         selectionTo: to,
       },
-      zoneId,
       sessionId
     )
 
@@ -548,26 +455,27 @@ export function createAIWriterController(
     const tr = view.state.tr
     tr.setMeta(aiWriterPluginKey, {
       type: 'start',
-      pos: zone.from,
+      pos: zone.nodeFrom,
       zoneId,
       sessionId,
-      deletedSlice: deserializeDeletedSlice(view, zone.deletedSlice),
-      selectionFrom: zone.from,
-      selectionTo: zone.to,
+      originalSlice: deserializeOriginalSlice(view, zone.originalSlice),
+      originalFrom: zone.nodeFrom,
+      selectionFrom: zone.nodeFrom,
+      selectionTo: zone.nodeTo,
     })
     tr.setMeta('addToHistory', false)
     view.dispatch(tr)
 
-    updateZoneMark(view, zoneId, {
+    updateZoneNode(view, zoneId, {
       streaming: true,
       sessionId,
     })
 
-    const selectedText = view.state.doc.textBetween(zone.from, zone.to, '\n\n', '\n')
+    const selectedText = view.state.doc.textBetween(zone.nodeFrom, zone.nodeTo, '\n\n', '\n')
     const fallbackContext = getPromptContextForRange(
       view,
-      zone.from,
-      zone.to,
+      zone.nodeFrom,
+      zone.nodeTo,
       getIncludeAfterContext()
     )
     const zoneSession = zone.sessionId ? getSessionById(zone.sessionId) : null
@@ -581,10 +489,9 @@ export function createAIWriterController(
         contextAfter: contextAfter ?? undefined,
         prompt: trimmedPrompt,
         selectedText,
-        selectionFrom: zone.from,
-        selectionTo: zone.to,
+        selectionFrom: zone.nodeFrom,
+        selectionTo: zone.nodeTo,
       },
-      zoneId,
       sessionId
     )
 
@@ -620,22 +527,14 @@ export function createAIWriterController(
 
     const zone = getTargetZone(view, zoneId)
     if (zone) {
-      const markType = getAIZoneMarkType(view)
-
-      const tr = view.state.tr
-      if (markType) {
-        tr.removeMark(zone.from, zone.to, markType)
-      }
-      tr.setMeta(aiWriterPluginKey, { type: 'accept' })
-      tr.setMeta('addToHistory', false)
-      view.dispatch(tr)
+      unwrapZoneNodes(view, zone.id, { metaType: 'accept', addToHistory: true })
       pruneInlineOrphans()
       return
     }
 
     if (pluginState?.active) {
       const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'accept' })
-      tr.setMeta('addToHistory', false)
+      tr.setMeta('addToHistory', true)
       view.dispatch(tr)
       pruneInlineOrphans()
     }
@@ -654,22 +553,7 @@ export function createAIWriterController(
     const zone = getTargetZone(view, zoneId)
     if (!zone) {
       if (pluginState?.active) {
-        const tr = view.state.tr
-
-        if (
-          pluginState.from !== null &&
-          pluginState.to !== null &&
-          pluginState.from < pluginState.to
-        ) {
-          tr.delete(pluginState.from, pluginState.to)
-        }
-
-        const deletedFrom = pluginState.deletedFrom ?? pluginState.from
-        if (pluginState.deletedSlice && deletedFrom !== null) {
-          tr.replace(deletedFrom, deletedFrom, pluginState.deletedSlice)
-        }
-
-        tr.setMeta(aiWriterPluginKey, { type: 'reject' })
+        const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'reject' })
         tr.setMeta('addToHistory', false)
         view.dispatch(tr)
         pruneInlineOrphans()
@@ -678,46 +562,29 @@ export function createAIWriterController(
     }
 
     const tr = view.state.tr
-    const markType = getAIZoneMarkType(view)
+    const originalSlice =
+      deserializeOriginalSlice(view, zone.originalSlice) ??
+      (pluginState?.zoneId === zone.id ? pluginState.originalSlice : null)
 
-    const trackedFrom =
-      pluginState?.zoneId === zone.id && pluginState.from !== null ? pluginState.from : null
-    const trackedTo =
-      pluginState?.zoneId === zone.id && pluginState.to !== null ? pluginState.to : null
-    const deleteFrom = trackedFrom !== null ? Math.min(zone.from, trackedFrom) : zone.from
-    const deleteTo = trackedTo !== null ? Math.max(zone.to, trackedTo) : zone.to
-
-    const deletedSlice =
-      deserializeDeletedSlice(view, zone.deletedSlice) ??
-      (pluginState?.zoneId === zone.id ? pluginState.deletedSlice : null)
-
-    if (deleteFrom < deleteTo) {
-      tr.delete(deleteFrom, deleteTo)
-    }
-
-    if (deletedSlice) {
-      tr.replace(deleteFrom, deleteFrom, deletedSlice)
-    }
-
-    if (markType) {
-      const removeTo = deleteFrom + (deletedSlice?.content.size ?? 0)
-      tr.removeMark(deleteFrom, Math.max(deleteFrom, removeTo), markType)
+    tr.delete(zone.nodeFrom, zone.nodeTo)
+    if (originalSlice) {
+      tr.replace(zone.nodeFrom, zone.nodeFrom, originalSlice)
     }
 
     tr.setMeta(aiWriterPluginKey, { type: 'reject' })
-    tr.setMeta('addToHistory', false)
+    tr.setMeta('addToHistory', true)
     view.dispatch(tr)
     pruneInlineOrphans()
   }
 
-  function cancelAI(view?: EditorView): void {
+  function cancelAI(view?: EditorView, options: { preserveDoc?: boolean } = {}): void {
     const targetView = view ?? currentView
     const activeZone =
       targetView && aiWriterPluginKey.getState(targetView.state)?.zoneId
         ? getTargetZone(
-          targetView,
-          aiWriterPluginKey.getState(targetView.state)?.zoneId ?? undefined
-        )
+            targetView,
+            aiWriterPluginKey.getState(targetView.state)?.zoneId ?? undefined
+          )
         : null
     const toolScope = getToolScope()
     if (toolScope.projectId && toolScope.documentId && activeZone?.sessionId) {
@@ -727,7 +594,7 @@ export function createAIWriterController(
           documentId: toolScope.documentId,
           sessionId: activeZone.sessionId,
         })
-        .catch(() => { })
+        .catch(() => {})
     }
 
     abortController?.abort()
@@ -735,7 +602,14 @@ export function createAIWriterController(
     streamedText = ''
     stuckDetector.reset()
     currentView = null
-    if (view) {
+    if (options.preserveDoc && view) {
+      onStreamingChange?.(false)
+      const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'streaming_stop' })
+      tr.setMeta('addToHistory', false)
+      view.dispatch(tr)
+    } else if (options.preserveDoc) {
+      setStreamingState(false)
+    } else if (view) {
       setStreamingState(false, view)
     } else {
       setStreamingState(false)

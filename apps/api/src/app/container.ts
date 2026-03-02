@@ -27,11 +27,15 @@ export function createContainer(dbPath: string, yjsConfig: YjsRuntimeConfig): Ap
   )
 
   const chatRuntime = createChatRuntime(adapter.services)
-  const inlineRuntime = createInlineRuntime(adapter.services, {
-    documents: adapter.repositories.documents,
-    projectDocuments: adapter.repositories.projectDocuments,
-    yjsDocuments: adapter.repositories.yjsDocuments,
-  })
+  const inlineRuntime = createInlineRuntime(
+    adapter.services,
+    {
+      documents: adapter.repositories.documents,
+      projectDocuments: adapter.repositories.projectDocuments,
+      yjsDocuments: adapter.repositories.yjsDocuments,
+    },
+    yjsRuntime
+  )
 
   return {
     services: adapter.services,

@@ -108,6 +108,25 @@ const EDITABLE_FIELD_META: Record<EditableFieldKey, EditableFieldMeta> = {
     description: 'Model ID passed to your AI provider.',
     placeholder: 'gpt-5',
   },
+  aiDefaultTemperature: {
+    kind: 'number',
+    id: 'ai-default-temperature',
+    label: 'Default Temperature',
+    description:
+      'Temperature for AI generation (0-2). Higher = more creative, lower = more deterministic.',
+  },
+  aiSelectionEditTemperature: {
+    kind: 'number',
+    id: 'ai-selection-edit-temperature',
+    label: 'Selection Edit Temperature',
+    description: 'Temperature for inline AI edits (0-2). Lower values = more focused changes.',
+  },
+  aiDefaultMaxOutputTokens: {
+    kind: 'number',
+    id: 'ai-default-max-output-tokens',
+    label: 'Max Output Tokens',
+    description: 'Default maximum tokens for AI responses.',
+  },
   yjsPersistenceFlushMs: {
     kind: 'number',
     id: 'flush-ms',
@@ -127,12 +146,6 @@ const EDITABLE_FIELD_META: Record<EditableFieldKey, EditableFieldMeta> = {
     id: 'max-context',
     label: 'Context chars',
     description: 'Max characters for AI context.',
-  },
-  maxHintChars: {
-    kind: 'number',
-    id: 'max-hint',
-    label: 'Hint chars',
-    description: 'Max characters for hints.',
   },
   maxPromptChars: {
     kind: 'number',
@@ -206,6 +219,9 @@ const AI_FIELD_KEYS = [
   'aiApiKey',
   'aiBaseUrl',
   'aiModel',
+  'aiDefaultTemperature',
+  'aiSelectionEditTemperature',
+  'aiDefaultMaxOutputTokens',
 ] as const satisfies ReadonlyArray<EditableFieldKey>
 const COLLABORATION_FIELD_KEYS = [
   'yjsPersistenceFlushMs',
@@ -213,8 +229,8 @@ const COLLABORATION_FIELD_KEYS = [
 ] as const satisfies ReadonlyArray<EditableFieldKey>
 const LIMIT_FIELD_ROWS = [
   {
-    keys: ['maxContextChars', 'maxHintChars', 'maxPromptChars'],
-    columnsClassName: 'sm:grid-cols-3',
+    keys: ['maxContextChars', 'maxPromptChars'],
+    columnsClassName: 'sm:grid-cols-2',
   },
   {
     keys: ['maxToolEntries', 'maxToolReadChars', 'maxAiToolSteps', 'maxChatMessageChars'],

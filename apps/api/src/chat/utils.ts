@@ -14,10 +14,15 @@ import { safeValidateUIMessages, type UIMessage } from 'ai'
 import { configManager } from '../config/manager.js'
 import type { ChatThread } from '../core/services/chats.service.js'
 
-const markdownSerializer = new MarkdownSerializer(defaultMarkdownSerializer.nodes, {
-  ...defaultMarkdownSerializer.marks,
-  ai_zone: { open: '', close: '', mixable: true },
-})
+const markdownSerializer = new MarkdownSerializer(
+  {
+    ...defaultMarkdownSerializer.nodes,
+    ai_zone(state, node) {
+      state.renderContent(node)
+    },
+  },
+  defaultMarkdownSerializer.marks
+)
 
 export interface ProjectFileIndex {
   files: Map<string, string>

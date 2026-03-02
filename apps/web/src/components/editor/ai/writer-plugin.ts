@@ -1,14 +1,21 @@
 import { type Node as ProseMirrorNode, type Slice } from 'prosemirror-model'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
+import { hasMeaningfulGap, parseZoneNodeAttrs } from '@plotline/shared'
+
+interface AIZoneSegment {
+  nodeFrom: number
+  nodeTo: number
+}
 
 export interface AIZone {
   id: string
-  from: number
-  to: number
+  nodeFrom: number
+  nodeTo: number
+  segments: AIZoneSegment[]
   streaming: boolean
   sessionId: string | null
-  deletedSlice: string | null
+  originalSlice: string | null
 }
 
 export interface AIWriterState {
@@ -19,8 +26,8 @@ export interface AIWriterState {
   to: number | null
   streaming: boolean
   stuck: boolean
-  deletedSlice: Slice | null
-  deletedFrom: number | null
+  originalSlice: Slice | null
+  originalFrom: number | null
   originalSelectionFrom: number | null
   originalSelectionTo: number | null
   zones: AIZone[]
@@ -29,89 +36,91 @@ export interface AIWriterState {
 export interface AIWriterActionHandlers {
   onAccept: () => void
   onReject: () => void
-  onCancelAI: (view: EditorView) => void
+  onCancelAI: (view: EditorView, options?: { preserveDoc?: boolean }) => void
 }
 
 export const aiWriterPluginKey = new PluginKey<AIWriterState>('ai_writer')
 
-function readZoneMarkAttrs(mark: unknown): AIZone | null {
-  if (typeof mark !== 'object' || mark === null || Array.isArray(mark)) {
-    return null
-  }
+function collectInvalidAIZoneNodePositions(doc: ProseMirrorNode): number[] {
+  const zoneType = doc.type.schema.nodes.ai_zone
+  if (!zoneType) return []
 
-  const attrs = mark as Record<string, unknown>
-  const id = attrs.id
-  if (typeof id !== 'string' || id.length === 0) {
-    return null
-  }
+  const positions: number[] = []
+  const lastNodeToById = new Map<string, number>()
+  doc.descendants((node, pos) => {
+    if (node.type !== zoneType) return true
+    const parsed = parseZoneNodeAttrs(node.attrs)
+    if (!parsed) {
+      positions.push(pos)
+      return false
+    }
 
-  const rawSessionId = attrs.sessionId
-  const sessionId =
-    typeof rawSessionId === 'string' && rawSessionId.trim().length > 0 ? rawSessionId : null
+    const previousNodeTo = lastNodeToById.get(parsed.id)
+    if (previousNodeTo !== undefined && hasMeaningfulGap(doc, previousNodeTo, pos)) {
+      positions.push(pos)
+      return false
+    }
 
-  const streaming = attrs.streaming === true
-  const deletedSlice =
-    typeof attrs.deletedSlice === 'string' && attrs.deletedSlice.length > 0
-      ? attrs.deletedSlice
-      : null
+    lastNodeToById.set(parsed.id, pos + node.nodeSize)
+    return false
+  })
 
-  return {
-    id,
-    from: 0,
-    to: 0,
-    streaming,
-    sessionId,
-    deletedSlice,
-  }
+  return positions.sort((left, right) => right - left)
 }
 
 function collectAIZones(doc: ProseMirrorNode): AIZone[] {
-  const markType = doc.type.schema.marks.ai_zone
-  if (!markType) return []
+  const zoneType = doc.type.schema.nodes.ai_zone
+  if (!zoneType) return []
 
   const byId = new Map<string, AIZone>()
 
   doc.descendants((node, pos) => {
-    if (!node.isText) return true
+    if (node.type !== zoneType) return true
 
-    for (const mark of node.marks) {
-      if (mark.type !== markType) continue
+    const parsed = parseZoneNodeAttrs(node.attrs)
+    if (!parsed) return false
 
-      const parsed = readZoneMarkAttrs(mark.attrs)
-      if (!parsed) continue
-
-      const from = pos
-      const to = pos + node.nodeSize
-      const current = byId.get(parsed.id)
-
-      if (!current) {
-        byId.set(parsed.id, {
-          ...parsed,
-          from,
-          to,
-        })
-        continue
-      }
-
-      current.from = Math.min(current.from, from)
-      current.to = Math.max(current.to, to)
-      current.streaming = current.streaming || parsed.streaming
-
-      if (!current.sessionId && parsed.sessionId) {
-        current.sessionId = parsed.sessionId
-      }
-
-      if (!current.deletedSlice && parsed.deletedSlice) {
-        current.deletedSlice = parsed.deletedSlice
-      }
+    const segment: AIZoneSegment = {
+      nodeFrom: pos,
+      nodeTo: pos + node.nodeSize,
     }
 
-    return true
+    const existing = byId.get(parsed.id)
+    if (!existing) {
+      byId.set(parsed.id, {
+        ...parsed,
+        nodeFrom: segment.nodeFrom,
+        nodeTo: segment.nodeTo,
+        segments: [segment],
+      })
+      return false
+    }
+
+    if (hasMeaningfulGap(doc, existing.nodeTo, segment.nodeFrom)) {
+      return false
+    }
+
+    existing.nodeFrom = Math.min(existing.nodeFrom, segment.nodeFrom)
+    existing.nodeTo = Math.max(existing.nodeTo, segment.nodeTo)
+    existing.streaming = existing.streaming || parsed.streaming
+
+    if (!existing.sessionId && parsed.sessionId) {
+      existing.sessionId = parsed.sessionId
+    }
+    if (!existing.originalSlice && parsed.originalSlice) {
+      existing.originalSlice = parsed.originalSlice
+    }
+
+    existing.segments.push(segment)
+    return false
   })
 
   return [...byId.values()]
-    .filter((zone) => zone.from < zone.to)
-    .sort((left, right) => left.from - right.from)
+    .map((zone) => ({
+      ...zone,
+      segments: zone.segments.sort((left, right) => left.nodeFrom - right.nodeFrom),
+    }))
+    .sort((left, right) => left.nodeFrom - right.nodeFrom)
 }
 
 function createInactiveState(zones: AIZone[] = []): AIWriterState {
@@ -123,8 +132,8 @@ function createInactiveState(zones: AIZone[] = []): AIWriterState {
     to: null,
     streaming: false,
     stuck: false,
-    deletedSlice: null,
-    deletedFrom: null,
+    originalSlice: null,
+    originalFrom: null,
     originalSelectionFrom: null,
     originalSelectionTo: null,
     zones,
@@ -135,13 +144,9 @@ function protectedRanges(state: AIWriterState): Array<{ from: number; to: number
   const ranges: Array<{ from: number; to: number }> = []
 
   for (const zone of state.zones) {
-    if (zone.from < zone.to) {
-      ranges.push({ from: zone.from, to: zone.to })
+    if (zone.nodeFrom < zone.nodeTo) {
+      ranges.push({ from: zone.nodeFrom, to: zone.nodeTo })
     }
-  }
-
-  if (state.active && state.from !== null && state.to !== null && state.from < state.to) {
-    ranges.push({ from: state.from, to: state.to })
   }
 
   return ranges
@@ -150,15 +155,6 @@ function protectedRanges(state: AIWriterState): Array<{ from: number; to: number
 function findZoneById(zones: AIZone[], zoneId: string | null): AIZone | null {
   if (!zoneId) return null
   return zones.find((zone) => zone.id === zoneId) ?? null
-}
-
-function localZoneBounds(state: AIWriterState): { from: number | null; to: number | null } {
-  const localZone = findZoneById(state.zones, state.zoneId)
-  if (localZone) {
-    return { from: localZone.from, to: localZone.to }
-  }
-
-  return { from: state.from, to: state.to }
 }
 
 export function getPrimaryAIZoneFromState(state: AIWriterState | null | undefined): AIZone | null {
@@ -199,28 +195,10 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
             to: meta.pos,
             streaming: true,
             stuck: false,
-            deletedSlice: meta.deletedSlice ?? null,
-            deletedFrom: meta.deletedSlice ? meta.pos : null,
+            originalSlice: meta.originalSlice ?? null,
+            originalFrom: meta.originalSlice ? (meta.originalFrom ?? null) : null,
             originalSelectionFrom: meta.selectionFrom ?? meta.pos,
             originalSelectionTo: meta.selectionTo ?? meta.pos,
-          }
-        }
-
-        if (meta?.type === 'zone_start') {
-          next = {
-            ...next,
-            from: meta.pos,
-            to: meta.pos,
-            deletedSlice: meta.deletedSlice ?? next.deletedSlice,
-            deletedFrom: meta.deletedFrom ?? next.deletedFrom,
-          }
-        }
-
-        if (meta?.type === 'zone_set') {
-          next = {
-            ...next,
-            from: meta.from,
-            to: meta.to,
           }
         }
 
@@ -236,24 +214,17 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
           next = { ...next, stuck: false }
         }
 
-        if (meta?.type === 'stop') {
-          next = createInactiveState(next.zones)
-        }
-
-        if (meta?.type === 'accept') {
-          next = createInactiveState(next.zones)
-        }
-
-        if (meta?.type === 'reject') {
+        if (meta?.type === 'stop' || meta?.type === 'accept' || meta?.type === 'reject') {
           next = createInactiveState(next.zones)
         }
 
         if (tr.docChanged) {
+          const hadLocalZoneBeforeChange = findZoneById(value.zones, value.zoneId) !== null
           const zones = collectAIZones(tr.doc)
           const mappedFrom = next.from !== null ? tr.mapping.map(next.from, 1) : null
           const mappedTo = next.to !== null ? tr.mapping.map(next.to, -1) : null
-          const mappedDeletedFrom =
-            next.deletedFrom !== null ? tr.mapping.map(next.deletedFrom) : null
+          const mappedOriginalFrom =
+            next.originalFrom !== null ? tr.mapping.map(next.originalFrom) : null
           const mappedOriginalSelectionFrom =
             next.originalSelectionFrom !== null ? tr.mapping.map(next.originalSelectionFrom) : null
           const mappedOriginalSelectionTo =
@@ -263,34 +234,54 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
           next = {
             ...next,
             zones,
-            from: localZone
-              ? mappedFrom !== null
-                ? Math.min(localZone.from, mappedFrom)
-                : localZone.from
-              : mappedFrom,
-            to: localZone
-              ? mappedTo !== null
-                ? Math.max(localZone.to, mappedTo)
-                : localZone.to
-              : mappedTo,
-            deletedFrom: mappedDeletedFrom,
+            from: localZone ? localZone.nodeFrom : mappedFrom,
+            to: localZone ? localZone.nodeTo : mappedTo,
+            originalFrom: mappedOriginalFrom,
             originalSelectionFrom: mappedOriginalSelectionFrom,
             originalSelectionTo: mappedOriginalSelectionTo,
             streaming: localZone ? localZone.streaming : next.streaming,
           }
 
-          if (
-            next.active &&
-            next.zoneId &&
-            !localZone &&
-            (meta?.type === 'accept' || meta?.type === 'reject' || meta?.type === 'stop')
-          ) {
+          if (next.active && next.zoneId && !localZone && hadLocalZoneBeforeChange) {
             next = createInactiveState(zones)
           }
         }
 
         return next
       },
+    },
+    appendTransaction(transactions, _oldState, newState) {
+      if (!transactions.some((transaction) => transaction.docChanged)) {
+        return null
+      }
+
+      const invalidPositions = collectInvalidAIZoneNodePositions(newState.doc)
+      if (invalidPositions.length === 0) {
+        return null
+      }
+
+      const zoneType = newState.schema.nodes.ai_zone
+      if (!zoneType) {
+        return null
+      }
+
+      const tr = newState.tr
+      for (const position of invalidPositions) {
+        const mappedFrom = tr.mapping.map(position, -1)
+        const node = tr.doc.nodeAt(mappedFrom)
+        if (!node || node.type !== zoneType) {
+          continue
+        }
+
+        tr.replaceWith(mappedFrom, mappedFrom + node.nodeSize, node.content)
+      }
+
+      if (!tr.docChanged) {
+        return null
+      }
+
+      tr.setMeta('addToHistory', false)
+      return tr
     },
     props: {
       handleTextInput(view, from, to) {
@@ -302,26 +293,12 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
         const ranges = protectedRanges(pluginState)
         if (ranges.length === 0) return false
 
-        const localBounds = localZoneBounds(pluginState)
-
         if (from === to && ranges.some((range) => from > range.from && from < range.to)) {
           return true
         }
 
         if (ranges.some((range) => from < range.to && to > range.from)) {
           return true
-        }
-
-        if (
-          pluginState.active &&
-          pluginState.streaming &&
-          localBounds.from !== null &&
-          localBounds.to !== null &&
-          from === localBounds.to &&
-          from >= localBounds.from
-        ) {
-          handlers.onCancelAI(view)
-          return false
         }
 
         return false
@@ -336,22 +313,9 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
         if (ranges.length === 0) return false
 
         const selection = view.state.selection
-        const localBounds = localZoneBounds(pluginState)
 
         if (ranges.some((range) => selection.from < range.to && selection.to > range.from)) {
           return true
-        }
-
-        if (
-          pluginState.active &&
-          pluginState.streaming &&
-          localBounds.from !== null &&
-          localBounds.to !== null &&
-          selection.from === localBounds.to &&
-          selection.to === localBounds.to
-        ) {
-          handlers.onCancelAI(view)
-          return false
         }
 
         return false
@@ -373,10 +337,12 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
             return true
           }
 
-          if ((event.key === 'z' || event.key === 'y') && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault()
-            handlers.onReject()
-            return true
+          if (
+            ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey)) ||
+            ((event.key === 'y' || event.key === 'Y') && (event.metaKey || event.ctrlKey))
+          ) {
+            handlers.onCancelAI(view, { preserveDoc: true })
+            return false
           }
         }
 

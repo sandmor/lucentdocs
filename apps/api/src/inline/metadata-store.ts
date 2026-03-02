@@ -68,20 +68,12 @@ function collectSessionIdsFromProsemirrorNode(value: unknown, output: Set<string
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return
 
   const record = value as Record<string, unknown>
-  const marks = Array.isArray(record.marks) ? record.marks : []
-
-  for (const mark of marks) {
-    if (typeof mark !== 'object' || mark === null || Array.isArray(mark)) continue
-    const markRecord = mark as Record<string, unknown>
-    if (markRecord.type !== 'ai_zone') continue
-
+  if (record.type === 'ai_zone') {
     const attrs =
-      typeof markRecord.attrs === 'object' && markRecord.attrs !== null && !Array.isArray(markRecord.attrs)
-        ? (markRecord.attrs as Record<string, unknown>)
+      typeof record.attrs === 'object' && record.attrs !== null && !Array.isArray(record.attrs)
+        ? (record.attrs as Record<string, unknown>)
         : null
-    if (!attrs) continue
-
-    const sessionId = attrs.sessionId
+    const sessionId = attrs?.sessionId
     if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
       output.add(sessionId)
     }

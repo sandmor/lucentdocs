@@ -24,7 +24,7 @@ export interface ToolScope {
 }
 
 interface BuildInlineToolsOptions {
-  onWriteAction: (action: InlineZoneWriteAction) => void
+  onWriteAction: (action: InlineZoneWriteAction) => void | Promise<void>
 }
 
 type BuildReadToolsContext = {
@@ -164,7 +164,7 @@ export function buildInlineZoneWriteTools(options: BuildInlineToolsOptions) {
           toOffset: normalizedTo,
           content,
         }
-        options.onWriteAction(action)
+        await options.onWriteAction(action)
         return {
           ok: true,
           applied: action,
@@ -181,7 +181,7 @@ export function buildInlineZoneWriteTools(options: BuildInlineToolsOptions) {
           type: 'set_choices',
           choices: normalizedChoices,
         }
-        options.onWriteAction(action)
+        await options.onWriteAction(action)
         return {
           ok: true,
           applied: action,

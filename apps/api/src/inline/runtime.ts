@@ -1,6 +1,6 @@
 import { observable } from '@trpc/server/observable'
 import { nanoid } from 'nanoid'
-import { readUIMessageStream, stepCountIs, streamText, type UIMessage, type UIMessageChunk } from 'ai'
+import { readUIMessageStream, stepCountIs, streamText, type UIMessage } from 'ai'
 import type {
   InlineChatMessage,
   InlineToolChip,
@@ -18,6 +18,8 @@ import {
   type InlineSessionMetadataStore,
 } from './metadata-store.js'
 import type { RepositorySet } from '../core/ports/types.js'
+import type { YjsRuntime } from '../yjs/runtime.js'
+import { applyInlineZoneWriteActionToDoc } from './zone-write.js'
 
 export interface InlineObserveState extends InlineScope {
   sessionId: string
@@ -31,14 +33,7 @@ export interface InlineObserveSnapshotEvent extends InlineObserveState {
   type: 'snapshot'
 }
 
-export interface InlineObserveStreamChunkEvent extends InlineScope {
-  type: 'stream-chunk'
-  sessionId: string
-  generationId: string
-  chunk: UIMessageChunk
-}
-
-export type InlineObserveEvent = InlineObserveSnapshotEvent | InlineObserveStreamChunkEvent
+export type InlineObserveEvent = InlineObserveSnapshotEvent
 
 export interface StartInlineGenerationInput extends InlineScope {
   sessionId: string
@@ -47,6 +42,7 @@ export interface StartInlineGenerationInput extends InlineScope {
   prompt: string
   selectedText?: string
   maxOutputTokens?: number
+  requesterClientName?: string
 }
 
 interface ActiveGeneration {
@@ -243,21 +239,15 @@ function upsertAssistantMessage(session: InlineZoneSession, message: UIMessage):
   }
 }
 
-function applyWriteActions(
+function applyWriteActionToSession(
   session: InlineZoneSession,
-  pendingActions: InlineZoneWriteAction[]
+  action: InlineZoneWriteAction
 ): InlineZoneSession {
-  if (pendingActions.length === 0) return session
-
-  let nextChoices = session.choices
-  for (const action of pendingActions) {
-    if (action.type === 'set_choices') {
-      nextChoices = action.choices
-    }
+  if (action.type !== 'set_choices') {
+    return session
   }
 
-  pendingActions.length = 0
-
+  const nextChoices = action.choices
   if (nextChoices === session.choices) {
     return session
   }
@@ -266,6 +256,19 @@ function applyWriteActions(
     ...session,
     choices: [...nextChoices],
   }
+}
+
+function normalizeRequesterClientName(name: string | undefined): string {
+  const trimmed = name?.trim() ?? ''
+  if (!trimmed) return 'inline-client'
+
+  const safe = trimmed.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80)
+  return safe.length > 0 ? safe : 'inline-client'
+}
+
+function toInlineServerOrigin(requesterClientName: string): string {
+  const normalized = normalizeRequesterClientName(requesterClientName)
+  return `${normalized}__inline_server`
 }
 
 export class InlineRuntimeError extends Error {
@@ -283,17 +286,21 @@ type InlineListener = (event: InlineObserveEvent) => void
 export class InlineRuntime {
   #services: ServiceSet
   #store: InlineSessionMetadataStore
+  #yjsRuntime: YjsRuntime
   #listeners = new Map<string, Set<InlineListener>>()
   #liveStates = new Map<string, InlineObserveSnapshotEvent>()
   #activeGenerations = new Map<string, ActiveGeneration>()
   #activePrunes = new Map<string, Promise<void>>()
+  #sessionWriteTasks = new Map<string, Promise<void>>()
 
   constructor(
     services: ServiceSet,
-    repos: Pick<RepositorySet, 'documents' | 'projectDocuments' | 'yjsDocuments'>
+    repos: Pick<RepositorySet, 'documents' | 'projectDocuments' | 'yjsDocuments'>,
+    yjsRuntime: YjsRuntime
   ) {
     this.#services = services
     this.#store = createInlineSessionMetadataStore(repos)
+    this.#yjsRuntime = yjsRuntime
   }
 
   #shouldRetainState(key: string): boolean {
@@ -444,7 +451,11 @@ export class InlineRuntime {
       messages: [...baseSession.messages, createUserMessage(prompt)],
     }
 
-    const userMessageSaved = await this.#store.saveSession(input, input.sessionId, sessionWithUserMessage)
+    const userMessageSaved = await this.#store.saveSession(
+      input,
+      input.sessionId,
+      sessionWithUserMessage
+    )
     if (!userMessageSaved) {
       throw new InlineRuntimeError(
         'NOT_FOUND',
@@ -454,6 +465,7 @@ export class InlineRuntime {
 
     const generationId = nanoid()
     const controller = new AbortController()
+    const requesterClientName = normalizeRequesterClientName(input.requesterClientName)
     this.#activeGenerations.set(key, {
       id: generationId,
       controller,
@@ -467,7 +479,14 @@ export class InlineRuntime {
       })
     )
 
-    void this.#runGeneration(input, generationId, controller, sessionWithUserMessage, prompt)
+    void this.#runGeneration(
+      input,
+      generationId,
+      controller,
+      sessionWithUserMessage,
+      prompt,
+      requesterClientName
+    )
 
     return { generationId }
   }
@@ -509,18 +528,71 @@ export class InlineRuntime {
     })
   }
 
+  async #applyWriteActionToDocument(
+    scope: InlineScope & { sessionId: string },
+    action: InlineZoneWriteAction,
+    requesterClientName: string
+  ): Promise<void> {
+    if (action.type === 'set_choices') {
+      return
+    }
+
+    const documentInScope = await this.#store.isDocumentInScope(scope)
+    if (!documentInScope) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `Document ${scope.documentId} not found in project ${scope.projectId}`
+      )
+    }
+
+    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+      origin: toInlineServerOrigin(requesterClientName),
+      transform: (currentDoc) => {
+        const applied = applyInlineZoneWriteActionToDoc(currentDoc, scope.sessionId, action)
+        return {
+          changed: applied.changed,
+          nextDoc: applied.nextDoc,
+          result: applied,
+        }
+      },
+    })
+    const applied = transformed.result
+
+    if (!applied.zoneFound) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `AI zone for inline session ${scope.sessionId} was not found in document ${scope.documentId}`
+      )
+    }
+  }
+
+  async #enqueueSessionWrite(
+    scope: InlineScope & { sessionId: string },
+    task: () => Promise<void>
+  ): Promise<void> {
+    const key = toInlineKey(scope)
+    const previous = this.#sessionWriteTasks.get(key) ?? Promise.resolve()
+    const next = previous.catch(() => undefined).then(task)
+    this.#sessionWriteTasks.set(key, next)
+    try {
+      await next
+    } finally {
+      if (this.#sessionWriteTasks.get(key) === next) {
+        this.#sessionWriteTasks.delete(key)
+      }
+    }
+  }
+
   async #runGeneration(
     input: StartInlineGenerationInput,
     generationId: string,
     controller: AbortController,
     baseSession: InlineZoneSession,
-    prompt: string
+    prompt: string,
+    requesterClientName: string
   ): Promise<void> {
     const key = toInlineKey(input)
     let finalSession = baseSession
-    let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null = null
-    let chunkForwardTask: Promise<void> | null = null
-    const pendingWriteActions: InlineZoneWriteAction[] = []
 
     try {
       if (isTestRuntime()) {
@@ -538,8 +610,21 @@ export class InlineRuntime {
       assertPromptProtocolMode(rendered.definition, 'prompt')
 
       const writeTools = buildInlineZoneWriteTools({
-        onWriteAction: (action) => {
-          pendingWriteActions.push(action)
+        onWriteAction: async (action) => {
+          await this.#enqueueSessionWrite(input, async () => {
+            await this.#applyWriteActionToDocument(input, action, requesterClientName)
+            const nextSession = applyWriteActionToSession(finalSession, action)
+            if (nextSession === finalSession) return
+
+            finalSession = nextSession
+            this.#emitSnapshot(
+              createObserveState(input, {
+                session: finalSession,
+                generating: true,
+                generationId,
+              })
+            )
+          })
         },
       })
 
@@ -578,32 +663,16 @@ export class InlineRuntime {
         },
       })
 
-      const [chunkStream, messageStream] = uiStream.tee()
-      chunkReader = chunkStream.getReader()
-      chunkForwardTask = (async () => {
-        const reader = chunkReader
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            this.#emitStreamChunk(input, generationId, value)
-          }
-        } finally {
-          reader.releaseLock()
-        }
-      })()
-
       let latestAssistant: UIMessage | null = null
       for await (const assistantMessage of readUIMessageStream<UIMessage>({
         message: latestAssistant ?? undefined,
-        stream: messageStream,
+        stream: uiStream,
         terminateOnError: false,
         onError: (error) => {
           console.warn('Failed to read inline AI UI message stream', { error })
         },
       })) {
         latestAssistant = assistantMessage
-        finalSession = applyWriteActions(finalSession, pendingWriteActions)
         finalSession = upsertAssistantMessage(finalSession, assistantMessage)
         this.#emitSnapshot(
           createObserveState(input, {
@@ -613,31 +682,11 @@ export class InlineRuntime {
           })
         )
       }
-
-      finalSession = applyWriteActions(finalSession, pendingWriteActions)
-
     } catch (error) {
       if (!(error instanceof Error && error.name === 'AbortError')) {
         console.error('Inline prompt generation failed', error)
       }
     } finally {
-      finalSession = applyWriteActions(finalSession, pendingWriteActions)
-
-      if (chunkReader) {
-        try {
-          await chunkReader.cancel()
-        } catch {
-          // Ignore cancellation errors when stream already closed.
-        }
-      }
-      if (chunkForwardTask) {
-        try {
-          await chunkForwardTask
-        } catch (error) {
-          console.error('Failed while waiting for inline chunk forward task', error)
-        }
-      }
-
       const active = this.#activeGenerations.get(key)
       if (active?.id === generationId) {
         this.#activeGenerations.delete(key)
@@ -680,37 +729,7 @@ export class InlineRuntime {
     if (controller.signal.aborted) return baseSession
 
     const messageId = `test-inline-${generationId}`
-    const textId = `test-inline-text-${generationId}`
     const generated = resolveTestInlineResponse(input.prompt)
-
-    const chunks: UIMessageChunk[] = [
-      {
-        type: 'start',
-        messageId,
-      } as UIMessageChunk,
-      {
-        type: 'text-start',
-        id: textId,
-      } as UIMessageChunk,
-      {
-        type: 'text-delta',
-        id: textId,
-        delta: generated,
-      } as UIMessageChunk,
-      {
-        type: 'text-end',
-        id: textId,
-      } as UIMessageChunk,
-      {
-        type: 'finish',
-      } as UIMessageChunk,
-    ]
-
-    for (const chunk of chunks) {
-      if (controller.signal.aborted) return baseSession
-      this.#emitStreamChunk(input, generationId, chunk)
-      await Promise.resolve()
-    }
 
     const assistantMessage: InlineChatMessage = {
       id: messageId,
@@ -765,38 +784,12 @@ export class InlineRuntime {
       }
     }
   }
-
-  #emitStreamChunk(
-    scope: InlineScope & { sessionId: string },
-    generationId: string,
-    chunk: UIMessageChunk
-  ): void {
-    const key = toInlineKey(scope)
-    const listeners = this.#listeners.get(key)
-    if (!listeners) return
-
-    const event: InlineObserveStreamChunkEvent = {
-      type: 'stream-chunk',
-      projectId: scope.projectId,
-      documentId: scope.documentId,
-      sessionId: scope.sessionId,
-      generationId,
-      chunk,
-    }
-
-    for (const listener of listeners) {
-      try {
-        listener(event)
-      } catch (error) {
-        console.error('Inline observe listener failed', error)
-      }
-    }
-  }
 }
 
 export function createInlineRuntime(
   services: ServiceSet,
-  repos: Pick<RepositorySet, 'documents' | 'projectDocuments' | 'yjsDocuments'>
+  repos: Pick<RepositorySet, 'documents' | 'projectDocuments' | 'yjsDocuments'>,
+  yjsRuntime: YjsRuntime
 ): InlineRuntime {
-  return new InlineRuntime(services, repos)
+  return new InlineRuntime(services, repos, yjsRuntime)
 }

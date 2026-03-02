@@ -1,27 +1,47 @@
-import { Slice, type MarkType } from 'prosemirror-model'
+import { Fragment, Slice } from 'prosemirror-model'
 import type { EditorView } from 'prosemirror-view'
+import {
+  wrapSliceWithZoneNodes as wrapSliceWithZoneNodesShared,
+  type AIZoneAttrs,
+} from '@plotline/shared'
 import { aiWriterPluginKey, getAIZones, type AIZone } from '../writer-plugin'
-import type { AIZoneMarkAttrs, ZoneMarkPatch } from './types'
+import type { AIZoneNodeAttrs, ZoneNodePatch } from './types'
 
-export function getAIZoneMarkType(view: EditorView): MarkType | null {
-  return view.state.schema.marks.ai_zone ?? null
+export function getAIZoneNodeType(view: EditorView) {
+  return view.state.schema.nodes.ai_zone ?? null
 }
 
-export function createZoneMarkAttrs(
+export function createZoneNodeAttrs(
   zoneId: string,
   streaming: boolean,
   sessionId: string | null,
-  deletedSlice: string | null
-): AIZoneMarkAttrs {
+  originalSlice: string | null
+): AIZoneNodeAttrs {
   return {
     id: zoneId,
     streaming,
     sessionId,
-    deletedSlice,
+    originalSlice,
   }
 }
 
-export function deserializeDeletedSlice(view: EditorView, value: string | null): Slice | null {
+export function wrapSliceWithZoneNodes(
+  view: EditorView,
+  slice: Slice,
+  attrs: AIZoneNodeAttrs
+): Slice | null {
+  const nodeType = getAIZoneNodeType(view)
+  if (!nodeType) return null
+  return wrapSliceWithZoneNodesShared(slice, nodeType, attrs)
+}
+
+export function createEmptyZoneSlice(view: EditorView, attrs: AIZoneNodeAttrs): Slice | null {
+  const nodeType = getAIZoneNodeType(view)
+  if (!nodeType) return null
+  return new Slice(Fragment.from(nodeType.create(attrs)), 0, 0)
+}
+
+export function deserializeOriginalSlice(view: EditorView, value: string | null): Slice | null {
   if (!value) return null
 
   try {
@@ -46,48 +66,116 @@ export function getTargetZone(view: EditorView, preferredZoneId?: string): AIZon
   return null
 }
 
-export function upsertZoneMark(
+export function updateZoneNode(
   view: EditorView,
-  from: number,
-  to: number,
-  attrs: AIZoneMarkAttrs,
+  zoneId: string,
+  patch: ZoneNodePatch,
   metaType?: string
 ): boolean {
-  if (from >= to) return false
+  const zone = getAIZones(view).find((entry) => entry.id === zoneId)
+  if (!zone) return false
 
-  const markType = getAIZoneMarkType(view)
-  if (!markType) return false
+  const nodeType = getAIZoneNodeType(view)
+  if (!nodeType) return false
+
+  const attrs = createZoneNodeAttrs(
+    zone.id,
+    patch.streaming ?? zone.streaming,
+    patch.sessionId === undefined ? zone.sessionId : patch.sessionId,
+    patch.originalSlice === undefined ? zone.originalSlice : patch.originalSlice
+  )
 
   const tr = view.state.tr
-  tr.removeMark(from, to, markType)
-  tr.addMark(from, to, markType.create(attrs))
+  for (const segment of [...zone.segments].sort((left, right) => right.nodeFrom - left.nodeFrom)) {
+    const mappedFrom = tr.mapping.map(segment.nodeFrom, -1)
+    const node = tr.doc.nodeAt(mappedFrom)
+    if (!node || node.type !== nodeType) {
+      continue
+    }
+
+    tr.setNodeMarkup(mappedFrom, nodeType, attrs)
+  }
+
+  if (!tr.docChanged) {
+    return false
+  }
 
   if (metaType) {
     tr.setMeta(aiWriterPluginKey, { type: metaType })
   }
-
   tr.setMeta('addToHistory', false)
   view.dispatch(tr)
   return true
 }
 
-export function updateZoneMark(
+export function replaceZoneContent(
   view: EditorView,
   zoneId: string,
-  patch: ZoneMarkPatch,
-  metaType?: string
+  content: Slice,
+  options: {
+    streaming?: boolean
+    metaType?: string
+    addToHistory?: boolean
+  } = {}
 ): boolean {
   const zone = getAIZones(view).find((entry) => entry.id === zoneId)
-  if (!zone || zone.from >= zone.to) return false
+  if (!zone) return false
 
-  const attrs = createZoneMarkAttrs(
-    zone.id,
-    patch.streaming ?? zone.streaming,
-    patch.sessionId === undefined ? zone.sessionId : patch.sessionId,
-    patch.deletedSlice === undefined ? zone.deletedSlice : patch.deletedSlice
-  )
+  const nodeType = getAIZoneNodeType(view)
+  if (!nodeType) return false
 
-  return upsertZoneMark(view, zone.from, zone.to, attrs, metaType)
+  const attrs: AIZoneAttrs = {
+    id: zone.id,
+    streaming: options.streaming ?? zone.streaming,
+    sessionId: zone.sessionId,
+    originalSlice: zone.originalSlice,
+  }
+  const wrappedContent = wrapSliceWithZoneNodesShared(content, nodeType, attrs)
+
+  const tr = view.state.tr
+  tr.replaceRange(zone.nodeFrom, zone.nodeTo, wrappedContent)
+
+  if (options.metaType) {
+    tr.setMeta(aiWriterPluginKey, { type: options.metaType })
+  }
+
+  tr.setMeta('addToHistory', options.addToHistory === true)
+  view.dispatch(tr)
+  return true
+}
+
+export function unwrapZoneNodes(
+  view: EditorView,
+  zoneId: string,
+  options: { metaType?: string; addToHistory?: boolean } = {}
+): boolean {
+  const zone = getAIZones(view).find((entry) => entry.id === zoneId)
+  if (!zone) return false
+
+  const nodeType = getAIZoneNodeType(view)
+  if (!nodeType) return false
+
+  const tr = view.state.tr
+  for (const segment of [...zone.segments].sort((left, right) => right.nodeFrom - left.nodeFrom)) {
+    const mappedFrom = tr.mapping.map(segment.nodeFrom, -1)
+    const node = tr.doc.nodeAt(mappedFrom)
+    if (!node || node.type !== nodeType || node.attrs.id !== zoneId) {
+      continue
+    }
+
+    tr.replaceWith(mappedFrom, mappedFrom + node.nodeSize, node.content)
+  }
+
+  if (!tr.docChanged) {
+    return false
+  }
+
+  if (options.metaType) {
+    tr.setMeta(aiWriterPluginKey, { type: options.metaType })
+  }
+  tr.setMeta('addToHistory', options.addToHistory === true)
+  view.dispatch(tr)
+  return true
 }
 
 export function selectionOverlapsAIZone(
@@ -98,7 +186,7 @@ export function selectionOverlapsAIZone(
   if (selectionFrom >= selectionTo) return false
 
   for (const zone of getAIZones(view)) {
-    if (selectionFrom < zone.to && selectionTo > zone.from) {
+    if (selectionFrom < zone.nodeTo && selectionTo > zone.nodeFrom) {
       return true
     }
   }

@@ -33,6 +33,7 @@
         "nanoid": "^5.1.6",
         "prosemirror-markdown": "^1.13.2",
         "prosemirror-model": "^1.25.4",
+        "prosemirror-transform": "^1.10.5",
         "sirv": "^3.0.2",
         "superjson": "^2.2.6",
         "vite": "^7.3.1",
@@ -115,6 +116,8 @@
       "name": "@plotline/shared",
       "version": "0.0.1",
       "dependencies": {
+        "@types/markdown-it": "^14.1.2",
+        "markdown-it": "^14.1.0",
         "prosemirror-markdown": "^1.13.4",
         "prosemirror-model": "^1.25.4",
         "prosemirror-schema-basic": "^1.2.4",

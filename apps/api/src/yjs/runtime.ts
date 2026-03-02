@@ -2,9 +2,15 @@ import { docs, getYDoc, setPersistence, setupWSConnection } from '@y/websocket-s
 import * as Y from 'yjs'
 import type { YjsDocumentsRepositoryPort } from '../core/ports/yjsDocuments.port.js'
 import type { VersionSnapshotsRepositoryPort } from '../core/ports/versionSnapshots.port.js'
-import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
+import {
+  yDocToProsemirrorJSON,
+  prosemirrorJSONToYDoc,
+  updateYFragment,
+  yXmlFragmentToProseMirrorRootNode,
+} from 'y-prosemirror'
 import { createDefaultContent, parseContent, schema, type JsonObject } from '@plotline/shared'
 import { nanoid } from 'nanoid'
+import type { Node as ProseMirrorNode } from 'prosemirror-model'
 
 export { setupWSConnection }
 
@@ -16,6 +22,12 @@ export interface YjsRepositorySet {
 export interface YjsRuntimeConfig {
   persistenceFlushIntervalMs: number
   versionSnapshotIntervalMs: number
+}
+
+interface ProsemirrorTransformResult<T> {
+  changed: boolean
+  nextDoc: ProseMirrorNode
+  result: T
 }
 
 export const YJS_RESTORE_CLOSE_CODE = 4401
@@ -68,6 +80,81 @@ export class YjsRuntime {
     this.#ensurePersistenceInitialized()
     const doc = getYDoc(documentName)
     await this.#initializeDocumentState(documentName, doc)
+  }
+
+  async getDocumentProsemirrorJson(documentName: string): Promise<JsonObject> {
+    this.#ensurePersistenceInitialized()
+    await this.ensureDocumentLoaded(documentName)
+    const doc = getYDoc(documentName)
+    return yDocToProsemirrorJSON(doc) as JsonObject
+  }
+
+  async replaceLiveDocumentContent(
+    documentName: string,
+    prosemirrorJson: JsonObject,
+    options: { origin?: unknown } = {}
+  ): Promise<void> {
+    this.#ensurePersistenceInitialized()
+    await this.ensureDocumentLoaded(documentName)
+    const liveDoc = getYDoc(documentName)
+    const replacementDoc = prosemirrorJSONToYDoc(schema, prosemirrorJson)
+
+    try {
+      const replacementRoot = replacementDoc.getXmlFragment('prosemirror')
+      const clonedContent = replacementRoot.toArray().flatMap((node) => {
+        const cloned = node.clone()
+        if (cloned instanceof Y.XmlElement || cloned instanceof Y.XmlText) {
+          return [cloned]
+        }
+        return []
+      })
+
+      liveDoc.transact(() => {
+        const root = liveDoc.getXmlFragment('prosemirror')
+        if (root.length > 0) {
+          root.delete(0, root.length)
+        }
+        if (clonedContent.length > 0) {
+          root.insert(0, clonedContent)
+        }
+      }, options.origin)
+    } finally {
+      replacementDoc.destroy()
+    }
+  }
+
+  async applyProsemirrorTransform<T>(
+    documentName: string,
+    options: {
+      origin?: unknown
+      transform: (currentDoc: ProseMirrorNode) => ProsemirrorTransformResult<T>
+    }
+  ): Promise<ProsemirrorTransformResult<T>> {
+    this.#ensurePersistenceInitialized()
+    await this.ensureDocumentLoaded(documentName)
+    const liveDoc = getYDoc(documentName)
+
+    let transformed: ProsemirrorTransformResult<T> | null = null
+
+    liveDoc.transact(() => {
+      const root = liveDoc.getXmlFragment('prosemirror')
+      const currentDoc = yXmlFragmentToProseMirrorRootNode(root, schema)
+      transformed = options.transform(currentDoc)
+      if (!transformed.changed) {
+        return
+      }
+
+      updateYFragment(liveDoc, root, transformed.nextDoc, {
+        mapping: new Map(),
+        isOMark: new Map(),
+      })
+    }, options.origin)
+
+    if (!transformed) {
+      throw new Error(`Failed to apply ProseMirror transform for ${documentName}`)
+    }
+
+    return transformed
   }
 
   async flushAllDocumentStates(): Promise<void> {

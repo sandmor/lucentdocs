@@ -1,5 +1,5 @@
 import type { EditorView } from 'prosemirror-view'
-import type { InlineZoneSession } from '@plotline/shared'
+import type { InlineZoneSession, AIZoneAttrs } from '@plotline/shared'
 
 export type StreamingHandler = (streaming: boolean) => void
 
@@ -7,21 +7,17 @@ export interface AIWriterControllerOptions {
   onStreamingChange?: StreamingHandler
   getIncludeAfterContext?: () => boolean
   getToolScope?: () => { projectId?: string; documentId?: string }
+  getRequesterClientName?: () => string | null
   getSessionById?: (sessionId: string) => InlineZoneSession | null
   setSessionById?: (sessionId: string, session: InlineZoneSession | null) => void
 }
 
-export interface AIZoneMarkAttrs {
-  id: string
-  streaming: boolean
-  sessionId: string | null
-  deletedSlice: string | null
-}
+export type AIZoneNodeAttrs = AIZoneAttrs
 
-export interface ZoneMarkPatch {
+export interface ZoneNodePatch {
   streaming?: boolean
   sessionId?: string | null
-  deletedSlice?: string | null
+  originalSlice?: string | null
 }
 
 export interface AIWriterController {
@@ -36,7 +32,7 @@ export interface AIWriterController {
   dismissChoicesForZone: (view: EditorView, zoneId: string) => boolean
   acceptAI: (view: EditorView, zoneId?: string) => void
   rejectAI: (view: EditorView, zoneId?: string) => void
-  cancelAI: (view?: EditorView) => void
+  cancelAI: (view?: EditorView, options?: { preserveDoc?: boolean }) => void
 }
 
 export interface StreamPayload {
@@ -53,11 +49,4 @@ export interface PromptStreamPayload extends StreamPayload {
   prompt: string
   selectionFrom: number
   selectionTo: number
-}
-
-export interface ParsedInlineToolPart {
-  toolName: string
-  toolCallId: string
-  rawState: string
-  chipState: 'pending' | 'complete'
 }

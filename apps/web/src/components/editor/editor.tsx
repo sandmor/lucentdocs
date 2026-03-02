@@ -100,6 +100,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           documentId,
         }
       },
+      getRequesterClientName() {
+        const clientId = providerRef.current?.doc.clientID
+        if (typeof clientId !== 'number') return null
+        return `yjs_client_${clientId}`
+      },
       getSessionById(sessionId) {
         return inlineSessionsRef.current[sessionId] ?? null
       },
@@ -168,8 +173,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           onReject() {
             if (viewRef.current) aiController.rejectAI(viewRef.current)
           },
-          onCancelAI(view) {
-            aiController.cancelAI(view)
+          onCancelAI(view, options) {
+            aiController.cancelAI(view, options)
           },
         },
       }),

@@ -12,6 +12,11 @@ export {
   type MarkdownResult,
 } from './markdown.js'
 export {
+  parseMarkdownishToFragment,
+  parseMarkdownishToSlice,
+  type MarkdownishSliceOptions,
+} from './markdownish.js'
+export {
   DIRECTORY_SENTINEL_NAME,
   normalizeDocumentPath,
   pathSegments,
@@ -90,3 +95,12 @@ export {
 } from './inline-ai.js'
 export type { InlineToolChip, InlineChatMessage, InlineZoneSession } from './inline-ai-session.js'
 export { normalizeInlineZoneSession, normalizeInlineZoneSessionMap } from './inline-ai-session.js'
+export type { AIZoneAttrs } from './ai-zone-utils.js'
+export {
+  readTrimmedString,
+  hasMeaningfulGap,
+  parseZoneNodeAttrs,
+  wrapFragmentWithZoneNodes,
+  wrapNodeWithZoneNodes,
+  wrapSliceWithZoneNodes,
+} from './ai-zone-utils.js'
