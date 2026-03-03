@@ -60,7 +60,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   const {
     streamAssistantRef,
     streamGenerationIdRef,
-    streamChunkControllerRef,
+    enqueueStreamChunk,
     stopStreamChunkPump,
     startStreamChunkPump,
   } = useChatStreamPump({
@@ -161,11 +161,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
             startStreamChunkPump(event.generationId, streamAssistantRef.current, event.chatId)
           }
 
-          try {
-            streamChunkControllerRef.current?.enqueue(event.chunk)
-          } catch (error) {
-            console.warn('Failed to enqueue chat stream chunk', { error })
-          }
+          enqueueStreamChunk(event.chunk)
           return
         }
 

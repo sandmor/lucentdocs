@@ -1,6 +1,7 @@
-import { useCallback, useRef, type MutableRefObject } from 'react'
-import { readUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai'
+import { useCallback, useEffect, useRef, type MutableRefObject } from 'react'
+import type { UIMessage, UIMessageChunk } from 'ai'
 import { upsertAssistantMessage } from './message-utils'
+import { createUIMessageChunkPump, type UIMessageChunkPump } from '../ai/ui-message-chunk-pump'
 
 interface UseChatStreamPumpOptions {
   isThreadActive: (chatId: string) => boolean
@@ -11,7 +12,7 @@ interface UseChatStreamPumpOptions {
 interface ChatStreamPump {
   streamAssistantRef: MutableRefObject<UIMessage | null>
   streamGenerationIdRef: MutableRefObject<string | null>
-  streamChunkControllerRef: MutableRefObject<ReadableStreamDefaultController<UIMessageChunk> | null>
+  enqueueStreamChunk: (chunk: UIMessageChunk) => void
   stopStreamChunkPump: () => void
   startStreamChunkPump: (generationId: string, seedAssistant: UIMessage | null, chatId: string) => void
 }
@@ -23,17 +24,32 @@ export function useChatStreamPump({
 }: UseChatStreamPumpOptions): ChatStreamPump {
   const streamAssistantRef = useRef<UIMessage | null>(null)
   const streamGenerationIdRef = useRef<string | null>(null)
-  const streamChunkControllerRef = useRef<ReadableStreamDefaultController<UIMessageChunk> | null>(null)
+  const pumpRef = useRef<UIMessageChunkPump | null>(null)
 
-  const stopStreamChunkPump = useCallback(() => {
-    if (streamChunkControllerRef.current) {
-      try {
-        streamChunkControllerRef.current.close()
-      } catch {
-        // ignore double-close races
+  useEffect(() => {
+    const pump = createUIMessageChunkPump({
+      isScopeActive: isThreadActive,
+      onMessage: (nextMessage) => {
+        streamAssistantRef.current = nextMessage
+        onAssistantMessage((previous) => upsertAssistantMessage(previous, nextMessage))
+      },
+      onGeneratingChange,
+      onError: (error) => {
+        console.warn('Chat stream chunk pump failed', { error })
+      },
+    })
+
+    pumpRef.current = pump
+    return () => {
+      pump.stop()
+      if (pumpRef.current === pump) {
+        pumpRef.current = null
       }
     }
-    streamChunkControllerRef.current = null
+  }, [isThreadActive, onAssistantMessage, onGeneratingChange])
+
+  const stopStreamChunkPump = useCallback(() => {
+    pumpRef.current?.stop()
     streamAssistantRef.current = null
     streamGenerationIdRef.current = null
   }, [])
@@ -43,42 +59,15 @@ export function useChatStreamPump({
       stopStreamChunkPump()
       streamAssistantRef.current = seedAssistant
       streamGenerationIdRef.current = generationId
-
-      const chunkStream = new ReadableStream<UIMessageChunk>({
-        start(controller) {
-          streamChunkControllerRef.current = controller
-        },
-      })
-
-      void (async () => {
-        let latestAssistant = seedAssistant
-        for await (const nextMessage of readUIMessageStream<UIMessage>({
-          message: latestAssistant ?? undefined,
-          stream: chunkStream,
-          terminateOnError: false,
-          onError: (error) => {
-            console.warn('Failed to read chat UI stream chunk', { error })
-          },
-        })) {
-          if (!isThreadActive(chatId)) {
-            continue
-          }
-          latestAssistant = nextMessage
-          streamAssistantRef.current = nextMessage
-          onGeneratingChange(true)
-          onAssistantMessage((previous) => upsertAssistantMessage(previous, nextMessage))
-        }
-      })().catch((error) => {
-        console.warn('Chat stream chunk pump failed', { error })
-      })
+      pumpRef.current?.start(generationId, seedAssistant, chatId)
     },
-    [isThreadActive, onAssistantMessage, onGeneratingChange, stopStreamChunkPump]
+    [stopStreamChunkPump]
   )
 
   return {
     streamAssistantRef,
     streamGenerationIdRef,
-    streamChunkControllerRef,
+    enqueueStreamChunk: (chunk) => pumpRef.current?.enqueue(chunk),
     stopStreamChunkPump,
     startStreamChunkPump,
   }

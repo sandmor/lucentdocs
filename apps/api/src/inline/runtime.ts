@@ -1,6 +1,6 @@
 import { observable } from '@trpc/server/observable'
 import { nanoid } from 'nanoid'
-import { readUIMessageStream, stepCountIs, streamText, type UIMessage } from 'ai'
+import { readUIMessageStream, stepCountIs, streamText, type UIMessage, type UIMessageChunk } from 'ai'
 import type {
   InlineChatMessage,
   InlineToolChip,
@@ -23,17 +23,28 @@ import { applyInlineZoneWriteActionToDoc } from './zone-write.js'
 
 export interface InlineObserveState extends InlineScope {
   sessionId: string
+  seq: number
   deleted: boolean
   generating: boolean
   generationId: string | null
   session: InlineZoneSession | null
 }
 
+export interface InlineObserveChunkEvent extends InlineScope {
+  type: 'stream-chunk'
+  projectId: string
+  documentId: string
+  sessionId: string
+  generationId: string
+  seq: number
+  chunk: UIMessageChunk
+}
+
 export interface InlineObserveSnapshotEvent extends InlineObserveState {
   type: 'snapshot'
 }
 
-export type InlineObserveEvent = InlineObserveSnapshotEvent
+export type InlineObserveEvent = InlineObserveSnapshotEvent | InlineObserveChunkEvent
 
 export interface StartInlineGenerationInput extends InlineScope {
   sessionId: string
@@ -48,6 +59,7 @@ export interface StartInlineGenerationInput extends InlineScope {
 interface ActiveGeneration {
   id: string
   controller: AbortController
+  events: InlineObserveEvent[]
 }
 
 interface ParsedInlineToolPart {
@@ -78,6 +90,7 @@ function toInlineKey(scope: InlineScope & { sessionId: string }): string {
 function createObserveState(
   scope: InlineScope & { sessionId: string },
   options: {
+    seq: number
     session: InlineZoneSession | null
     generating: boolean
     generationId: string | null
@@ -87,6 +100,7 @@ function createObserveState(
     projectId: scope.projectId,
     documentId: scope.documentId,
     sessionId: scope.sessionId,
+    seq: options.seq,
     deleted: options.session === null,
     generating: options.generating,
     generationId: options.generationId,
@@ -292,6 +306,7 @@ export class InlineRuntime {
   #activeGenerations = new Map<string, ActiveGeneration>()
   #activePrunes = new Map<string, Promise<void>>()
   #sessionWriteTasks = new Map<string, Promise<void>>()
+  #eventSeqByKey = new Map<string, number>()
 
   constructor(
     services: ServiceSet,
@@ -307,11 +322,69 @@ export class InlineRuntime {
     return this.#activeGenerations.has(key) || (this.#listeners.get(key)?.size ?? 0) > 0
   }
 
+  #nextSeq(key: string): number {
+    const nextSeq = (this.#eventSeqByKey.get(key) ?? 0) + 1
+    this.#eventSeqByKey.set(key, nextSeq)
+    return nextSeq
+  }
+
   #toSnapshotEvent(state: InlineObserveState): InlineObserveSnapshotEvent {
     return {
       ...state,
       type: 'snapshot',
     }
+  }
+
+  #cacheSnapshot(snapshot: InlineObserveSnapshotEvent): void {
+    const key = toInlineKey(snapshot)
+    if (this.#shouldRetainState(key)) {
+      this.#liveStates.set(key, snapshot)
+    } else {
+      this.#liveStates.delete(key)
+      this.#eventSeqByKey.delete(key)
+    }
+  }
+
+  #emitEvent(event: InlineObserveEvent): void {
+    if (event.type === 'snapshot') {
+      this.#cacheSnapshot(event)
+    }
+
+    const key = toInlineKey(event)
+    const listeners = this.#listeners.get(key)
+    if (!listeners) return
+
+    for (const listener of listeners) {
+      try {
+        listener(event)
+      } catch (error) {
+        console.error('Inline observe listener failed', error)
+      }
+    }
+  }
+
+  #emitStreamChunk(
+    scope: InlineScope & { sessionId: string },
+    generationId: string,
+    chunk: UIMessageChunk
+  ): void {
+    const key = toInlineKey(scope)
+    const event: InlineObserveChunkEvent = {
+      type: 'stream-chunk',
+      projectId: scope.projectId,
+      documentId: scope.documentId,
+      sessionId: scope.sessionId,
+      generationId,
+      seq: this.#nextSeq(key),
+      chunk,
+    }
+
+    const active = this.#activeGenerations.get(key)
+    if (active?.id === generationId) {
+      active.events.push(event)
+    }
+
+    this.#emitEvent(event)
   }
 
   async getSessions(
@@ -367,18 +440,58 @@ export class InlineRuntime {
       this.#listeners.set(key, listeners)
     }
 
-    listeners.add(listener)
+    let initializing = true
+    const queuedEvents: InlineObserveEvent[] = []
+    const queuedEventSeq = new Set<number>()
+
+    const wrappedListener: InlineListener = (event) => {
+      if (initializing) {
+        if (queuedEventSeq.has(event.seq)) return
+        queuedEventSeq.add(event.seq)
+        queuedEvents.push(event)
+        return
+      }
+      listener(event)
+    }
+
+    listeners.add(wrappedListener)
 
     try {
-      const cachedState = this.#liveStates.get(key)
-      if (cachedState) {
-        listener(cachedState)
+      let lastDeliveredSeq = 0
+      const activeGeneration = this.#activeGenerations.get(key)
+      if (activeGeneration && activeGeneration.events.length > 0) {
+        const baselineSnapshot = activeGeneration.events.find((event) => event.type === 'snapshot')
+        if (baselineSnapshot) {
+          listener(baselineSnapshot)
+          lastDeliveredSeq = baselineSnapshot.seq
+        }
+        for (const event of activeGeneration.events) {
+          if (event.seq <= lastDeliveredSeq) continue
+          listener(event)
+          lastDeliveredSeq = event.seq
+        }
       } else {
-        const state = await this.#loadPersistedState(scope)
-        this.#emitSnapshot(state)
+        const cachedState = this.#liveStates.get(key)
+        if (cachedState) {
+          listener(cachedState)
+          lastDeliveredSeq = cachedState.seq
+        } else {
+          const state = await this.#loadPersistedState(scope)
+          const snapshot = this.#toSnapshotEvent(state)
+          this.#cacheSnapshot(snapshot)
+          listener(snapshot)
+          lastDeliveredSeq = snapshot.seq
+        }
+      }
+
+      initializing = false
+      for (const event of queuedEvents) {
+        if (event.seq <= lastDeliveredSeq) continue
+        listener(event)
+        lastDeliveredSeq = event.seq
       }
     } catch (error) {
-      listeners.delete(listener)
+      listeners.delete(wrappedListener)
       if (listeners.size === 0) {
         this.#listeners.delete(key)
       }
@@ -389,11 +502,12 @@ export class InlineRuntime {
       const current = this.#listeners.get(key)
       if (!current) return
 
-      current.delete(listener)
+      current.delete(wrappedListener)
       if (current.size === 0) {
         this.#listeners.delete(key)
         if (!this.#activeGenerations.has(key)) {
           this.#liveStates.delete(key)
+          this.#eventSeqByKey.delete(key)
         }
       }
     }
@@ -466,18 +580,19 @@ export class InlineRuntime {
     const generationId = nanoid()
     const controller = new AbortController()
     const requesterClientName = normalizeRequesterClientName(input.requesterClientName)
+    const startedState = createObserveState(input, {
+      seq: this.#nextSeq(key),
+      session: sessionWithUserMessage,
+      generating: true,
+      generationId,
+    })
+    const startedSnapshot = this.#toSnapshotEvent(startedState)
     this.#activeGenerations.set(key, {
       id: generationId,
       controller,
+      events: [startedSnapshot],
     })
-
-    this.#emitSnapshot(
-      createObserveState(input, {
-        session: sessionWithUserMessage,
-        generating: true,
-        generationId,
-      })
-    )
+    this.#emitEvent(startedSnapshot)
 
     void this.#runGeneration(
       input,
@@ -617,12 +732,18 @@ export class InlineRuntime {
             if (nextSession === finalSession) return
 
             finalSession = nextSession
+            const active = this.#activeGenerations.get(key)
+            const seq = this.#nextSeq(key)
             this.#emitSnapshot(
               createObserveState(input, {
+                seq,
                 session: finalSession,
                 generating: true,
                 generationId,
-              })
+              }),
+              {
+                recordInGeneration: active?.id === generationId ? generationId : null,
+              }
             )
           })
         },
@@ -663,10 +784,30 @@ export class InlineRuntime {
         },
       })
 
+      const [chunkStream, messageStream] = uiStream.tee()
+      let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null = chunkStream.getReader()
+      const chunkForwardTask = (async () => {
+        const reader = chunkReader
+        if (!reader) return
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            this.#emitStreamChunk(input, generationId, value)
+          }
+        } catch (error) {
+          if (!(error instanceof Error && error.name === 'AbortError') && !controller.signal.aborted) {
+            console.error('Inline UI chunk forwarding failed', error)
+          }
+        } finally {
+          reader.releaseLock()
+        }
+      })()
+
       let latestAssistant: UIMessage | null = null
       for await (const assistantMessage of readUIMessageStream<UIMessage>({
         message: latestAssistant ?? undefined,
-        stream: uiStream,
+        stream: messageStream,
         terminateOnError: false,
         onError: (error) => {
           console.warn('Failed to read inline AI UI message stream', { error })
@@ -674,14 +815,17 @@ export class InlineRuntime {
       })) {
         latestAssistant = assistantMessage
         finalSession = upsertAssistantMessage(finalSession, assistantMessage)
-        this.#emitSnapshot(
-          createObserveState(input, {
-            session: finalSession,
-            generating: true,
-            generationId,
-          })
-        )
       }
+
+      if (chunkReader) {
+        try {
+          await chunkReader.cancel()
+        } catch {
+          // Ignore cancellation errors when stream already closed.
+        }
+      }
+      chunkReader = null
+      await chunkForwardTask
     } catch (error) {
       if (!(error instanceof Error && error.name === 'AbortError')) {
         console.error('Inline prompt generation failed', error)
@@ -712,6 +856,7 @@ export class InlineRuntime {
 
       this.#emitSnapshot(
         createObserveState(input, {
+          seq: this.#nextSeq(key),
           session: sessionForSnapshot,
           generating: false,
           generationId: null,
@@ -757,32 +902,27 @@ export class InlineRuntime {
 
     const activeGeneration = this.#activeGenerations.get(toInlineKey(scope))
     return createObserveState(scope, {
+      seq: this.#nextSeq(toInlineKey(scope)),
       session,
       generating: Boolean(activeGeneration),
       generationId: activeGeneration?.id ?? null,
     })
   }
 
-  #emitSnapshot(state: InlineObserveState): void {
+  #emitSnapshot(
+    state: InlineObserveState,
+    options: { recordInGeneration?: string | null } = {}
+  ): void {
     const snapshot = this.#toSnapshotEvent(state)
-
     const key = toInlineKey(state)
-    if (this.#shouldRetainState(key)) {
-      this.#liveStates.set(key, snapshot)
-    } else {
-      this.#liveStates.delete(key)
-    }
-
-    const listeners = this.#listeners.get(key)
-    if (!listeners) return
-
-    for (const listener of listeners) {
-      try {
-        listener(snapshot)
-      } catch (error) {
-        console.error('Inline observe listener failed', error)
+    if (options.recordInGeneration) {
+      const active = this.#activeGenerations.get(key)
+      if (active?.id === options.recordInGeneration) {
+        active.events.push(snapshot)
       }
     }
+
+    this.#emitEvent(snapshot)
   }
 }
 
