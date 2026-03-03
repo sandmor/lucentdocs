@@ -26,6 +26,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   const [isThreadBrowserOpen, setIsThreadBrowserOpen] = useState(false)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const shouldStickToBottomRef = useRef(true)
   const activeThreadIdRef = useRef<string | null>(null)
 
   const queryEnabled = Boolean(projectId && documentId)
@@ -241,8 +242,32 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   )
 
   useEffect(() => {
-    if (!scrollRef.current) return
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const scrollElement = scrollRef.current
+    if (!scrollElement) return
+
+    const updateStickiness = () => {
+      const bottomDistance =
+        scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight
+      shouldStickToBottomRef.current = bottomDistance <= 80
+    }
+
+    updateStickiness()
+    scrollElement.addEventListener('scroll', updateStickiness, { passive: true })
+    return () => {
+      scrollElement.removeEventListener('scroll', updateStickiness)
+    }
+  }, [])
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current
+    if (!scrollElement || !shouldStickToBottomRef.current) return
+
+    const rafId = requestAnimationFrame(() => {
+      scrollElement.scrollTop = scrollElement.scrollHeight
+    })
+    return () => {
+      cancelAnimationFrame(rafId)
+    }
   }, [messages])
 
   const createThread = useCallback(async () => {
@@ -362,6 +387,15 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
     }
   }
 
+  const streamingAssistantMessageId = useMemo(() => {
+    if (!isGenerating) return null
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]
+      if (message?.role === 'assistant') return message.id
+    }
+    return null
+  }, [isGenerating, messages])
+
   return (
     <div className={cn('relative flex h-full flex-col', className)}>
       <div className="border-b bg-background/70 px-4 py-3 backdrop-blur">
@@ -442,13 +476,11 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
         {messages.length === 0 && <EmptyChatState onSuggestionClick={setInput} />}
 
-        {messages.map((message, index) => (
+        {messages.map((message) => (
           <ChatBubble
             key={message.id}
             message={message}
-            isStreaming={
-              isGenerating && index === messages.length - 1 && message.role === 'assistant'
-            }
+            isStreaming={streamingAssistantMessageId === message.id}
           />
         ))}
       </div>

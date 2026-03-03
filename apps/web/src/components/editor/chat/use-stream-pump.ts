@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react'
 import type { UIMessage, UIMessageChunk } from 'ai'
-import { upsertAssistantMessage } from './message-utils'
+import { cloneUIMessage, upsertAssistantMessage } from './message-utils'
 import { createUIMessageChunkPump, type UIMessageChunkPump } from '../ai/ui-message-chunk-pump'
 
 interface UseChatStreamPumpOptions {
@@ -25,15 +25,35 @@ export function useChatStreamPump({
   const streamAssistantRef = useRef<UIMessage | null>(null)
   const streamGenerationIdRef = useRef<string | null>(null)
   const pumpRef = useRef<UIMessageChunkPump | null>(null)
+  const isThreadActiveRef = useRef(isThreadActive)
+  const onAssistantMessageRef = useRef(onAssistantMessage)
+  const onGeneratingChangeRef = useRef(onGeneratingChange)
+
+  useEffect(() => {
+    isThreadActiveRef.current = isThreadActive
+  }, [isThreadActive])
+
+  useEffect(() => {
+    onAssistantMessageRef.current = onAssistantMessage
+  }, [onAssistantMessage])
+
+  useEffect(() => {
+    onGeneratingChangeRef.current = onGeneratingChange
+  }, [onGeneratingChange])
 
   useEffect(() => {
     const pump = createUIMessageChunkPump({
-      isScopeActive: isThreadActive,
+      // Keep chat responsive while reducing render pressure during fast token streams.
+      emitIntervalMs: 32,
+      isScopeActive: (chatId) => isThreadActiveRef.current(chatId),
       onMessage: (nextMessage) => {
-        streamAssistantRef.current = nextMessage
-        onAssistantMessage((previous) => upsertAssistantMessage(previous, nextMessage))
+        const nextMessageClone = cloneUIMessage(nextMessage)
+        streamAssistantRef.current = nextMessageClone
+        onAssistantMessageRef.current((previous) =>
+          upsertAssistantMessage(previous, nextMessageClone)
+        )
       },
-      onGeneratingChange,
+      onGeneratingChange: (generating) => onGeneratingChangeRef.current(generating),
       onError: (error) => {
         console.warn('Chat stream chunk pump failed', { error })
       },
@@ -46,7 +66,7 @@ export function useChatStreamPump({
         pumpRef.current = null
       }
     }
-  }, [isThreadActive, onAssistantMessage, onGeneratingChange])
+  }, [])
 
   const stopStreamChunkPump = useCallback(() => {
     pumpRef.current?.stop()

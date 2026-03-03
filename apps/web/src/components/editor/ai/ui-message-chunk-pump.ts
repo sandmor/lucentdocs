@@ -5,6 +5,7 @@ interface CreateUIMessageChunkPumpOptions {
   onMessage: (message: UIMessage) => void
   onGeneratingChange?: (generating: boolean) => void
   onError?: (error: unknown) => void
+  emitIntervalMs?: number
 }
 
 export interface UIMessageChunkPump {
@@ -20,9 +21,48 @@ export function createUIMessageChunkPump(
 ): UIMessageChunkPump {
   let latestMessage: UIMessage | null = null
   let activeGenerationId: string | null = null
+  let activeScopeId: string | null = null
   let streamController: ReadableStreamDefaultController<UIMessageChunk> | null = null
+  let pendingMessage: UIMessage | null = null
+  let emitTimer: ReturnType<typeof setTimeout> | null = null
+  const emitIntervalMs = Math.max(0, Math.round(options.emitIntervalMs ?? 48))
+
+  const clearEmitTimer = () => {
+    if (emitTimer !== null) {
+      clearTimeout(emitTimer)
+      emitTimer = null
+    }
+  }
+
+  const flushPendingMessage = () => {
+    if (!pendingMessage) return
+    if (!activeScopeId || !options.isScopeActive(activeScopeId)) {
+      pendingMessage = null
+      return
+    }
+
+    const nextMessage = pendingMessage
+    pendingMessage = null
+    latestMessage = nextMessage
+    options.onGeneratingChange?.(true)
+    options.onMessage(nextMessage)
+  }
+
+  const scheduleMessageFlush = () => {
+    if (emitIntervalMs === 0) {
+      flushPendingMessage()
+      return
+    }
+    if (emitTimer !== null) return
+    emitTimer = setTimeout(() => {
+      emitTimer = null
+      flushPendingMessage()
+    }, emitIntervalMs)
+  }
 
   const stop = () => {
+    clearEmitTimer()
+    flushPendingMessage()
     if (streamController) {
       try {
         streamController.close()
@@ -31,14 +71,17 @@ export function createUIMessageChunkPump(
       }
     }
     streamController = null
+    pendingMessage = null
     latestMessage = null
     activeGenerationId = null
+    activeScopeId = null
   }
 
   const start = (generationId: string, seedMessage: UIMessage | null, scopeId: string) => {
     stop()
     latestMessage = seedMessage
     activeGenerationId = generationId
+    activeScopeId = scopeId
 
     const chunkStream = new ReadableStream<UIMessageChunk>({
       start(controller) {
@@ -60,10 +103,11 @@ export function createUIMessageChunkPump(
           continue
         }
         current = nextMessage
-        latestMessage = nextMessage
-        options.onGeneratingChange?.(true)
-        options.onMessage(nextMessage)
+        pendingMessage = nextMessage
+        scheduleMessageFlush()
       }
+      clearEmitTimer()
+      flushPendingMessage()
     })().catch((error) => {
       options.onError?.(error)
     })

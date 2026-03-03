@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { UIMessage } from 'ai'
 import { BookOpen, Eye, MessageSquareQuote, Search, Trash2, User } from 'lucide-react'
 import { Streamdown } from 'streamdown'
@@ -48,7 +49,7 @@ export function ThreadRow({
   )
 }
 
-export function ChatBubble({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
+function ChatBubbleImpl({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
   const isUser = message.role === 'user'
   const text = extractMessageText(message)
   const toolParts = extractToolParts(message)
@@ -103,6 +104,12 @@ export function ChatBubble({ message, isStreaming }: { message: UIMessage; isStr
     </div>
   )
 }
+
+export const ChatBubble = memo(
+  ChatBubbleImpl,
+  (previous, next) =>
+    previous.isStreaming === next.isStreaming && previous.message === next.message
+)
 
 function TypingIndicator({ compact = false }: { compact?: boolean }) {
   if (compact) {

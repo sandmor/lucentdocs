@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
 import type { InlineZoneSession } from '@plotline/shared'
 import { useAnimatedPresence, useMountAnimationPhase, useSelectionComposeController } from './hooks'
+import { AI_ZONE_CONTROL_LAYOUT_EVENT, emitAIZoneControlLayoutChange } from './layout-events'
 import { AIZoneSurface, SelectionComposeSurface } from './surfaces'
 import type { InlineControlState } from './types'
 import {
@@ -119,39 +120,20 @@ export function SelectionComposeFloatingControl({
     window.addEventListener('resize', scheduleUpdate)
     window.addEventListener('scroll', scheduleUpdate, true)
 
-    const controlsObserver = new MutationObserver(() => {
+    const handleZoneControlLayout = () => {
       scheduleUpdate()
-    })
-
-    const watchControls = () => {
-      controlsObserver.disconnect()
-      const zoneControls = document.querySelectorAll<HTMLElement>('.ai-writer-floating-controls')
-      for (const control of zoneControls) {
-        if (control === floating) continue
-        controlsObserver.observe(control, {
-          attributes: true,
-          attributeFilter: ['style', 'class'],
-        })
-      }
     }
 
-    watchControls()
-
-    const controlsListObserver = new MutationObserver(() => {
-      watchControls()
-      scheduleUpdate()
-    })
-    controlsListObserver.observe(document.body, { childList: true, subtree: true })
+    window.addEventListener(AI_ZONE_CONTROL_LAYOUT_EVENT, handleZoneControlLayout)
 
     return () => {
       cancelled = true
       cancelAnimationFrame(rafId)
       floatingResizeObserver.disconnect()
       editorResizeObserver.disconnect()
-      controlsObserver.disconnect()
-      controlsListObserver.disconnect()
       window.removeEventListener('resize', scheduleUpdate)
       window.removeEventListener('scroll', scheduleUpdate, true)
+      window.removeEventListener(AI_ZONE_CONTROL_LAYOUT_EVENT, handleZoneControlLayout)
     }
   }, [view, anchoredSelection, controls.prompt.length, presence.mounted])
 
@@ -202,7 +184,16 @@ export function AIZoneFloatingControl({
   onDismissChoices,
 }: AIZoneFloatingControlProps) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const fromRef = useRef(from)
+  const toRef = useRef(to)
+  const scheduleUpdateRef = useRef<(() => void) | null>(null)
   const animationPhase = useMountAnimationPhase()
+
+  useEffect(() => {
+    fromRef.current = from
+    toRef.current = to
+    scheduleUpdateRef.current?.()
+  }, [from, to])
 
   const getZoneAnchorElement = useCallback((): HTMLElement | null => {
     if (!zoneId) return null
@@ -223,28 +214,62 @@ export function AIZoneFloatingControl({
     if (!rootRef.current) return
 
     const el = rootRef.current
+    let cancelled = false
+    let rafId = 0
+    let notifyLayoutRafId = 0
+    let positionRequestId = 0
 
-    const updatePosition = () => {
+    const queueLayoutNotification = () => {
+      if (cancelled || notifyLayoutRafId !== 0) return
+      notifyLayoutRafId = requestAnimationFrame(() => {
+        notifyLayoutRafId = 0
+        if (!cancelled) {
+          emitAIZoneControlLayoutChange()
+        }
+      })
+    }
+
+    const applyComputedPosition = (x: number, y: number) => {
+      if (cancelled) return
+      const roundedX = Math.round(x)
+      const roundedY = Math.round(y)
+      const nextLeft = `${roundedX}px`
+      const nextTop = `${roundedY}px`
+
+      if (el.style.left === nextLeft && el.style.top === nextTop) {
+        return
+      }
+
+      el.style.left = nextLeft
+      el.style.top = nextTop
+      queueLayoutNotification()
+    }
+
+    const updatePosition = async () => {
       const anchorElement = getZoneAnchorElement()
+      const requestId = ++positionRequestId
 
       if (anchorElement) {
-        computePosition(anchorElement, el, {
-          placement: 'bottom-start',
-          middleware: [
-            offset(8),
-            flip({ fallbackAxisSideDirection: 'end' }),
-            shift({ padding: 8 }),
-          ],
-        }).then(({ x, y }) => {
-          el.style.left = `${Math.round(x)}px`
-          el.style.top = `${Math.round(y)}px`
-        })
+        try {
+          const result = await computePosition(anchorElement, el, {
+            placement: 'bottom-start',
+            middleware: [
+              offset(8),
+              flip({ fallbackAxisSideDirection: 'end' }),
+              shift({ padding: 8 }),
+            ],
+          })
+          if (cancelled || requestId !== positionRequestId) return
+          applyComputedPosition(result.x, result.y)
+        } catch {
+          // ignore transient compute errors while the editor DOM is mutating
+        }
         return
       }
 
       const docSize = view.state.doc.content.size
-      const safeFrom = Math.max(0, Math.min(Math.min(from, to), docSize))
-      const safeTo = Math.max(0, Math.min(Math.max(from, to), docSize))
+      const safeFrom = Math.max(0, Math.min(Math.min(fromRef.current, toRef.current), docSize))
+      const safeTo = Math.max(0, Math.min(Math.max(fromRef.current, toRef.current), docSize))
       const fallbackPos = Math.max(0, Math.min(safeTo || safeFrom, docSize))
       const coords = view.coordsAtPos(fallbackPos)
       const virtualEl = {
@@ -252,29 +277,47 @@ export function AIZoneFloatingControl({
           new DOMRect(coords.left, coords.top, Math.max(1, coords.right - coords.left), 1),
       }
 
-      computePosition(virtualEl, el, {
-        placement: 'bottom-start',
-        middleware: [offset(8), flip({ fallbackAxisSideDirection: 'end' }), shift({ padding: 8 })],
-      }).then(({ x, y }) => {
-        el.style.left = `${Math.round(x)}px`
-        el.style.top = `${Math.round(y)}px`
+      try {
+        const result = await computePosition(virtualEl, el, {
+          placement: 'bottom-start',
+          middleware: [offset(8), flip({ fallbackAxisSideDirection: 'end' }), shift({ padding: 8 })],
+        })
+        if (cancelled || requestId !== positionRequestId) return
+        applyComputedPosition(result.x, result.y)
+      } catch {
+        // ignore transient compute errors while the editor DOM is mutating
+      }
+    }
+
+    const scheduleUpdate = () => {
+      if (cancelled) return
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => {
+        void updatePosition()
       })
     }
 
-    updatePosition()
-    const cleanup = autoUpdate(view.dom as HTMLElement, el, updatePosition, {
-      animationFrame: true,
-    })
+    scheduleUpdateRef.current = scheduleUpdate
+    scheduleUpdate()
+    const resizeObserver = new ResizeObserver(scheduleUpdate)
+    resizeObserver.observe(el)
+    const cleanupAutoUpdate = autoUpdate(view.dom as HTMLElement, el, scheduleUpdate)
 
     return () => {
-      cleanup()
+      cancelled = true
+      scheduleUpdateRef.current = null
+      cancelAnimationFrame(rafId)
+      cancelAnimationFrame(notifyLayoutRafId)
+      resizeObserver.disconnect()
+      cleanupAutoUpdate()
+      emitAIZoneControlLayoutChange()
     }
-  }, [view, zoneId, from, to, state, stuck, session?.choices.length, getZoneAnchorElement])
+  }, [view, zoneId, getZoneAnchorElement])
 
   return createPortal(
     <AIZoneSurface
       rootRef={rootRef}
-      className="ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-desktop fixed z-60 flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
+      className="ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-desktop fixed z-60 flex min-w-0 w-[min(94vw,420px)] flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
       animationPhase={animationPhase}
       zoneId={zoneId}
       state={state}

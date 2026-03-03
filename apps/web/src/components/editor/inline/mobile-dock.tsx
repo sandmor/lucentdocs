@@ -112,24 +112,37 @@ export function MobileInlineAIDock({
     }
 
     const dockEl = dockRef.current
+    let rafId = 0
+
     const updateDockLayout = () => {
       const dockHeight = Math.max(0, Math.round(dockEl.getBoundingClientRect().height))
       const offset = Math.max(0, viewportBottomOffset)
       setDockLayoutVariables(offset, dockHeight + offset)
     }
 
-    updateDockLayout()
+    const scheduleDockLayoutUpdate = () => {
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(updateDockLayout)
+    }
 
-    const resizeObserver = new ResizeObserver(updateDockLayout)
+    scheduleDockLayoutUpdate()
+
+    const resizeObserver = new ResizeObserver(scheduleDockLayoutUpdate)
     resizeObserver.observe(dockEl)
-    window.addEventListener('resize', updateDockLayout)
+    window.addEventListener('resize', scheduleDockLayoutUpdate)
 
     return () => {
+      cancelAnimationFrame(rafId)
       resizeObserver.disconnect()
-      window.removeEventListener('resize', updateDockLayout)
+      window.removeEventListener('resize', scheduleDockLayoutUpdate)
+    }
+  }, [presence.mounted, viewportBottomOffset])
+
+  useEffect(() => {
+    return () => {
       setDockLayoutVariables(0, 0)
     }
-  }, [presence.mounted, viewportBottomOffset, activeMode])
+  }, [])
 
   const moveReviewSelection = useCallback(
     (direction: -1 | 1) => {

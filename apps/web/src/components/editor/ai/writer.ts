@@ -75,6 +75,15 @@ export function createAIWriterController(
   const toToolChipState = (rawState: string): InlineToolChip['state'] =>
     rawState === 'output-available' ? 'complete' : 'pending'
 
+  const areToolChipListsEqual = (left: InlineToolChip[], right: InlineToolChip[]): boolean => {
+    if (left.length !== right.length) return false
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index]?.toolName !== right[index]?.toolName) return false
+      if (left[index]?.state !== right[index]?.state) return false
+    }
+    return true
+  }
+
   const extractInlineToolsFromMessage = (message: UIMessage): InlineToolChip[] => {
     const tools: InlineToolChip[] = []
 
@@ -132,6 +141,13 @@ export function createAIWriterController(
     }
 
     if (last?.role === 'assistant') {
+      const unchanged =
+        last.id === assistant.id &&
+        last.text === assistant.text &&
+        areToolChipListsEqual(last.tools, assistant.tools)
+      if (unchanged) {
+        return session
+      }
       messages[messages.length - 1] = assistant
     } else {
       messages.push(assistant)
@@ -267,6 +283,7 @@ export function createAIWriterController(
     let activeGenerationId: string | null = null
     let lastInlineEventSeq = 0
     const chunkPump = createUIMessageChunkPump({
+      emitIntervalMs: 48,
       isScopeActive: (scopeId) => scopeId === sessionId,
       onGeneratingChange: onStreamingChange ?? undefined,
       onMessage: (nextMessage) => {

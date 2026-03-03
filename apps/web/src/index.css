@@ -316,6 +316,7 @@
   margin-right: auto;
   max-height: min(45dvh, 360px);
   overflow: auto;
+  scrollbar-gutter: stable both-edges;
 }
 
 @keyframes ai-inline-enter-desktop {

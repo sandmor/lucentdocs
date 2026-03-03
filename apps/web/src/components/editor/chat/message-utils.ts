@@ -9,6 +9,18 @@ export function asUIMessageArray(value: unknown): UIMessage[] {
   return Array.isArray(value) ? (value as UIMessage[]) : []
 }
 
+export function cloneUIMessage(message: UIMessage): UIMessage {
+  try {
+    if (typeof structuredClone === 'function') {
+      return structuredClone(message)
+    }
+  } catch {
+    // fallback below
+  }
+
+  return JSON.parse(JSON.stringify(message)) as UIMessage
+}
+
 export function upsertAssistantMessage(messages: UIMessage[], assistantMessage: UIMessage): UIMessage[] {
   if (messages.length === 0) {
     return [assistantMessage]
