@@ -166,6 +166,7 @@ interface AIZoneFloatingControlProps {
   session: InlineZoneSession | null
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
+  onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
 }
@@ -180,6 +181,7 @@ export function AIZoneFloatingControl({
   session,
   onAccept,
   onReject,
+  onStop,
   onContinuePrompt,
   onDismissChoices,
 }: AIZoneFloatingControlProps) {
@@ -328,6 +330,7 @@ export function AIZoneFloatingControl({
       view={view}
       onAccept={onAccept}
       onReject={onReject}
+      onStop={onStop}
       onContinuePrompt={onContinuePrompt}
       onDismissChoices={onDismissChoices}
     />,

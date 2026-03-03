@@ -1,11 +1,10 @@
 import { type Node as ProseMirrorNode } from 'prosemirror-model'
 import { Transform } from 'prosemirror-transform'
 import {
-  parseMarkdownishToSlice,
   type InlineZoneWriteAction,
   hasMeaningfulGap,
   parseZoneNodeAttrs,
-  wrapSliceWithZoneNodes,
+  createWrappedZoneSliceFromText,
   type AIZoneAttrs,
 } from '@plotline/shared'
 
@@ -16,6 +15,13 @@ interface SessionZone {
   sessionId: string
   originalSlice: string | null
   streaming: boolean
+}
+
+interface SessionZoneSegment {
+  id: string
+  nodeFrom: number
+  sessionId: string
+  originalSlice: string | null
 }
 
 function collectSessionZones(doc: ProseMirrorNode, sessionId: string): SessionZone[] {
@@ -67,6 +73,29 @@ function collectSessionZones(doc: ProseMirrorNode, sessionId: string): SessionZo
   return [...byId.values()].sort((left, right) => left.nodeFrom - right.nodeFrom)
 }
 
+function collectSessionZoneSegments(doc: ProseMirrorNode, sessionId: string): SessionZoneSegment[] {
+  const zoneType = doc.type.schema.nodes.ai_zone
+  if (!zoneType) return []
+
+  const segments: SessionZoneSegment[] = []
+  doc.descendants((node, pos) => {
+    if (node.type !== zoneType) return true
+
+    const parsed = parseZoneNodeAttrs(node.attrs, { requireSessionId: true })
+    if (!parsed || parsed.sessionId !== sessionId) return false
+
+    segments.push({
+      id: parsed.id,
+      nodeFrom: pos,
+      sessionId: parsed.sessionId!,
+      originalSlice: parsed.originalSlice,
+    })
+    return false
+  })
+
+  return segments.sort((left, right) => left.nodeFrom - right.nodeFrom)
+}
+
 function resolveSessionZone(doc: ProseMirrorNode, sessionId: string): SessionZone | null {
   const zones = collectSessionZones(doc, sessionId)
   if (zones.length === 0) return null
@@ -101,7 +130,6 @@ export function applyInlineZoneWriteActionToDoc(
   const toOffset = Math.max(fromOffset, Math.min(action.toOffset, zoneLength))
 
   const nextText = `${zoneText.slice(0, fromOffset)}${action.content}${zoneText.slice(toOffset)}`
-  const replacement = parseMarkdownishToSlice(nextText)
 
   const zoneType = doc.type.schema.nodes.ai_zone
   if (!zoneType) {
@@ -118,10 +146,62 @@ export function applyInlineZoneWriteActionToDoc(
     sessionId: zone.sessionId,
     originalSlice: zone.originalSlice,
   }
-  const wrappedReplacement = wrapSliceWithZoneNodes(replacement, zoneType, attrs)
+  const wrappedReplacement = createWrappedZoneSliceFromText(
+    doc,
+    zone.nodeFrom,
+    zone.nodeTo,
+    nextText,
+    zoneType,
+    attrs
+  )
 
   const tr = new Transform(doc)
   tr.replaceRange(zone.nodeFrom, zone.nodeTo, wrappedReplacement)
+
+  return {
+    changed: !tr.doc.eq(doc),
+    nextDoc: tr.doc,
+    zoneFound: true,
+  }
+}
+
+export function setInlineZoneStreamingInDoc(
+  doc: ProseMirrorNode,
+  sessionId: string,
+  streaming: boolean
+): { changed: boolean; nextDoc: ProseMirrorNode; zoneFound: boolean } {
+  const segments = collectSessionZoneSegments(doc, sessionId)
+  if (segments.length === 0) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const zoneType = doc.type.schema.nodes.ai_zone
+  if (!zoneType) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const tr = new Transform(doc)
+  for (const segment of segments.sort((left, right) => right.nodeFrom - left.nodeFrom)) {
+    const attrs: AIZoneAttrs = {
+      id: segment.id,
+      streaming,
+      sessionId: segment.sessionId,
+      originalSlice: segment.originalSlice,
+    }
+
+    const segmentFrom = tr.mapping.map(segment.nodeFrom, -1)
+    const node = tr.doc.nodeAt(segmentFrom)
+    if (!node || node.type !== zoneType) continue
+    tr.setNodeMarkup(segmentFrom, zoneType, attrs)
+  }
 
   return {
     changed: !tr.doc.eq(doc),

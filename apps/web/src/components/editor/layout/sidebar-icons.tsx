@@ -34,6 +34,8 @@ export function SidebarIconBar({
         return (
           <Tooltip key={id}>
             <TooltipTrigger
+              aria-label={label}
+              data-sidebar-panel={id}
               className={cn(
                 'relative flex size-9 cursor-pointer items-center justify-center rounded-lg transition-all duration-200',
                 'hover:bg-muted/40 hover:text-foreground/90',

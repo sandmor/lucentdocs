@@ -75,6 +75,30 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
     [threads, activeThreadId]
   )
 
+  const resetLocalChatState = useCallback(
+    (
+      options: {
+        clearInput?: boolean
+        clearThread?: boolean
+        closeThreadBrowser?: boolean
+      } = {}
+    ) => {
+      setMessages([])
+      setIsGenerating(false)
+      if (options.clearInput) {
+        setInput('')
+      }
+      if (options.clearThread) {
+        setActiveThreadId(null)
+      }
+      if (options.closeThreadBrowser) {
+        setIsThreadBrowserOpen(false)
+      }
+      stopStreamChunkPump()
+    },
+    [stopStreamChunkPump]
+  )
+
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId
   }, [activeThreadId])
@@ -84,18 +108,17 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
 
     queueMicrotask(() => {
       if (cancelled) return
-      setMessages([])
-      setInput('')
-      setIsGenerating(false)
-      setIsThreadBrowserOpen(false)
-      setActiveThreadId(null)
-      stopStreamChunkPump()
+      resetLocalChatState({
+        clearInput: true,
+        clearThread: true,
+        closeThreadBrowser: true,
+      })
     })
 
     return () => {
       cancelled = true
     }
-  }, [documentKey, stopStreamChunkPump])
+  }, [documentKey, resetLocalChatState])
 
   useEffect(() => {
     if (!queryEnabled) return
@@ -105,26 +128,19 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
     if (threads.length === 0 && activeThreadId !== null) {
       queueMicrotask(() => {
         if (cancelled) return
-        setActiveThreadId(null)
-        setMessages([])
-        setInput('')
-        setIsGenerating(false)
-        stopStreamChunkPump()
+        resetLocalChatState({ clearInput: true, clearThread: true })
       })
     } else if (activeThreadId && !threads.some((thread) => thread.id === activeThreadId)) {
       queueMicrotask(() => {
         if (cancelled) return
-        setActiveThreadId(null)
-        setMessages([])
-        setIsGenerating(false)
-        stopStreamChunkPump()
+        resetLocalChatState({ clearThread: true })
       })
     }
 
     return () => {
       cancelled = true
     }
-  }, [activeThreadId, queryEnabled, stopStreamChunkPump, threads])
+  }, [activeThreadId, queryEnabled, resetLocalChatState, threads])
 
   useEffect(() => {
     if (!activeThreadId || !activeThreadQuery.data) return
@@ -167,10 +183,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
         }
 
         if (event.deleted || !event.thread) {
-          setIsGenerating(false)
-          setMessages([])
-          setActiveThreadId(null)
-          stopStreamChunkPump()
+          resetLocalChatState({ clearThread: true })
           utils.chat.listByDocument.setData({ projectId, documentId }, (previous) => {
             const current = previous?.threads ?? []
             return { threads: current.filter((thread) => thread.id !== activeThreadId) }
@@ -310,11 +323,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
         })
 
         if (activeThreadId === threadId) {
-          setMessages([])
-          setInput('')
-          setIsGenerating(false)
-          setActiveThreadId(null)
-          stopStreamChunkPump()
+          resetLocalChatState({ clearInput: true, clearThread: true })
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to delete chat thread'
@@ -327,7 +336,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       documentId,
       isGenerating,
       projectId,
-      stopStreamChunkPump,
+      resetLocalChatState,
       utils.chat.listByDocument,
     ]
   )
@@ -340,6 +349,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
         projectId,
         documentId,
         chatId: activeThreadId,
+        generationId: streamGenerationIdRef.current ?? undefined,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to stop generation'
@@ -356,9 +366,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       targetChatId = await createThread()
       if (!targetChatId) return
       setActiveThreadId(targetChatId)
-      setMessages([])
-      setIsGenerating(false)
-      stopStreamChunkPump()
+      resetLocalChatState()
     }
 
     setInput('')
@@ -397,7 +405,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   }, [isGenerating, messages])
 
   return (
-    <div className={cn('relative flex h-full flex-col', className)}>
+    <div data-chat-panel="true" className={cn('relative flex h-full flex-col', className)}>
       <div className="border-b bg-background/70 px-4 py-3 backdrop-blur">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -412,13 +420,10 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
             <Button
               variant="ghost"
               size="icon-sm"
+              data-chat-new-thread="true"
               disabled={!queryEnabled || isGenerating}
               onClick={() => {
-                setActiveThreadId(null)
-                setMessages([])
-                setInput('')
-                setIsGenerating(false)
-                stopStreamChunkPump()
+                resetLocalChatState({ clearInput: true, clearThread: true })
               }}
             >
               <Plus className="size-4" />
@@ -426,6 +431,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
             <Button
               variant="ghost"
               size="icon-sm"
+              data-chat-history-toggle="true"
               disabled={!queryEnabled || threads.length === 0}
               onClick={() => setIsThreadBrowserOpen((value) => !value)}
             >
@@ -434,6 +440,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
             <Button
               variant="ghost"
               size="icon-sm"
+              data-chat-delete-thread="true"
               disabled={
                 !queryEnabled || !activeThreadId || deleteThreadMutation.isPending || isGenerating
               }
@@ -455,9 +462,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
                 active={thread.id === activeThreadId}
                 onSelect={() => {
                   setActiveThreadId(thread.id)
-                  setMessages([])
-                  setIsGenerating(false)
-                  stopStreamChunkPump()
+                  resetLocalChatState()
                 }}
                 onDelete={() => {
                   void deleteThread(thread.id)
@@ -488,6 +493,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       <div className="border-t border-border/50 bg-background/50 p-4">
         <div className="relative rounded-xl border bg-background shadow-sm focus-within:ring-1 focus-within:ring-primary/50">
           <Textarea
+            data-chat-input="true"
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
@@ -500,10 +506,11 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
               <Button
                 variant="ghost"
                 size="icon-sm"
+                data-chat-stop="true"
                 onClick={() => {
                   void handleStop()
                 }}
-                className="text-destructive"
+                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                 disabled={cancelGenerationMutation.isPending}
               >
                 <StopCircle className="size-4.5" />
@@ -512,6 +519,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
               <Button
                 variant="secondary"
                 size="icon-sm"
+                data-chat-send="true"
                 onClick={() => {
                   void handleSend()
                 }}

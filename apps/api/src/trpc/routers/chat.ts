@@ -223,11 +223,12 @@ export const chatRouter = router({
         projectId: idSchema,
         documentId: idSchema,
         chatId: idSchema,
+        generationId: idSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
-      return { canceled: ctx.chatRuntime.cancelGeneration(input) }
+      return { canceled: ctx.chatRuntime.cancelGeneration(input, input.generationId) }
     }),
 
   deleteById: publicProcedure

@@ -14,7 +14,9 @@ export async function createProject(page: PWPage, title: string) {
 
 export async function startInlineGeneration(page: PWPage) {
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter')
-  await expect(page.locator('.ai-generating-text')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toBeVisible({
+    timeout: 15_000,
+  })
 }
 
 export async function placeCaretInsideZoneMiddle(page: PWPage) {
@@ -22,18 +24,21 @@ export async function placeCaretInsideZoneMiddle(page: PWPage) {
     const zone = document.querySelector('.ai-generating-text')
     if (!zone) return
 
-    const textNode = zone.firstChild
-    if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return
-
-    const textLength = textNode.textContent?.length ?? 0
-    if (textLength < 2) return
-
-    const offset = Math.floor(textLength / 2)
     const selection = window.getSelection()
     if (!selection) return
 
     const range = document.createRange()
-    range.setStart(textNode, offset)
+
+    const textNode = zone.firstChild
+    if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+      const textLength = textNode.textContent?.length ?? 0
+      const offset = textLength > 1 ? Math.floor(textLength / 2) : 0
+      range.setStart(textNode, offset)
+    } else {
+      range.selectNodeContents(zone)
+      range.setStart(zone, 0)
+    }
+
     range.collapse(true)
     selection.removeAllRanges()
     selection.addRange(range)

@@ -300,7 +300,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       destroyed = true
       clearTimeout(loadingTimeout)
 
-      aiController.cancelAI()
+      aiController.detachAI()
       aiControllerRef.current = null
 
       if (providerRef.current) {
@@ -413,6 +413,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         }}
         onReject={(zoneId) => {
           if (viewRef.current) aiControllerRef.current?.rejectAI(viewRef.current, zoneId)
+        }}
+        onStop={(zoneId) => {
+          if (!viewRef.current || !aiControllerRef.current) return
+          aiControllerRef.current.cancelAI(viewRef.current, { preserveDoc: true, zoneId })
         }}
         onContinuePrompt={(zoneId, prompt) => {
           if (!viewRef.current || !aiControllerRef.current) return false

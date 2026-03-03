@@ -32,21 +32,26 @@ export interface AIWriterController {
   dismissChoicesForZone: (view: EditorView, zoneId: string) => boolean
   acceptAI: (view: EditorView, zoneId?: string) => void
   rejectAI: (view: EditorView, zoneId?: string) => void
-  cancelAI: (view?: EditorView, options?: { preserveDoc?: boolean }) => void
+  cancelAI: (view?: EditorView, options?: { preserveDoc?: boolean; zoneId?: string }) => void
+  detachAI: () => void
 }
 
-export interface StreamPayload {
-  mode: 'continue' | 'prompt'
+export interface PromptStreamPayload {
+  mode: 'prompt'
   contextBefore: string
   contextAfter?: string
-  prompt?: string
-  selectedText?: string
-  conversation?: string
-}
-
-export interface PromptStreamPayload extends StreamPayload {
-  mode: 'prompt'
   prompt: string
+  selectedText?: string
   selectionFrom: number
   selectionTo: number
 }
+
+export interface ContinuationStreamPayload {
+  mode: 'continue'
+  contextBefore: string
+  contextAfter?: string
+  selectionFrom: number
+  selectionTo: number
+}
+
+export type InlineStreamPayload = PromptStreamPayload | ContinuationStreamPayload

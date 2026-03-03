@@ -112,7 +112,42 @@ export const inlineRouter = router({
       }
 
       try {
-        return await ctx.inlineRuntime.startGeneration(input)
+        return await ctx.inlineRuntime.startGeneration({
+          ...input,
+          mode: 'prompt',
+        })
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
+  startContinuationGeneration: publicProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        sessionId: idSchema,
+        contextBefore: z.string(),
+        contextAfter: z.string().optional(),
+        maxOutputTokens: z.number().int().min(1).optional(),
+        requesterClientName: idSchema.optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const limits = configManager.getConfig().limits
+      const totalContext = input.contextBefore.length + (input.contextAfter?.length ?? 0)
+      if (totalContext > limits.contextChars) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Combined contextBefore and contextAfter exceeds ${limits.contextChars} characters`,
+        })
+      }
+
+      try {
+        return await ctx.inlineRuntime.startGeneration({
+          ...input,
+          mode: 'continue',
+        })
       } catch (error) {
         throw mapRuntimeError(error)
       }
@@ -124,11 +159,12 @@ export const inlineRouter = router({
         projectId: idSchema,
         documentId: idSchema,
         sessionId: idSchema,
+        generationId: idSchema.optional(),
       })
     )
     .mutation(({ ctx, input }) => {
       return {
-        canceled: ctx.inlineRuntime.cancelGeneration(input),
+        canceled: ctx.inlineRuntime.cancelGeneration(input, input.generationId),
       }
     }),
 

@@ -1,4 +1,5 @@
 import { Fragment, Slice, type Node as ProseMirrorNode, type NodeType } from 'prosemirror-model'
+import { parseMarkdownishToSlice } from './markdownish.js'
 
 export interface AIZoneAttrs {
   id: string
@@ -101,4 +102,28 @@ export function wrapSliceWithZoneNodes(
 ): Slice {
   const wrappedContent = wrapFragmentWithZoneNodes(slice.content, nodeType, attrs, true)
   return new Slice(wrappedContent, slice.openStart, slice.openEnd)
+}
+
+export function createWrappedZoneSliceFromText(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+  text: string,
+  nodeType: NodeType,
+  attrs: AIZoneAttrs
+): Slice {
+  const docSize = doc.content.size
+  const clampedFrom = Math.max(0, Math.min(from, docSize))
+  const clampedTo = Math.max(0, Math.min(to, docSize))
+  const rangeFrom = Math.min(clampedFrom, clampedTo)
+  const rangeTo = Math.max(clampedFrom, clampedTo)
+
+  const $from = doc.resolve(rangeFrom)
+  const $to = doc.resolve(rangeTo)
+  const replacement = parseMarkdownishToSlice(text, {
+    openStart: $from.parent.inlineContent,
+    openEnd: $to.parent.inlineContent,
+  })
+
+  return wrapSliceWithZoneNodes(replacement, nodeType, attrs)
 }

@@ -1,6 +1,12 @@
 import { observable } from '@trpc/server/observable'
 import { nanoid } from 'nanoid'
-import { readUIMessageStream, stepCountIs, streamText, type UIMessage, type UIMessageChunk } from 'ai'
+import {
+  readUIMessageStream,
+  stepCountIs,
+  streamText,
+  type UIMessage,
+  type UIMessageChunk,
+} from 'ai'
 import type {
   InlineChatMessage,
   InlineToolChip,
@@ -8,8 +14,12 @@ import type {
   InlineZoneWriteAction,
 } from '@plotline/shared'
 import type { ServiceSet } from '../core/services/types.js'
-import { getLanguageModel } from '../ai/index.js'
-import { assertPromptProtocolMode, resolveSelectionPrompt } from '../ai/prompt-engine.js'
+import { createStreamCleaner, getLanguageModel } from '../ai/index.js'
+import {
+  assertPromptProtocolMode,
+  resolveContinuePrompt,
+  resolveSelectionPrompt,
+} from '../ai/prompt-engine.js'
 import { configManager } from '../config/manager.js'
 import { buildInlineZoneWriteTools, buildReadTools, hasValidToolScope } from '../chat/tools.js'
 import {
@@ -19,7 +29,7 @@ import {
 } from './metadata-store.js'
 import type { RepositorySet } from '../core/ports/types.js'
 import type { YjsRuntime } from '../yjs/runtime.js'
-import { applyInlineZoneWriteActionToDoc } from './zone-write.js'
+import { applyInlineZoneWriteActionToDoc, setInlineZoneStreamingInDoc } from './zone-write.js'
 
 export interface InlineObserveState extends InlineScope {
   sessionId: string
@@ -46,7 +56,8 @@ export interface InlineObserveSnapshotEvent extends InlineObserveState {
 
 export type InlineObserveEvent = InlineObserveSnapshotEvent | InlineObserveChunkEvent
 
-export interface StartInlineGenerationInput extends InlineScope {
+export interface StartInlinePromptGenerationInput extends InlineScope {
+  mode: 'prompt'
   sessionId: string
   contextBefore: string
   contextAfter?: string
@@ -55,6 +66,19 @@ export interface StartInlineGenerationInput extends InlineScope {
   maxOutputTokens?: number
   requesterClientName?: string
 }
+
+export interface StartInlineContinuationGenerationInput extends InlineScope {
+  mode: 'continue'
+  sessionId: string
+  contextBefore: string
+  contextAfter?: string
+  maxOutputTokens?: number
+  requesterClientName?: string
+}
+
+export type StartInlineGenerationInput =
+  | StartInlinePromptGenerationInput
+  | StartInlineContinuationGenerationInput
 
 interface ActiveGeneration {
   id: string
@@ -81,6 +105,41 @@ function resolveTestInlineResponse(prompt: string): string {
   const normalizedPrompt = prompt.trim().toLowerCase()
   if (normalizedPrompt.includes('mobile')) return 'mobile'
   return 'spark'
+}
+
+function resolveTestInlineDelayMs(prompt: string): number {
+  const envDelay = Number(process.env.PLOTLINE_TEST_INLINE_DELAY_MS ?? '')
+  if (Number.isFinite(envDelay) && envDelay > 0) {
+    return Math.round(envDelay)
+  }
+
+  const normalizedPrompt = prompt.trim().toLowerCase()
+  if (normalizedPrompt.includes('slow')) return 1200
+  return 0
+}
+
+async function waitForAbortableDelay(controller: AbortController, delayMs: number): Promise<void> {
+  if (delayMs <= 0) return
+  if (controller.signal.aborted) return
+
+  await new Promise<void>((resolve) => {
+    const onAbort = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      controller.signal.removeEventListener('abort', onAbort)
+      resolve()
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      timeoutId = null
+      controller.signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+
+    controller.signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function toInlineKey(scope: InlineScope & { sessionId: string }): string {
@@ -270,6 +329,16 @@ function applyWriteActionToSession(
     ...session,
     choices: [...nextChoices],
   }
+}
+
+function applyReplaceRangeToText(current: string, action: InlineZoneWriteAction): string {
+  if (action.type !== 'replace_range') {
+    return current
+  }
+
+  const fromOffset = Math.max(0, Math.min(action.fromOffset, current.length))
+  const toOffset = Math.max(fromOffset, Math.min(action.toOffset, current.length))
+  return `${current.slice(0, fromOffset)}${action.content}${current.slice(toOffset)}`
 }
 
 function normalizeRequesterClientName(name: string | undefined): string {
@@ -517,10 +586,11 @@ export class InlineRuntime {
     return this.#activeGenerations.has(toInlineKey(scope))
   }
 
-  cancelGeneration(scope: InlineScope & { sessionId: string }): boolean {
+  cancelGeneration(scope: InlineScope & { sessionId: string }, generationId?: string): boolean {
     const key = toInlineKey(scope)
     const active = this.#activeGenerations.get(key)
     if (!active) return false
+    if (generationId && active.id !== generationId) return false
 
     active.controller.abort()
     return true
@@ -532,13 +602,16 @@ export class InlineRuntime {
       throw new InlineRuntimeError('CONFLICT', 'Inline generation is already in progress.')
     }
 
-    const prompt = input.prompt.trim()
-    const maxPromptChars = configManager.getConfig().limits.promptChars
-    if (!prompt || prompt.length > maxPromptChars) {
-      throw new InlineRuntimeError(
-        'BAD_REQUEST',
-        `Prompt must be between 1 and ${maxPromptChars} characters`
-      )
+    let prompt: string | null = null
+    if (input.mode === 'prompt') {
+      prompt = input.prompt.trim()
+      const maxPromptChars = configManager.getConfig().limits.promptChars
+      if (!prompt || prompt.length > maxPromptChars) {
+        throw new InlineRuntimeError(
+          'BAD_REQUEST',
+          `Prompt must be between 1 and ${maxPromptChars} characters`
+        )
+      }
     }
 
     const documentExists = await this.#store.isDocumentInScope(input)
@@ -558,17 +631,23 @@ export class InlineRuntime {
     }
 
     const baseSession = persistedSession ?? createEmptySession()
-    const sessionWithUserMessage: InlineZoneSession = {
+    const sessionWithContext: InlineZoneSession = {
       ...baseSession,
       contextBefore: baseSession.contextBefore ?? input.contextBefore,
       contextAfter: baseSession.contextAfter ?? input.contextAfter ?? null,
-      messages: [...baseSession.messages, createUserMessage(prompt)],
     }
+    const sessionForGeneration: InlineZoneSession =
+      input.mode === 'prompt' && prompt
+        ? {
+            ...sessionWithContext,
+            messages: [...sessionWithContext.messages, createUserMessage(prompt)],
+          }
+        : sessionWithContext
 
     const userMessageSaved = await this.#store.saveSession(
       input,
       input.sessionId,
-      sessionWithUserMessage
+      sessionForGeneration
     )
     if (!userMessageSaved) {
       throw new InlineRuntimeError(
@@ -582,7 +661,7 @@ export class InlineRuntime {
     const requesterClientName = normalizeRequesterClientName(input.requesterClientName)
     const startedState = createObserveState(input, {
       seq: this.#nextSeq(key),
-      session: sessionWithUserMessage,
+      session: sessionForGeneration,
       generating: true,
       generationId,
     })
@@ -598,8 +677,7 @@ export class InlineRuntime {
       input,
       generationId,
       controller,
-      sessionWithUserMessage,
-      prompt,
+      sessionForGeneration,
       requesterClientName
     )
 
@@ -681,6 +759,30 @@ export class InlineRuntime {
     }
   }
 
+  async #setZoneStreaming(
+    scope: InlineScope & { sessionId: string },
+    streaming: boolean,
+    requesterClientName: string
+  ): Promise<void> {
+    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+      origin: toInlineServerOrigin(requesterClientName),
+      transform: (currentDoc) => {
+        const applied = setInlineZoneStreamingInDoc(currentDoc, scope.sessionId, streaming)
+        return {
+          changed: applied.changed,
+          nextDoc: applied.nextDoc,
+          result: applied,
+        }
+      },
+    })
+
+    if (!transformed.result.zoneFound && streaming) {
+      console.warn(
+        `AI zone for inline session ${scope.sessionId} was not found while setting streaming=${String(streaming)}`
+      )
+    }
+  }
+
   async #enqueueSessionWrite(
     scope: InlineScope & { sessionId: string },
     task: () => Promise<void>
@@ -703,11 +805,11 @@ export class InlineRuntime {
     generationId: string,
     controller: AbortController,
     baseSession: InlineZoneSession,
-    prompt: string,
     requesterClientName: string
   ): Promise<void> {
     const key = toInlineKey(input)
     let finalSession = baseSession
+    let zoneDraftText = input.mode === 'prompt' ? (input.selectedText ?? '') : ''
 
     try {
       if (isTestRuntime()) {
@@ -715,125 +817,221 @@ export class InlineRuntime {
         return
       }
 
-      const rendered = resolveSelectionPrompt(
-        baseSession.contextBefore ?? input.contextBefore,
-        baseSession.contextAfter ?? input.contextAfter ?? null,
-        prompt,
-        input.selectedText ?? null,
-        serializeInlineConversation(baseSession)
-      )
-      assertPromptProtocolMode(rendered.definition, 'prompt')
-
-      const writeTools = buildInlineZoneWriteTools({
-        onWriteAction: async (action) => {
-          await this.#enqueueSessionWrite(input, async () => {
-            await this.#applyWriteActionToDocument(input, action, requesterClientName)
-            const nextSession = applyWriteActionToSession(finalSession, action)
-            if (nextSession === finalSession) return
-
-            finalSession = nextSession
-            const active = this.#activeGenerations.get(key)
-            const seq = this.#nextSeq(key)
-            this.#emitSnapshot(
-              createObserveState(input, {
-                seq,
-                session: finalSession,
-                generating: true,
-                generationId,
-              }),
-              {
-                recordInGeneration: active?.id === generationId ? generationId : null,
-              }
-            )
-          })
-        },
-      })
-
-      const readTools = hasValidToolScope(input)
-        ? buildReadTools({
-            scope: {
-              projectId: input.projectId,
-              documentId: input.documentId,
-            },
-            services: this.#services,
-          })
-        : {}
-
-      const tools = {
-        ...readTools,
-        ...writeTools,
-      }
-
       const model = await getLanguageModel()
       const runtimeLimits = configManager.getConfig().limits
-      const result = streamText({
-        model,
-        system: rendered.systemPrompt,
-        prompt: rendered.userPrompt,
-        tools,
-        stopWhen: stepCountIs(runtimeLimits.aiToolSteps),
-        maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
-        temperature: rendered.definition.defaults.temperature,
-        abortSignal: controller.signal,
-      })
 
-      const uiStream = result.toUIMessageStream({
-        onError: (error) => {
-          console.error('AI inline prompt stream error', error)
-          return error instanceof Error ? error.message : 'Inline AI stream failed'
-        },
-      })
+      if (input.mode === 'continue') {
+        const contextBefore = baseSession.contextBefore ?? input.contextBefore
+        const contextAfter = baseSession.contextAfter ?? input.contextAfter ?? null
+        const rendered = resolveContinuePrompt(contextBefore, contextAfter)
+        assertPromptProtocolMode(rendered.definition, 'continue')
+        const cleaner = createStreamCleaner(contextBefore, contextAfter)
+        const result = streamText({
+          model,
+          system: rendered.systemPrompt,
+          prompt: rendered.userPrompt,
+          maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+          temperature: rendered.definition.defaults.temperature,
+          abortSignal: controller.signal,
+        })
 
-      const [chunkStream, messageStream] = uiStream.tee()
-      let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null = chunkStream.getReader()
-      const chunkForwardTask = (async () => {
-        const reader = chunkReader
-        if (!reader) return
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            this.#emitStreamChunk(input, generationId, value)
+        let generatedText = ''
+        const appendGeneratedText = async (rawText: string) => {
+          if (!rawText) return
+          generatedText += rawText
+          zoneDraftText = generatedText
+
+          const fullReplaceAction: InlineZoneWriteAction = {
+            type: 'replace_range',
+            fromOffset: 0,
+            toOffset: Number.MAX_SAFE_INTEGER,
+            content: zoneDraftText,
           }
-        } catch (error) {
-          if (!(error instanceof Error && error.name === 'AbortError') && !controller.signal.aborted) {
-            console.error('Inline UI chunk forwarding failed', error)
+
+          await this.#enqueueSessionWrite(input, async () => {
+            await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
+          })
+
+          const active = this.#activeGenerations.get(key)
+          this.#emitSnapshot(
+            createObserveState(input, {
+              seq: this.#nextSeq(key),
+              session: finalSession,
+              generating: true,
+              generationId,
+            }),
+            {
+              recordInGeneration: active?.id === generationId ? generationId : null,
+            }
+          )
+        }
+
+        for await (const part of result.fullStream) {
+          if (part.type === 'text-delta') {
+            await appendGeneratedText(cleaner.process(part.text))
+            continue
           }
-        } finally {
-          reader.releaseLock()
+          if (part.type === 'error') {
+            throw part.error instanceof Error
+              ? part.error
+              : new Error('Inline continue generation failed')
+          }
         }
-      })()
 
-      let latestAssistant: UIMessage | null = null
-      for await (const assistantMessage of readUIMessageStream<UIMessage>({
-        message: latestAssistant ?? undefined,
-        stream: messageStream,
-        terminateOnError: false,
-        onError: (error) => {
-          console.warn('Failed to read inline AI UI message stream', { error })
-        },
-      })) {
-        latestAssistant = assistantMessage
-        finalSession = upsertAssistantMessage(finalSession, assistantMessage)
-      }
+        await appendGeneratedText(cleaner.flush())
+      } else {
+        const prompt = input.prompt.trim()
+        const rendered = resolveSelectionPrompt(
+          baseSession.contextBefore ?? input.contextBefore,
+          baseSession.contextAfter ?? input.contextAfter ?? null,
+          prompt,
+          input.selectedText ?? null,
+          serializeInlineConversation(baseSession)
+        )
+        assertPromptProtocolMode(rendered.definition, 'prompt')
 
-      if (chunkReader) {
-        try {
-          await chunkReader.cancel()
-        } catch {
-          // Ignore cancellation errors when stream already closed.
+        const writeTools = buildInlineZoneWriteTools({
+          onWriteAction: async (action) => {
+            await this.#enqueueSessionWrite(input, async () => {
+              if (action.type === 'replace_range') {
+                zoneDraftText = applyReplaceRangeToText(zoneDraftText, action)
+                const fullReplaceAction: InlineZoneWriteAction = {
+                  type: 'replace_range',
+                  fromOffset: 0,
+                  toOffset: Number.MAX_SAFE_INTEGER,
+                  content: zoneDraftText,
+                }
+                await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
+              }
+
+              const nextSession = applyWriteActionToSession(finalSession, action)
+              if (nextSession === finalSession) return
+
+              finalSession = nextSession
+              const active = this.#activeGenerations.get(key)
+              const seq = this.#nextSeq(key)
+              this.#emitSnapshot(
+                createObserveState(input, {
+                  seq,
+                  session: finalSession,
+                  generating: true,
+                  generationId,
+                }),
+                {
+                  recordInGeneration: active?.id === generationId ? generationId : null,
+                }
+              )
+            })
+          },
+        })
+
+        const readTools = hasValidToolScope(input)
+          ? buildReadTools({
+              scope: {
+                projectId: input.projectId,
+                documentId: input.documentId,
+              },
+              services: this.#services,
+            })
+          : {}
+
+        const tools = {
+          ...readTools,
+          ...writeTools,
         }
+
+        const result = streamText({
+          model,
+          system: rendered.systemPrompt,
+          prompt: rendered.userPrompt,
+          tools,
+          stopWhen: stepCountIs(runtimeLimits.aiToolSteps),
+          maxOutputTokens: input.maxOutputTokens ?? rendered.definition.defaults.maxOutputTokens,
+          temperature: rendered.definition.defaults.temperature,
+          abortSignal: controller.signal,
+        })
+
+        const uiStream = result.toUIMessageStream({
+          onError: (error) => {
+            console.error('AI inline prompt stream error', error)
+            return error instanceof Error ? error.message : 'Inline AI stream failed'
+          },
+        })
+
+        const [chunkStream, messageStream] = uiStream.tee()
+        let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null =
+          chunkStream.getReader()
+        const chunkForwardTask = (async () => {
+          const reader = chunkReader
+          if (!reader) return
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              this.#emitStreamChunk(input, generationId, value)
+            }
+          } catch (error) {
+            if (
+              !(error instanceof Error && error.name === 'AbortError') &&
+              !controller.signal.aborted
+            ) {
+              console.error('Inline UI chunk forwarding failed', error)
+            }
+          } finally {
+            reader.releaseLock()
+          }
+        })()
+
+        let latestAssistant: UIMessage | null = null
+        for await (const assistantMessage of readUIMessageStream<UIMessage>({
+          message: latestAssistant ?? undefined,
+          stream: messageStream,
+          terminateOnError: false,
+          onError: (error) => {
+            console.warn('Failed to read inline AI UI message stream', { error })
+          },
+        })) {
+          latestAssistant = assistantMessage
+          finalSession = upsertAssistantMessage(finalSession, assistantMessage)
+
+          const active = this.#activeGenerations.get(key)
+          this.#emitSnapshot(
+            createObserveState(input, {
+              seq: this.#nextSeq(key),
+              session: finalSession,
+              generating: true,
+              generationId,
+            }),
+            {
+              recordInGeneration: active?.id === generationId ? generationId : null,
+            }
+          )
+        }
+
+        if (chunkReader) {
+          try {
+            await chunkReader.cancel()
+          } catch {
+            // Ignore cancellation errors when stream already closed.
+          }
+        }
+        chunkReader = null
+        await chunkForwardTask
       }
-      chunkReader = null
-      await chunkForwardTask
     } catch (error) {
       if (!(error instanceof Error && error.name === 'AbortError')) {
-        console.error('Inline prompt generation failed', error)
+        console.error('Inline generation failed', error)
       }
     } finally {
       const active = this.#activeGenerations.get(key)
       if (active?.id === generationId) {
         this.#activeGenerations.delete(key)
+      }
+
+      try {
+        await this.#setZoneStreaming(input, false, requesterClientName)
+      } catch (error) {
+        console.error('Failed to finalize inline zone streaming state', error)
       }
 
       let sessionForSnapshot: InlineZoneSession | null = finalSession
@@ -874,13 +1072,32 @@ export class InlineRuntime {
     if (controller.signal.aborted) return baseSession
 
     const messageId = `test-inline-${generationId}`
-    const generated = resolveTestInlineResponse(input.prompt)
+    const testPromptSeed = input.mode === 'prompt' ? input.prompt : 'continue'
+    const generated = resolveTestInlineResponse(testPromptSeed)
+    const delayMs = resolveTestInlineDelayMs(testPromptSeed)
+    await waitForAbortableDelay(controller, delayMs)
+    if (controller.signal.aborted) return baseSession
 
     const assistantMessage: InlineChatMessage = {
       id: messageId,
       role: 'assistant',
       text: generated,
       tools: [],
+    }
+
+    if (input.mode === 'continue') {
+      const action: InlineZoneWriteAction = {
+        type: 'replace_range',
+        fromOffset: 0,
+        toOffset: Number.MAX_SAFE_INTEGER,
+        content: generated,
+      }
+
+      await this.#enqueueSessionWrite(input, async () => {
+        await this.#applyWriteActionToDocument(input, action, 'inline-test-runtime')
+      })
+
+      return baseSession
     }
 
     return {

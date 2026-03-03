@@ -18,6 +18,7 @@ interface InlineAIControlsProps {
   onGenerate: (prompt: string, selection: SelectionRange) => boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
+  onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
   onInteractionChange: (interacting: boolean) => void
@@ -30,6 +31,7 @@ export function InlineAIControls({
   onGenerate,
   onAccept,
   onReject,
+  onStop,
   onContinuePrompt,
   onDismissChoices,
   onInteractionChange,
@@ -69,6 +71,7 @@ export function InlineAIControls({
         onGenerate={onGenerate}
         onAccept={onAccept}
         onReject={onReject}
+        onStop={onStop}
         onContinuePrompt={onContinuePrompt}
         onDismissChoices={onDismissChoices}
         onInteractionChange={onInteractionChange}
@@ -98,6 +101,7 @@ export function InlineAIControls({
           session={activeLoadingAnchor.session}
           onAccept={onAccept}
           onReject={onReject}
+          onStop={onStop}
           onContinuePrompt={onContinuePrompt}
           onDismissChoices={onDismissChoices}
         />
@@ -115,6 +119,7 @@ export function InlineAIControls({
           session={activeReviewZone.session}
           onAccept={onAccept}
           onReject={onReject}
+          onStop={onStop}
           onContinuePrompt={onContinuePrompt}
           onDismissChoices={onDismissChoices}
         />

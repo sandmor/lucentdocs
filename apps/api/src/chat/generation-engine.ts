@@ -57,6 +57,62 @@ export interface GenerationCallbacks {
   createRuntimeError: (code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT', message: string) => Error
 }
 
+function isTestRuntime(): boolean {
+  return (
+    configManager.getConfig().runtime.nodeEnv === 'test' || process.env.PLOTLINE_TEST_MODE === '1'
+  )
+}
+
+function extractMessageText(message: UIMessage | undefined): string {
+  const parts = Array.isArray(message?.parts) ? message.parts : []
+  return parts
+    .flatMap((part) => {
+      if (part.type !== 'text') return []
+      return typeof part.text === 'string' ? [part.text] : []
+    })
+    .join('')
+}
+
+function resolveTestChatResponse(promptSeed: string): string {
+  const envOverride = process.env.PLOTLINE_TEST_CHAT_RESPONSE?.trim()
+  if (envOverride) return envOverride
+
+  const normalizedPrompt = promptSeed.trim().toLowerCase()
+  if (normalizedPrompt.includes('mobile')) return 'mobile'
+  return 'spark'
+}
+
+function resolveTestChatDelayMs(): number {
+  const envDelay = Number(process.env.PLOTLINE_TEST_CHAT_DELAY_MS ?? '')
+  if (Number.isFinite(envDelay) && envDelay > 0) {
+    return Math.round(envDelay)
+  }
+  return 0
+}
+
+async function waitForAbortableDelay(controller: AbortController, delayMs: number): Promise<void> {
+  if (delayMs <= 0 || controller.signal.aborted) return
+
+  await new Promise<void>((resolve) => {
+    const onAbort = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      controller.signal.removeEventListener('abort', onAbort)
+      resolve()
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      timeoutId = null
+      controller.signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+
+    controller.signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 export class GenerationEngine {
   #services: ServiceSet
 
@@ -90,6 +146,26 @@ export class GenerationEngine {
           'NOT_FOUND',
           `Document ${scope.documentId} not found in project ${scope.projectId}`
         )
+      }
+
+      if (isTestRuntime()) {
+        const delayMs = resolveTestChatDelayMs()
+        await waitForAbortableDelay(abortController, delayMs)
+        if (!abortController.signal.aborted) {
+          const promptSeed = extractMessageText(baseMessages[baseMessages.length - 1])
+          const assistantMessage: UIMessage = {
+            id: `test-chat-${generationId}`,
+            role: 'assistant',
+            parts: [{ type: 'text', text: resolveTestChatResponse(promptSeed) }],
+          }
+          finalMessages = [...baseMessages, assistantMessage]
+          callbacks.onProgress({
+            thread: { ...baseThread, messages: finalMessages, updatedAt: Date.now() },
+            generating: true,
+            generationId,
+          })
+        }
+        return
       }
 
       const currentFilePath = normalizeDocumentPath(currentDocument.title) || '(untitled)'

@@ -100,6 +100,7 @@ export {
   readTrimmedString,
   hasMeaningfulGap,
   parseZoneNodeAttrs,
+  createWrappedZoneSliceFromText,
   wrapFragmentWithZoneNodes,
   wrapNodeWithZoneNodes,
   wrapSliceWithZoneNodes,

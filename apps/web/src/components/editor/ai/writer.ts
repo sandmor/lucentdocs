@@ -1,4 +1,5 @@
 import { TextSelection } from 'prosemirror-state'
+import { closeHistory } from 'prosemirror-history'
 import { EditorView } from 'prosemirror-view'
 import type { UIMessage } from 'ai'
 import { toast } from 'sonner'
@@ -13,7 +14,6 @@ import {
 import { getDocumentContext, getPromptContextForRange } from './writer/context'
 import { createInlineSessionId, createZoneId } from './writer/ids'
 import { createEmptySession } from './writer/session-state'
-import { insertChunk, readErrorMessage } from './writer/stream'
 import {
   createEmptyZoneSlice,
   createZoneNodeAttrs,
@@ -27,8 +27,7 @@ import {
 import type {
   AIWriterController,
   AIWriterControllerOptions,
-  PromptStreamPayload,
-  StreamPayload,
+  InlineStreamPayload,
 } from './writer/types'
 import { createUIMessageChunkPump } from './ui-message-chunk-pump'
 import { getTrpcProxyClient } from '@/lib/trpc'
@@ -38,7 +37,7 @@ export function createAIWriterController(
 ): AIWriterController {
   let abortController: AbortController | null = null
   let currentRequestId = 0
-  let streamedText = ''
+  const abortPolicies = new WeakMap<AbortController, { cancelServerOnAbort: boolean }>()
   const onStreamingChange = options.onStreamingChange ?? null
   const getIncludeAfterContext = options.getIncludeAfterContext ?? (() => false)
   const getToolScope =
@@ -52,6 +51,20 @@ export function createAIWriterController(
   const setSessionById = options.setSessionById ?? (() => {})
   let currentView: EditorView | null = null
   const trpcClient = getTrpcProxyClient()
+
+  const setAbortPolicy = (
+    controller: AbortController,
+    policy: { cancelServerOnAbort: boolean }
+  ): void => {
+    abortPolicies.set(controller, policy)
+  }
+
+  const abortActiveRequest = (policy: { cancelServerOnAbort: boolean }): void => {
+    const activeController = abortController
+    if (!activeController) return
+    setAbortPolicy(activeController, policy)
+    activeController.abort()
+  }
 
   const pruneInlineOrphans = () => {
     const toolScope = getToolScope()
@@ -205,75 +218,15 @@ export function createAIWriterController(
     }
   }
 
-  async function streamAI(view: EditorView, payload: StreamPayload): Promise<void> {
-    abortController?.abort()
-    const requestAbortController = new AbortController()
-    abortController = requestAbortController
-    const requestId = ++currentRequestId
-    currentView = view
-    stuckDetector.reset()
-    setStreamingState(true)
-
-    try {
-      const response = await fetch('/api/ai/stream', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: requestAbortController.signal,
-      })
-
-      if (!response.ok) {
-        const message = await readErrorMessage(response)
-        handleAIError(view, message)
-        return
-      }
-
-      if (!response.body) {
-        handleAIError(view, 'No stream returned from AI endpoint')
-        return
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-
-      while (abortController === requestAbortController && !requestAbortController.signal.aborted) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        if (value && !requestAbortController.signal.aborted) {
-          const chunk = decoder.decode(value, { stream: true })
-          if (chunk) {
-            streamedText += chunk
-            stuckDetector.onChunk()
-            insertChunk(view, streamedText)
-          }
-        }
-
-        const pluginState = aiWriterPluginKey.getState(view.state)
-        if (!pluginState?.active) break
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        return
-      }
-      const message = error instanceof Error ? error.message : 'AI streaming error'
-      handleAIError(view, message)
-    } finally {
-      if (requestId === currentRequestId && abortController === requestAbortController) {
-        abortController = null
-        setStreamingState(false, view)
-      }
-    }
-  }
-
   async function streamAIPrompt(
     view: EditorView,
-    payload: PromptStreamPayload,
+    payload: InlineStreamPayload,
     sessionId: string
   ): Promise<void> {
-    abortController?.abort()
+    abortActiveRequest({ cancelServerOnAbort: true })
     const requestAbortController = new AbortController()
     abortController = requestAbortController
+    setAbortPolicy(requestAbortController, { cancelServerOnAbort: true })
     const requestId = ++currentRequestId
     currentView = view
     stuckDetector.reset()
@@ -287,7 +240,9 @@ export function createAIWriterController(
       isScopeActive: (scopeId) => scopeId === sessionId,
       onGeneratingChange: onStreamingChange ?? undefined,
       onMessage: (nextMessage) => {
-        updateZoneSession(sessionId, (current) => upsertAssistantMessageInSession(current, nextMessage))
+        updateZoneSession(sessionId, (current) =>
+          upsertAssistantMessageInSession(current, nextMessage)
+        )
         stuckDetector.onChunk()
       },
       onError: (error) => {
@@ -304,11 +259,35 @@ export function createAIWriterController(
 
       let resolveGenerationDone: (() => void) | null = null
       let rejectGenerationDone: ((error: Error) => void) | null = null
+      let generationDoneSettled = false
+      let cancelRequested = false
+
+      const settleGenerationDone = () => {
+        if (generationDoneSettled) return
+        generationDoneSettled = true
+        resolveGenerationDone?.()
+      }
+
+      const rejectGeneration = (error: Error) => {
+        if (generationDoneSettled) return
+        generationDoneSettled = true
+        rejectGenerationDone?.(error)
+      }
 
       const generationDone = new Promise<void>((resolve, reject) => {
         resolveGenerationDone = resolve
         rejectGenerationDone = reject
       })
+
+      const requestServerCancel = (generationId: string) => {
+        const payload = {
+          projectId: toolScope.projectId!,
+          documentId: toolScope.documentId!,
+          sessionId,
+          generationId,
+        }
+        void trpcClient.inline.cancelGeneration.mutate(payload).catch(() => {})
+      }
 
       observeUnsubscribe = trpcClient.inline.observeSession.subscribe(
         {
@@ -322,12 +301,11 @@ export function createAIWriterController(
             if (event.seq <= lastInlineEventSeq) return
 
             if (lastInlineEventSeq > 0 && event.seq > lastInlineEventSeq + 1) {
-              rejectGenerationDone?.(
-                new Error(
-                  `Inline stream sequence gap detected (${lastInlineEventSeq} -> ${event.seq})`
-                )
-              )
-              return
+              console.warn('Inline stream sequence gap detected', {
+                previousSeq: lastInlineEventSeq,
+                nextSeq: event.seq,
+                sessionId,
+              })
             }
             lastInlineEventSeq = event.seq
 
@@ -372,11 +350,11 @@ export function createAIWriterController(
             }
 
             if (activeGenerationId && !event.generating) {
-              resolveGenerationDone?.()
+              settleGenerationDone()
             }
           },
           onError: (error) => {
-            rejectGenerationDone?.(
+            rejectGeneration(
               error instanceof Error ? error : new Error('Inline stream subscription failed')
             )
           },
@@ -386,29 +364,48 @@ export function createAIWriterController(
       requestAbortController.signal.addEventListener(
         'abort',
         () => {
-          if (!activeGenerationId) return
-          void trpcClient.inline.cancelGeneration
-            .mutate({
-              projectId: toolScope.projectId!,
-              documentId: toolScope.documentId!,
-              sessionId,
-            })
-            .catch(() => {})
+          const abortPolicy = abortPolicies.get(requestAbortController)
+          abortPolicies.delete(requestAbortController)
+          const shouldCancelServer = abortPolicy?.cancelServerOnAbort ?? true
+
+          if (shouldCancelServer) {
+            cancelRequested = true
+            if (activeGenerationId) {
+              requestServerCancel(activeGenerationId)
+            }
+          }
+
+          const abortError = new Error('Inline generation aborted')
+          abortError.name = 'AbortError'
+          rejectGeneration(abortError)
         },
         { once: true }
       )
 
-      const started = await trpcClient.inline.startPromptGeneration.mutate({
-        projectId: toolScope.projectId,
-        documentId: toolScope.documentId,
-        sessionId,
-        contextBefore: payload.contextBefore,
-        contextAfter: payload.contextAfter,
-        prompt: payload.prompt,
-        selectedText: payload.selectedText,
-        requesterClientName: getRequesterClientName() ?? undefined,
-      })
+      const started =
+        payload.mode === 'prompt'
+          ? await trpcClient.inline.startPromptGeneration.mutate({
+              projectId: toolScope.projectId,
+              documentId: toolScope.documentId,
+              sessionId,
+              contextBefore: payload.contextBefore,
+              contextAfter: payload.contextAfter,
+              prompt: payload.prompt,
+              selectedText: payload.selectedText,
+              requesterClientName: getRequesterClientName() ?? undefined,
+            })
+          : await trpcClient.inline.startContinuationGeneration.mutate({
+              projectId: toolScope.projectId,
+              documentId: toolScope.documentId,
+              sessionId,
+              contextBefore: payload.contextBefore,
+              contextAfter: payload.contextAfter,
+              requesterClientName: getRequesterClientName() ?? undefined,
+            })
       activeGenerationId = started.generationId
+      if (cancelRequested || requestAbortController.signal.aborted) {
+        requestServerCancel(started.generationId)
+      }
 
       await generationDone
     } catch (error) {
@@ -448,7 +445,6 @@ export function createAIWriterController(
     stuckDetector.reset()
     currentView = null
     setStreamingState(false)
-    streamedText = ''
     const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'stop' })
     view.dispatch(tr)
   }
@@ -486,12 +482,17 @@ export function createAIWriterController(
     }
 
     const zoneId = createZoneId()
-    const zoneAttrs = createZoneNodeAttrs(zoneId, true, null, null)
+    const sessionId = createInlineSessionId()
+    const zoneAttrs = createZoneNodeAttrs(zoneId, true, sessionId, null)
     const zoneSlice = createEmptyZoneSlice(view, zoneAttrs)
     if (!zoneSlice) {
       toast.error('AI zones are not available in this editor schema')
       return
     }
+
+    const closeHistoryTr = closeHistory(view.state.tr)
+    closeHistoryTr.setMeta('addToHistory', false)
+    view.dispatch(closeHistoryTr)
 
     const tr = view.state.tr
     try {
@@ -501,13 +502,22 @@ export function createAIWriterController(
       return
     }
     const zoneStart = tr.mapping.map(pos, -1)
-    tr.setMeta(aiWriterPluginKey, { type: 'start', pos: zoneStart, zoneId })
+    tr.setMeta(aiWriterPluginKey, { type: 'start', pos: zoneStart, zoneId, sessionId })
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
-    streamedText = ''
 
     const { contextBefore, contextAfter } = getDocumentContext(view, pos, getIncludeAfterContext())
-    void streamAI(view, { mode: 'continue', contextBefore, contextAfter })
+    void streamAIPrompt(
+      view,
+      {
+        mode: 'continue',
+        contextBefore,
+        contextAfter,
+        selectionFrom: pos,
+        selectionTo: pos,
+      },
+      sessionId
+    )
   }
 
   function startAIPromptAtRange(
@@ -563,6 +573,11 @@ export function createAIWriterController(
       toast.error('Unable to create AI zone for the current selection')
       return false
     }
+
+    const closeHistoryTr = closeHistory(view.state.tr)
+    closeHistoryTr.setMeta('addToHistory', false)
+    view.dispatch(closeHistoryTr)
+
     const tr = view.state.tr
     try {
       tr.replaceRange(from, to, zoneSlice)
@@ -583,7 +598,6 @@ export function createAIWriterController(
     })
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
-    streamedText = ''
 
     void streamAIPrompt(
       view,
@@ -682,9 +696,8 @@ export function createAIWriterController(
   function acceptAI(view: EditorView, zoneId?: string): void {
     const pluginState = aiWriterPluginKey.getState(view.state)
 
-    abortController?.abort()
+    abortActiveRequest({ cancelServerOnAbort: true })
     abortController = null
-    streamedText = ''
     stuckDetector.reset()
     currentView = null
     onStreamingChange?.(false)
@@ -707,9 +720,8 @@ export function createAIWriterController(
   function rejectAI(view: EditorView, zoneId?: string): void {
     const pluginState = aiWriterPluginKey.getState(view.state)
 
-    abortController?.abort()
+    abortActiveRequest({ cancelServerOnAbort: true })
     abortController = null
-    streamedText = ''
     stuckDetector.reset()
     currentView = null
     onStreamingChange?.(false)
@@ -741,43 +753,58 @@ export function createAIWriterController(
     pruneInlineOrphans()
   }
 
-  function cancelAI(view?: EditorView, options: { preserveDoc?: boolean } = {}): void {
+  function cancelAI(
+    view?: EditorView,
+    options: { preserveDoc?: boolean; zoneId?: string } = {}
+  ): void {
     const targetView = view ?? currentView
-    const activeZone =
-      targetView && aiWriterPluginKey.getState(targetView.state)?.zoneId
-        ? getTargetZone(
-            targetView,
-            aiWriterPluginKey.getState(targetView.state)?.zoneId ?? undefined
-          )
-        : null
-    const toolScope = getToolScope()
-    if (toolScope.projectId && toolScope.documentId && activeZone?.sessionId) {
-      void trpcClient.inline.cancelGeneration
-        .mutate({
-          projectId: toolScope.projectId,
-          documentId: toolScope.documentId,
-          sessionId: activeZone.sessionId,
-        })
-        .catch(() => {})
+    const targetPluginState = targetView ? aiWriterPluginKey.getState(targetView.state) : null
+    const preferredZoneId = options.zoneId ?? targetPluginState?.zoneId
+    const activeZone = targetView ? getTargetZone(targetView, preferredZoneId ?? undefined) : null
+    const hasActiveLocalRequest = Boolean(abortController)
+    if (!hasActiveLocalRequest) {
+      const toolScope = getToolScope()
+      if (toolScope.projectId && toolScope.documentId && activeZone?.sessionId) {
+        void trpcClient.inline.cancelGeneration
+          .mutate({
+            projectId: toolScope.projectId,
+            documentId: toolScope.documentId,
+            sessionId: activeZone.sessionId,
+          })
+          .catch(() => {})
+      }
     }
 
-    abortController?.abort()
+    abortActiveRequest({ cancelServerOnAbort: true })
     abortController = null
-    streamedText = ''
     stuckDetector.reset()
     currentView = null
-    if (options.preserveDoc && view) {
+    if (options.preserveDoc && targetView) {
       onStreamingChange?.(false)
-      const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'streaming_stop' })
-      tr.setMeta('addToHistory', false)
-      view.dispatch(tr)
+      const stoppedZoneId = activeZone?.id ?? preferredZoneId ?? undefined
+      const updated = stoppedZoneId
+        ? updateZoneNode(targetView, stoppedZoneId, { streaming: false }, 'streaming_stop')
+        : false
+      if (!updated) {
+        const tr = targetView.state.tr.setMeta(aiWriterPluginKey, { type: 'streaming_stop' })
+        tr.setMeta('addToHistory', false)
+        targetView.dispatch(tr)
+      }
     } else if (options.preserveDoc) {
       setStreamingState(false)
-    } else if (view) {
-      setStreamingState(false, view)
+    } else if (targetView) {
+      setStreamingState(false, targetView)
     } else {
       setStreamingState(false)
     }
+  }
+
+  function detachAI(): void {
+    abortActiveRequest({ cancelServerOnAbort: false })
+    abortController = null
+    stuckDetector.reset()
+    currentView = null
+    onStreamingChange?.(false)
   }
 
   return {
@@ -788,6 +815,7 @@ export function createAIWriterController(
     acceptAI,
     rejectAI,
     cancelAI,
+    detachAI,
   }
 }
 

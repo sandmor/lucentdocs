@@ -3,8 +3,34 @@ import { defineConfig, devices } from '@playwright/test'
 const TEST_HOST = process.env.PLOTLINE_TEST_HOST ?? '127.0.0.1'
 const TEST_PORT = process.env.PLOTLINE_TEST_PORT ?? '5678'
 const TEST_DATA_DIR = process.env.PLOTLINE_TEST_DATA_DIR ?? 'data-test'
+const TEST_INLINE_DELAY_MS = process.env.PLOTLINE_TEST_INLINE_DELAY_MS ?? '1800'
+const TEST_CHAT_DELAY_MS = process.env.PLOTLINE_TEST_CHAT_DELAY_MS ?? '1800'
 const TEST_URL_HOST = TEST_HOST === '0.0.0.0' || TEST_HOST === '::' ? '127.0.0.1' : TEST_HOST
 const TEST_BASE_URL = `http://${TEST_URL_HOST}:${TEST_PORT}`
+
+function toEnvPrefix(env: Record<string, string>): string {
+  return Object.entries(env)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(' ')
+}
+
+const sharedTestEnv = {
+  PLOTLINE_TEST_MODE: '1',
+  PLOTLINE_TEST_DATA_DIR: TEST_DATA_DIR,
+}
+
+const serverTestEnv = {
+  ...sharedTestEnv,
+  NODE_ENV: 'test',
+  PLOTLINE_DATA_DIR: TEST_DATA_DIR,
+  PLOTLINE_TEST_INLINE_DELAY_MS: TEST_INLINE_DELAY_MS,
+  PLOTLINE_TEST_CHAT_DELAY_MS: TEST_CHAT_DELAY_MS,
+  HOST: TEST_HOST,
+  PORT: TEST_PORT,
+}
+
+const RESET_DATA_COMMAND = `${toEnvPrefix(sharedTestEnv)} bun src/test/reset-data-dir.ts`
+const START_API_COMMAND = `${toEnvPrefix(serverTestEnv)} bun run start`
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -21,7 +47,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `cd ../api && PLOTLINE_TEST_MODE=1 PLOTLINE_TEST_DATA_DIR=${TEST_DATA_DIR} bun src/test/reset-data-dir.ts && PLOTLINE_TEST_MODE=1 NODE_ENV=test PLOTLINE_TEST_DATA_DIR=${TEST_DATA_DIR} PLOTLINE_DATA_DIR=${TEST_DATA_DIR} HOST=${TEST_HOST} PORT=${TEST_PORT} bun run start`,
+    command: `cd ../api && ${RESET_DATA_COMMAND} && ${START_API_COMMAND}`,
     url: TEST_BASE_URL,
     reuseExistingServer: false,
     timeout: 120_000,

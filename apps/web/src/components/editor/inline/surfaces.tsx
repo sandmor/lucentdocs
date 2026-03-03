@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bold, Check, Italic, Loader2, Pen, Search, X } from 'lucide-react'
+import { Bold, Check, Italic, Loader2, Pen, Search, StopCircle, X } from 'lucide-react'
 import type { EditorView } from 'prosemirror-view'
 import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
@@ -166,6 +166,7 @@ interface AIZoneSurfaceProps {
   session: InlineZoneSession | null
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
+  onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
 }
@@ -183,6 +184,7 @@ export function AIZoneSurface({
   session,
   onAccept,
   onReject,
+  onStop,
   onContinuePrompt,
   onDismissChoices,
 }: AIZoneSurfaceProps) {
@@ -231,14 +233,32 @@ export function AIZoneSurface({
         </span>
         <span className="ml-auto">
           {isProcessing ? (
-            stuck ? (
-              <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400">
-                <Loader2 className="size-3 animate-spin" />
-                <span className="text-[10px] font-medium">Stuck…</span>
-              </span>
-            ) : (
-              <span className="text-[10px] font-medium text-muted-foreground">Processing</span>
-            )
+            <div className="flex items-center gap-2">
+              {stuck ? (
+                <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400">
+                  <Loader2 className="size-3 animate-spin" />
+                  <span className="text-[10px] font-medium">Stuck…</span>
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium text-muted-foreground">Processing</span>
+              )}
+              <Button
+                variant="ghost"
+                size="xs"
+                className="gap-1.5 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                title="Stop generation"
+                data-action="stop"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onStop(zoneId)
+                }}
+              >
+                <StopCircle className="size-3" />
+                Stop
+              </Button>
+            </div>
           ) : null}
         </span>
       </div>

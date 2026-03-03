@@ -22,6 +22,7 @@ interface MobileInlineAIDockProps {
   onGenerate: (prompt: string, selection: SelectionRange) => boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
+  onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
   onInteractionChange: (interacting: boolean) => void
@@ -44,6 +45,7 @@ export function MobileInlineAIDock({
   onGenerate,
   onAccept,
   onReject,
+  onStop,
   onContinuePrompt,
   onDismissChoices,
   onInteractionChange,
@@ -220,6 +222,7 @@ export function MobileInlineAIDock({
             view={view}
             onAccept={onAccept}
             onReject={onReject}
+            onStop={onStop}
             onContinuePrompt={onContinuePrompt}
             onDismissChoices={onDismissChoices}
           />
@@ -239,6 +242,7 @@ export function MobileInlineAIDock({
             view={view}
             onAccept={onAccept}
             onReject={onReject}
+            onStop={onStop}
             onContinuePrompt={onContinuePrompt}
             onDismissChoices={onDismissChoices}
           />

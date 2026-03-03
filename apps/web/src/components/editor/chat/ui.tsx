@@ -27,7 +27,12 @@ export function ThreadRow({
         active ? 'bg-accent/80' : 'hover:bg-muted/70'
       )}
     >
-      <button type="button" className="min-w-0 flex-1 text-left" onClick={onSelect}>
+      <button
+        type="button"
+        className="min-w-0 flex-1 text-left"
+        data-chat-thread-select={thread.id}
+        onClick={onSelect}
+      >
         <p className="line-clamp-1 text-xs font-medium">{thread.title}</p>
         <p className="text-[10px] text-muted-foreground">
           {new Date(thread.updatedAt).toLocaleString()} · {thread.messageCount} messages

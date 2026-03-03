@@ -206,9 +206,10 @@ export class ChatRuntime {
     return this.#activeGenerations.has(toChatKey(scope))
   }
 
-  cancelGeneration(scope: ChatScope): boolean {
+  cancelGeneration(scope: ChatScope, generationId?: string): boolean {
     const active = this.#activeGenerations.get(toChatKey(scope))
     if (!active) return false
+    if (generationId && active.id !== generationId) return false
     active.controller.abort()
     return true
   }

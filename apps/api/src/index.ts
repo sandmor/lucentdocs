@@ -12,7 +12,6 @@ import { appRouter } from './trpc/router.js'
 import type { AppContext } from './trpc/index.js'
 import { PROJECT_ROOT } from './paths.js'
 import { configManager } from './config/manager.js'
-import { registerAiTextStreamRoute } from './http/ai-stream.js'
 import { setupYjsWebSocket } from './yjs/websocket-handler.js'
 import { setupTrpcWebSocket, type TrpcWebSocketRuntime } from './trpc/websocket.js'
 import { createContainer } from './app/container.js'
@@ -244,7 +243,6 @@ async function startServer() {
   app.use(cookieParser())
 
   registerMetaRoutes(app)
-  registerAiTextStreamRoute(app)
   registerTrpcRoutes(app)
 
   const vite = await setupWebRuntime(app)

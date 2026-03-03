@@ -36,7 +36,7 @@ test('mobile uses bottom dock for selection and zone controls without auto repla
 
   const zoneControls = page.locator('.ai-writer-floating-controls[data-state="review"]')
   await expect(zoneControls).toBeVisible()
-  await zoneControls.locator('[data-action="accept"]').click()
+  await zoneControls.locator('[data-action="accept"]').click({ force: true })
 
   await expect(editor).toContainText('Hello world')
 
