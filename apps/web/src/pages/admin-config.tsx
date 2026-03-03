@@ -278,16 +278,14 @@ export function AdminConfigPage() {
     defaultValues: toFormValues(configQuery.data),
   })
 
-  const queryValues = toFormValues(configQuery.data)
-
   useEffect(() => {
     if (!configQuery.data) return
     if (form.formState.isDirty) return
-    form.reset(queryValues)
-  }, [configQuery.data, form, form.formState.isDirty, queryValues])
+    form.reset(toFormValues(configQuery.data))
+  }, [configQuery.data, form, form.formState.isDirty])
 
   const handleDiscard = () => {
-    form.reset(queryValues)
+    form.reset(toFormValues(configQuery.data))
   }
 
   const onSubmit = form.handleSubmit((values) => {

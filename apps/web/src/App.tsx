@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { RouterProvider, createBrowserRouter } from 'react-router'
+import { RouterProvider, type createBrowserRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from 'next-themes'
 import { trpc, createTRPCClient } from '@/lib/trpc'

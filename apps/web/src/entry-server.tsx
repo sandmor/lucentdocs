@@ -14,9 +14,12 @@ export async function render(url: string) {
 
   const router = createStaticRouter(handler.dataRoutes, context)
 
-  return renderToString(
-    <StrictMode>
-      <App router={router} />
-    </StrictMode>
-  )
+  return {
+    html: renderToString(
+      <StrictMode>
+        <App router={router} />
+      </StrictMode>
+    ),
+    hydrationData: context,
+  }
 }

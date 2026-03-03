@@ -104,7 +104,7 @@ function registerSsrRoute(app: Express, vite: ViteDevServer | null): void {
     try {
       const url = req.originalUrl
       let template: string
-      let render: (requestUrl: string) => Promise<string> | string
+      let render: (requestUrl: string) => Promise<{ html: string; hydrationData: unknown }> | { html: string; hydrationData: unknown }
 
       if (!isProd) {
         template = fs.readFileSync(path.join(WEB_ROOT, 'index.html'), 'utf-8')
@@ -116,9 +116,12 @@ function registerSsrRoute(app: Express, vite: ViteDevServer | null): void {
         render = (await import(serverEntryPoint)).render
       }
 
-      const appHtml = await render(url)
+      const { html: appHtml, hydrationData } = await render(url)
       const theme = resolveTheme(req.cookies.theme)
-      const html = template.replace('<!--app-html-->', appHtml)
+      const html = template.replace('<!--app-html-->', appHtml).replace(
+        '<!--hydration-data-->',
+        `<script>window.__staticRouterHydrationData = ${JSON.stringify(hydrationData)}</script>`
+      )
       const themedHtml = applyHtmlThemeClass(html, theme)
 
       res.status(200).set({ 'Content-Type': 'text/html' }).end(themedHtml)
