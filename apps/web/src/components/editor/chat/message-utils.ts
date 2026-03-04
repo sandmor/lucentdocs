@@ -26,17 +26,25 @@ export function upsertAssistantMessage(messages: UIMessage[], assistantMessage: 
     return [assistantMessage]
   }
 
-  const existingIndex = messages.findIndex((message) => message.id === assistantMessage.id)
+  let existingIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.id === assistantMessage.id) {
+      existingIndex = index
+      break
+    }
+  }
+
   if (existingIndex >= 0) {
     return messages.map((message, index) => (index === existingIndex ? assistantMessage : message))
   }
 
-  const last = messages[messages.length - 1]
-  if (last?.role === 'assistant') {
-    return [...messages.slice(0, -1), assistantMessage]
-  }
-
   return [...messages, assistantMessage]
+}
+
+export function getTrailingAssistantMessage(messages: UIMessage[]): UIMessage | null {
+  if (messages.length === 0) return null
+  const last = messages[messages.length - 1]
+  return last?.role === 'assistant' ? last : null
 }
 
 export function extractMessageText(message: UIMessage): string {

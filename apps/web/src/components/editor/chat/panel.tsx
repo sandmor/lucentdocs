@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
-import { asUIMessageArray } from './message-utils'
+import { asUIMessageArray, getTrailingAssistantMessage } from './message-utils'
 import type { ChatThreadSummary } from './types'
 import { ChatBubble, EmptyChatState, ThreadRow } from './ui'
 import { useChatStreamPump } from './use-stream-pump'
@@ -28,6 +28,8 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const activeThreadIdRef = useRef<string | null>(null)
+  const messagesRef = useRef<UIMessage[]>([])
+  const isGeneratingRef = useRef(false)
 
   const queryEnabled = Boolean(projectId && documentId)
   const documentKey = projectId && documentId ? `${projectId}:${documentId}` : null
@@ -59,15 +61,22 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   const cancelGenerationMutation = trpc.chat.cancelGenerationById.useMutation()
 
   const {
-    streamAssistantRef,
     streamGenerationIdRef,
     enqueueStreamChunk,
     stopStreamChunkPump,
     startStreamChunkPump,
   } = useChatStreamPump({
     isThreadActive: (chatId) => activeThreadIdRef.current === chatId,
-    onAssistantMessage: (updater) => setMessages(updater),
-    onGeneratingChange: setIsGenerating,
+    onAssistantMessage: (updater) =>
+      setMessages((previous) => {
+        const next = updater(previous)
+        messagesRef.current = next
+        return next
+      }),
+    onGeneratingChange: (generating) => {
+      isGeneratingRef.current = generating
+      setIsGenerating(generating)
+    },
   })
 
   const activeThread = useMemo(
@@ -85,6 +94,8 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
     ) => {
       setMessages([])
       setIsGenerating(false)
+      messagesRef.current = []
+      isGeneratingRef.current = false
       if (options.clearInput) {
         setInput('')
       }
@@ -149,8 +160,12 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
 
     queueMicrotask(() => {
       if (cancelled) return
-      setMessages(asUIMessageArray(activeThreadQuery.data.messages))
-      setIsGenerating(Boolean(activeThreadQuery.data.generating))
+      const nextMessages = asUIMessageArray(activeThreadQuery.data.messages)
+      const nextGenerating = Boolean(activeThreadQuery.data.generating)
+      messagesRef.current = nextMessages
+      isGeneratingRef.current = nextGenerating
+      setMessages(nextMessages)
+      setIsGenerating(nextGenerating)
       if (!activeThreadQuery.data.generating) {
         stopStreamChunkPump()
       }
@@ -175,7 +190,10 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
 
         if (event.type === 'stream-chunk') {
           if (streamGenerationIdRef.current !== event.generationId) {
-            startStreamChunkPump(event.generationId, streamAssistantRef.current, event.chatId)
+            const seedAssistant = isGeneratingRef.current
+              ? getTrailingAssistantMessage(messagesRef.current)
+              : null
+            startStreamChunkPump(event.generationId, seedAssistant, event.chatId)
           }
 
           enqueueStreamChunk(event.chunk)
@@ -197,15 +215,15 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
         }
 
         const nextMessages = asUIMessageArray(event.thread.messages)
+        messagesRef.current = nextMessages
+        isGeneratingRef.current = event.generating
         setMessages(nextMessages)
         setIsGenerating(event.generating)
-        const latestAssistant =
-          [...nextMessages].reverse().find((message) => message.role === 'assistant') ?? null
-        streamAssistantRef.current = latestAssistant
+        const trailingAssistant = getTrailingAssistantMessage(nextMessages)
 
         if (event.generating && event.generationId) {
           if (streamGenerationIdRef.current !== event.generationId) {
-            startStreamChunkPump(event.generationId, latestAssistant, event.chatId)
+            startStreamChunkPump(event.generationId, trailingAssistant, event.chatId)
           }
         } else {
           stopStreamChunkPump()
@@ -397,11 +415,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
 
   const streamingAssistantMessageId = useMemo(() => {
     if (!isGenerating) return null
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index]
-      if (message?.role === 'assistant') return message.id
-    }
-    return null
+    return getTrailingAssistantMessage(messages)?.id ?? null
   }, [isGenerating, messages])
 
   return (

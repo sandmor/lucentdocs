@@ -47,7 +47,11 @@ export function useChatStreamPump({
       emitIntervalMs: 32,
       isScopeActive: (chatId) => isThreadActiveRef.current(chatId),
       onMessage: (nextMessage) => {
+        const generationId = streamGenerationIdRef.current
         const nextMessageClone = cloneUIMessage(nextMessage)
+        if (generationId) {
+          nextMessageClone.id = `assistant-${generationId}`
+        }
         streamAssistantRef.current = nextMessageClone
         onAssistantMessageRef.current((previous) =>
           upsertAssistantMessage(previous, nextMessageClone)

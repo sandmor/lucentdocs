@@ -154,7 +154,7 @@ export class GenerationEngine {
         if (!abortController.signal.aborted) {
           const promptSeed = extractMessageText(baseMessages[baseMessages.length - 1])
           const assistantMessage: UIMessage = {
-            id: `test-chat-${generationId}`,
+            id: `assistant-${generationId}`,
             role: 'assistant',
             parts: [{ type: 'text', text: resolveTestChatResponse(promptSeed) }],
           }
@@ -233,8 +233,12 @@ export class GenerationEngine {
       for await (const assistantMessage of readUIMessageStream<UIMessage>({
         stream: messageStream,
       })) {
-        latestAssistantMessage = assistantMessage
-        finalMessages = [...baseMessages, assistantMessage]
+        const normalizedAssistant: UIMessage = {
+          ...assistantMessage,
+          id: `assistant-${generationId}`,
+        }
+        latestAssistantMessage = normalizedAssistant
+        finalMessages = [...baseMessages, normalizedAssistant]
 
         callbacks.onProgress({
           thread: { ...baseThread, messages: finalMessages, updatedAt: Date.now() },
