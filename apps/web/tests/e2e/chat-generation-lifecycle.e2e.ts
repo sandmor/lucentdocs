@@ -54,7 +54,9 @@ test('sidebar chat generation survives initiator disconnect and reconnecting cli
 
     await sendChatMessage(page, 'Seed message')
     await expect(page.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 12_000 })
-    await expect(page.locator('[data-chat-panel="true"]')).toContainText('spark', { timeout: 12_000 })
+    await expect(page.locator('[data-chat-panel="true"]')).toContainText('spark', {
+      timeout: 12_000,
+    })
 
     await sendChatMessage(page, 'Give me a mobile continuation')
     await page.close()

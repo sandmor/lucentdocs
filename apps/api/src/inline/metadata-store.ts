@@ -135,7 +135,11 @@ export class InlineSessionMetadataStore {
     return filtered
   }
 
-  async saveSession(scope: InlineScope, sessionId: string, session: InlineZoneSession): Promise<boolean> {
+  async saveSession(
+    scope: InlineScope,
+    sessionId: string,
+    session: InlineZoneSession
+  ): Promise<boolean> {
     const normalizedSession = normalizeInlineZoneSession(session)
     if (!normalizedSession) {
       return false
@@ -163,9 +167,7 @@ export class InlineSessionMetadataStore {
     return true
   }
 
-  async pruneOrphans(
-    scope: InlineScope
-  ): Promise<PruneResult | null> {
+  async pruneOrphans(scope: InlineScope): Promise<PruneResult | null> {
     const scopedDocument = await this.#loadScopedDocument(scope)
     if (!scopedDocument) return null
 

@@ -14,7 +14,11 @@ interface ChatStreamPump {
   streamGenerationIdRef: MutableRefObject<string | null>
   enqueueStreamChunk: (chunk: UIMessageChunk) => void
   stopStreamChunkPump: () => void
-  startStreamChunkPump: (generationId: string, seedAssistant: UIMessage | null, chatId: string) => void
+  startStreamChunkPump: (
+    generationId: string,
+    seedAssistant: UIMessage | null,
+    chatId: string
+  ) => void
 }
 
 export function useChatStreamPump({

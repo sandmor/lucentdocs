@@ -282,7 +282,11 @@ export function AIZoneFloatingControl({
       try {
         const result = await computePosition(virtualEl, el, {
           placement: 'bottom-start',
-          middleware: [offset(8), flip({ fallbackAxisSideDirection: 'end' }), shift({ padding: 8 })],
+          middleware: [
+            offset(8),
+            flip({ fallbackAxisSideDirection: 'end' }),
+            shift({ padding: 8 }),
+          ],
         })
         if (cancelled || requestId !== positionRequestId) return
         applyComputedPosition(result.x, result.y)

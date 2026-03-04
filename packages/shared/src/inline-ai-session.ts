@@ -81,9 +81,7 @@ export function normalizeInlineZoneSession(value: unknown): InlineZoneSession | 
   }
 }
 
-export function normalizeInlineZoneSessionMap(
-  value: unknown
-): Record<string, InlineZoneSession> {
+export function normalizeInlineZoneSessionMap(value: unknown): Record<string, InlineZoneSession> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return {}
   }

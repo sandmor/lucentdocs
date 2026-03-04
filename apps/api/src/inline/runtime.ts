@@ -901,7 +901,11 @@ export class InlineRuntime {
                   toOffset: Number.MAX_SAFE_INTEGER,
                   content: zoneDraftText,
                 }
-                await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
+                await this.#applyWriteActionToDocument(
+                  input,
+                  fullReplaceAction,
+                  requesterClientName
+                )
               }
 
               const nextSession = applyWriteActionToSession(finalSession, action)

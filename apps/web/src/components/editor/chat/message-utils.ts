@@ -21,7 +21,10 @@ export function cloneUIMessage(message: UIMessage): UIMessage {
   return JSON.parse(JSON.stringify(message)) as UIMessage
 }
 
-export function upsertAssistantMessage(messages: UIMessage[], assistantMessage: UIMessage): UIMessage[] {
+export function upsertAssistantMessage(
+  messages: UIMessage[],
+  assistantMessage: UIMessage
+): UIMessage[] {
   if (messages.length === 0) {
     return [assistantMessage]
   }

@@ -40,10 +40,7 @@ export interface GenerationOptions {
 }
 
 export interface GenerationCallbacks {
-  onChunk: (event: {
-    generationId: string
-    chunk: UIMessageChunk
-  }) => void
+  onChunk: (event: { generationId: string; chunk: UIMessageChunk }) => void
   onProgress: (state: {
     thread: PersistedChatThread
     generating: boolean

@@ -98,7 +98,10 @@ function ensureDefaultPromptsAndBindings(store: PromptStore): PromptStore {
   const defaults = createDefaultPromptBindings()
   const prompts = [...store.prompts]
 
-  for (const systemPrompt of createDefaultPromptDefinitions(new Date().toISOString(), getAiDefaults())) {
+  for (const systemPrompt of createDefaultPromptDefinitions(
+    new Date().toISOString(),
+    getAiDefaults()
+  )) {
     if (!prompts.some((prompt) => prompt.id === systemPrompt.id)) {
       prompts.push(systemPrompt)
     }

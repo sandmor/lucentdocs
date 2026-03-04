@@ -112,8 +112,7 @@ function ChatBubbleImpl({ message, isStreaming }: { message: UIMessage; isStream
 
 export const ChatBubble = memo(
   ChatBubbleImpl,
-  (previous, next) =>
-    previous.isStreaming === next.isStreaming && previous.message === next.message
+  (previous, next) => previous.isStreaming === next.isStreaming && previous.message === next.message
 )
 
 function TypingIndicator({ compact = false }: { compact?: boolean }) {
@@ -185,7 +184,11 @@ export const EMPTY_CHAT_SUGGESTIONS = [
   'Punch up the dialogue here',
 ] as const
 
-export function EmptyChatState({ onSuggestionClick }: { onSuggestionClick: (value: string) => void }) {
+export function EmptyChatState({
+  onSuggestionClick,
+}: {
+  onSuggestionClick: (value: string) => void
+}) {
   return (
     <div className="flex h-full flex-col justify-end pb-4">
       <div className="space-y-5">

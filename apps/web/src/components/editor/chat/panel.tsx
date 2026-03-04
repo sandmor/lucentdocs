@@ -60,24 +60,20 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   const generateMutation = trpc.chat.generateById.useMutation()
   const cancelGenerationMutation = trpc.chat.cancelGenerationById.useMutation()
 
-  const {
-    streamGenerationIdRef,
-    enqueueStreamChunk,
-    stopStreamChunkPump,
-    startStreamChunkPump,
-  } = useChatStreamPump({
-    isThreadActive: (chatId) => activeThreadIdRef.current === chatId,
-    onAssistantMessage: (updater) =>
-      setMessages((previous) => {
-        const next = updater(previous)
-        messagesRef.current = next
-        return next
-      }),
-    onGeneratingChange: (generating) => {
-      isGeneratingRef.current = generating
-      setIsGenerating(generating)
-    },
-  })
+  const { streamGenerationIdRef, enqueueStreamChunk, stopStreamChunkPump, startStreamChunkPump } =
+    useChatStreamPump({
+      isThreadActive: (chatId) => activeThreadIdRef.current === chatId,
+      onAssistantMessage: (updater) =>
+        setMessages((previous) => {
+          const next = updater(previous)
+          messagesRef.current = next
+          return next
+        }),
+      onGeneratingChange: (generating) => {
+        isGeneratingRef.current = generating
+        setIsGenerating(generating)
+      },
+    })
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) ?? null,
