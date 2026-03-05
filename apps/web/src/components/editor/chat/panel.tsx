@@ -30,6 +30,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
   const activeThreadIdRef = useRef<string | null>(null)
   const messagesRef = useRef<UIMessage[]>([])
   const isGeneratingRef = useRef(false)
+  const lastGenerationErrorRef = useRef<string | null>(null)
 
   const queryEnabled = Boolean(projectId && documentId)
   const documentKey = projectId && documentId ? `${projectId}:${documentId}` : null
@@ -92,6 +93,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
       setIsGenerating(false)
       messagesRef.current = []
       isGeneratingRef.current = false
+      lastGenerationErrorRef.current = null
       if (options.clearInput) {
         setInput('')
       }
@@ -108,6 +110,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
 
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId
+    lastGenerationErrorRef.current = null
   }, [activeThreadId])
 
   useEffect(() => {
@@ -218,6 +221,7 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
         const trailingAssistant = getTrailingAssistantMessage(nextMessages)
 
         if (event.generating && event.generationId) {
+          lastGenerationErrorRef.current = null
           if (streamGenerationIdRef.current !== event.generationId) {
             startStreamChunkPump(event.generationId, trailingAssistant, event.chatId)
           }
@@ -261,6 +265,14 @@ export function ChatPanel({ editorSelection, projectId, documentId, className }:
             ),
           }
         })
+
+        if (event.error) {
+          const errorKey = `${event.chatId}:${event.thread.updatedAt}:${event.error}`
+          if (lastGenerationErrorRef.current !== errorKey) {
+            lastGenerationErrorRef.current = errorKey
+            toast.error('AI Chat Error', { description: event.error })
+          }
+        }
       },
       onError: (error) => {
         toast.error('Chat subscription error', { description: error.message })

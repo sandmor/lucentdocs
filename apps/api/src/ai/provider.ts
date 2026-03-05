@@ -2,9 +2,19 @@ import { type LanguageModel } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { configManager, type ResolvedAiConfig } from '../config/manager.js'
+import type { AiModelSourceType } from '@plotline/shared'
+import type { AiSettingsService } from '../core/services/aiSettings.service.js'
+import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
 
-export type AiConfig = ResolvedAiConfig
+export interface AiConfig {
+  provider: 'openai' | 'anthropic' | 'openai-compatible'
+  source: {
+    type: AiModelSourceType
+    baseURL: string
+    model: string
+  }
+  apiKey: string
+}
 
 interface ResolvedProvider {
   model: LanguageModel
@@ -12,19 +22,51 @@ interface ResolvedProvider {
 }
 
 let providerPromise: Promise<ResolvedProvider> | null = null
+let aiSettingsService: AiSettingsService | null = null
 
-function getConfig(): AiConfig {
-  return configManager.getConfig().ai
+export function configureAiProvider(service: AiSettingsService): void {
+  aiSettingsService = service
+  resetClient()
+}
+
+function getAiSettingsService(): AiSettingsService {
+  if (!aiSettingsService) {
+    throw new Error('AI settings service is not configured.')
+  }
+  return aiSettingsService
+}
+
+async function resolveRuntimeConfig(): Promise<AiConfig> {
+  const selection = await getAiSettingsService().resolveRuntimeSelection()
+  const openaiDefault = normalizeBaseURL(AI_PROVIDER_DEFAULT_BASE_URLS.openai)
+  const sourceBaseURL = normalizeBaseURL(selection.baseURL)
+
+  const provider =
+    selection.type === 'anthropic'
+      ? 'anthropic'
+      : sourceBaseURL === openaiDefault
+        ? 'openai'
+        : 'openai-compatible'
+
+  return {
+    provider,
+    apiKey: selection.apiKey,
+    source: {
+      type: selection.type,
+      baseURL: selection.baseURL,
+      model: selection.model,
+    },
+  }
 }
 
 async function getProvider(): Promise<ResolvedProvider> {
   if (!providerPromise) {
-    const config = getConfig()
+    const config = await resolveRuntimeConfig()
 
-    if (!config.apiKey) {
-      throw new Error(
-        `Missing API key: set AI_API_KEY in env or ${configManager.getConfig().paths.configFile}`
-      )
+    const source = config.source
+    const requiresApiKey = config.provider !== 'openai-compatible'
+    if (requiresApiKey && !config.apiKey) {
+      throw new Error('Missing API key for the active provider configuration.')
     }
 
     providerPromise = Promise.resolve(
@@ -33,24 +75,24 @@ async function getProvider(): Promise<ResolvedProvider> {
             config,
             model: createAnthropic({
               apiKey: config.apiKey,
-              baseURL: config.baseURL,
-            })(config.model),
+              baseURL: source.baseURL,
+            })(source.model),
           }
         : config.provider === 'openai-compatible'
           ? {
               config,
               model: createOpenAICompatible({
                 name: 'openai-compatible',
-                apiKey: config.apiKey,
-                baseURL: config.baseURL,
-              })(config.model),
+                ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+                baseURL: source.baseURL,
+              })(source.model),
             }
           : {
               config,
               model: createOpenAI({
                 apiKey: config.apiKey,
-                baseURL: config.baseURL,
-              })(config.model),
+                baseURL: source.baseURL,
+              })(source.model),
             }
     )
   }

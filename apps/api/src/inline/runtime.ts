@@ -29,7 +29,11 @@ import {
 } from './metadata-store.js'
 import type { RepositorySet } from '../core/ports/types.js'
 import type { YjsRuntime } from '../yjs/runtime.js'
-import { applyInlineZoneWriteActionToDoc, setInlineZoneStreamingInDoc } from './zone-write.js'
+import {
+  applyInlineZoneWriteActionToDoc,
+  getInlineZoneTextFromDoc,
+  setInlineZoneStreamingInDoc,
+} from './zone-write.js'
 
 export interface InlineObserveState extends InlineScope {
   sessionId: string
@@ -37,6 +41,7 @@ export interface InlineObserveState extends InlineScope {
   deleted: boolean
   generating: boolean
   generationId: string | null
+  error: string | null
   session: InlineZoneSession | null
 }
 
@@ -153,6 +158,7 @@ function createObserveState(
     session: InlineZoneSession | null
     generating: boolean
     generationId: string | null
+    error?: string | null
   }
 ): InlineObserveState {
   return {
@@ -163,6 +169,7 @@ function createObserveState(
     deleted: options.session === null,
     generating: options.generating,
     generationId: options.generationId,
+    error: options.error ?? null,
     session: options.session,
   }
 }
@@ -656,6 +663,10 @@ export class InlineRuntime {
       )
     }
 
+    const zoneTextBeforeGeneration = await this.#readZoneText(input)
+    const rollbackZoneText =
+      zoneTextBeforeGeneration ?? (input.mode === 'prompt' ? (input.selectedText ?? '') : '')
+
     const generationId = nanoid()
     const controller = new AbortController()
     const requesterClientName = normalizeRequesterClientName(input.requesterClientName)
@@ -664,6 +675,7 @@ export class InlineRuntime {
       session: sessionForGeneration,
       generating: true,
       generationId,
+      error: null,
     })
     const startedSnapshot = this.#toSnapshotEvent(startedState)
     this.#activeGenerations.set(key, {
@@ -678,6 +690,8 @@ export class InlineRuntime {
       generationId,
       controller,
       sessionForGeneration,
+      baseSession,
+      rollbackZoneText,
       requesterClientName
     )
 
@@ -759,6 +773,21 @@ export class InlineRuntime {
     }
   }
 
+  async #readZoneText(scope: InlineScope & { sessionId: string }): Promise<string | null> {
+    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+      transform: (currentDoc) => {
+        const zone = getInlineZoneTextFromDoc(currentDoc, scope.sessionId)
+        return {
+          changed: false,
+          nextDoc: currentDoc,
+          result: zone,
+        }
+      },
+    })
+
+    return transformed.result.zoneFound ? transformed.result.text : null
+  }
+
   async #setZoneStreaming(
     scope: InlineScope & { sessionId: string },
     streaming: boolean,
@@ -804,16 +833,24 @@ export class InlineRuntime {
     input: StartInlineGenerationInput,
     generationId: string,
     controller: AbortController,
-    baseSession: InlineZoneSession,
+    generationSession: InlineZoneSession,
+    baselineSession: InlineZoneSession,
+    rollbackZoneText: string,
     requesterClientName: string
   ): Promise<void> {
     const key = toInlineKey(input)
-    let finalSession = baseSession
+    let finalSession = generationSession
     let zoneDraftText = input.mode === 'prompt' ? (input.selectedText ?? '') : ''
+    let generationError: string | null = null
 
     try {
       if (isTestRuntime()) {
-        finalSession = await this.#runTestGeneration(input, generationId, controller, baseSession)
+        finalSession = await this.#runTestGeneration(
+          input,
+          generationId,
+          controller,
+          generationSession
+        )
         return
       }
 
@@ -821,8 +858,8 @@ export class InlineRuntime {
       const runtimeLimits = configManager.getConfig().limits
 
       if (input.mode === 'continue') {
-        const contextBefore = baseSession.contextBefore ?? input.contextBefore
-        const contextAfter = baseSession.contextAfter ?? input.contextAfter ?? null
+        const contextBefore = generationSession.contextBefore ?? input.contextBefore
+        const contextAfter = generationSession.contextAfter ?? input.contextAfter ?? null
         const rendered = resolveContinuePrompt(contextBefore, contextAfter)
         assertPromptProtocolMode(rendered.definition, 'continue')
         const cleaner = createStreamCleaner(contextBefore, contextAfter)
@@ -882,11 +919,11 @@ export class InlineRuntime {
       } else {
         const prompt = input.prompt.trim()
         const rendered = resolveSelectionPrompt(
-          baseSession.contextBefore ?? input.contextBefore,
-          baseSession.contextAfter ?? input.contextAfter ?? null,
+          generationSession.contextBefore ?? input.contextBefore,
+          generationSession.contextAfter ?? input.contextAfter ?? null,
           prompt,
           input.selectedText ?? null,
-          serializeInlineConversation(baseSession)
+          serializeInlineConversation(generationSession)
         )
         assertPromptProtocolMode(rendered.definition, 'prompt')
 
@@ -990,10 +1027,7 @@ export class InlineRuntime {
         for await (const assistantMessage of readUIMessageStream<UIMessage>({
           message: latestAssistant ?? undefined,
           stream: messageStream,
-          terminateOnError: false,
-          onError: (error) => {
-            console.warn('Failed to read inline AI UI message stream', { error })
-          },
+          terminateOnError: true,
         })) {
           latestAssistant = assistantMessage
           finalSession = upsertAssistantMessage(finalSession, assistantMessage)
@@ -1023,10 +1057,30 @@ export class InlineRuntime {
         await chunkForwardTask
       }
     } catch (error) {
-      if (!(error instanceof Error && error.name === 'AbortError')) {
-        console.error('Inline generation failed', error)
-      }
+      if (error instanceof Error && error.name === 'AbortError') return
+      console.error('Inline generation failed', error)
+      generationError = error instanceof Error ? error.message : 'Inline AI generation failed.'
+      finalSession = baselineSession
     } finally {
+      if (generationError !== null) {
+        try {
+          await this.#enqueueSessionWrite(input, async () => {
+            await this.#applyWriteActionToDocument(
+              input,
+              {
+                type: 'replace_range',
+                fromOffset: 0,
+                toOffset: Number.MAX_SAFE_INTEGER,
+                content: rollbackZoneText,
+              },
+              requesterClientName
+            )
+          })
+        } catch (error) {
+          console.error('Failed to rollback inline zone content after generation error', error)
+        }
+      }
+
       const active = this.#activeGenerations.get(key)
       if (active?.id === generationId) {
         this.#activeGenerations.delete(key)
@@ -1062,6 +1116,7 @@ export class InlineRuntime {
           session: sessionForSnapshot,
           generating: false,
           generationId: null,
+          error: generationError,
         })
       )
     }

@@ -62,6 +62,60 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_chat_threads_document_updated
     ON chat_threads(projectId, documentId, updatedAt DESC);
+
+  CREATE TABLE IF NOT EXISTS ai_provider_configs (
+    id TEXT PRIMARY KEY,
+    providerId TEXT NOT NULL,
+    type TEXT NOT NULL,
+    baseUrl TEXT NOT NULL,
+    model TEXT NOT NULL,
+    apiKeyId TEXT,
+    sortOrder INTEGER NOT NULL,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    FOREIGN KEY (apiKeyId) REFERENCES ai_api_keys(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ai_provider_configs_order
+    ON ai_provider_configs(sortOrder ASC, createdAt ASC);
+
+  CREATE TABLE IF NOT EXISTS ai_api_keys (
+    id TEXT PRIMARY KEY,
+    baseUrl TEXT NOT NULL,
+    name TEXT NOT NULL,
+    apiKey TEXT NOT NULL,
+    isDefault INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ai_api_keys_base_url
+    ON ai_api_keys(baseUrl ASC, isDefault DESC, updatedAt DESC);
+
+  WITH ranked_defaults AS (
+    SELECT
+      id,
+      ROW_NUMBER() OVER (
+        PARTITION BY baseUrl
+        ORDER BY updatedAt DESC, createdAt DESC, id DESC
+      ) AS rowNum
+    FROM ai_api_keys
+    WHERE isDefault = 1
+  )
+  UPDATE ai_api_keys
+  SET isDefault = 0
+  WHERE id IN (SELECT id FROM ranked_defaults WHERE rowNum > 1);
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_api_keys_single_default
+    ON ai_api_keys(baseUrl)
+    WHERE isDefault = 1;
+
+  CREATE TABLE IF NOT EXISTS ai_runtime_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    activeProviderId TEXT,
+    updatedAt INTEGER NOT NULL,
+    FOREIGN KEY (activeProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL
+  );
 `
 
 export class SqliteConnection implements ConnectionPort {

@@ -9,9 +9,11 @@ import { ProjectDocumentsRepository } from './projectDocuments.adapter.js'
 import { ChatsRepository } from './chats.adapter.js'
 import { VersionSnapshotsRepository } from './versionSnapshots.adapter.js'
 import { YjsDocumentsRepository } from './yjsDocuments.adapter.js'
+import { AiSettingsRepository } from './aiSettings.adapter.js'
 import { createProjectsService } from '../../core/services/projects.service.js'
 import { createDocumentsService } from '../../core/services/documents.service.js'
 import { createChatsService } from '../../core/services/chats.service.js'
+import { createAiSettingsService } from '../../core/services/aiSettings.service.js'
 
 export interface SqliteAdapter {
   connection: SqliteConnection
@@ -31,12 +33,14 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
     chats: new ChatsRepository(connection),
     versionSnapshots: new VersionSnapshotsRepository(connection),
     yjsDocuments: new YjsDocumentsRepository(connection),
+    aiSettings: new AiSettingsRepository(connection),
   }
 
   const services: ServiceSet = {
     projects: createProjectsService(repositories, transaction),
     documents: createDocumentsService(repositories, transaction),
     chats: createChatsService(repositories),
+    aiSettings: createAiSettingsService(repositories, transaction),
   }
 
   return { connection, transaction, repositories, services }

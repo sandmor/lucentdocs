@@ -7,10 +7,10 @@ import {
   DEFAULT_PERSISTED_CONFIG,
   EDITABLE_CONFIG_KEYS,
   PERSISTED_CONFIG_KEYS,
+  type LimitsConfig,
   type PersistedAppConfig,
   type PersistedConfigKey,
   type PersistedConfigSection,
-  type LimitsConfig,
 } from '@plotline/shared'
 import {
   CONFIG_FILE_NAME,
@@ -20,10 +20,6 @@ import {
   resolveDataFile,
 } from '../paths.js'
 
-const DEFAULT_AI_MODEL = 'gpt-5'
-const DEFAULT_ANTHROPIC_MODEL = 'claude-3-5-haiku-latest'
-const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
-const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1'
 const DEFAULT_TEST_DATA_DIR = 'data-test'
 const TEST_MODE_ENV_VAR = 'PLOTLINE_TEST_MODE'
 const TEST_DATA_DIR_ENV_VAR = 'PLOTLINE_TEST_DATA_DIR'
@@ -31,13 +27,7 @@ const ALLOW_UNSAFE_TEST_DB_ENV_VAR = 'PLOTLINE_ALLOW_UNSAFE_TEST_DB'
 
 export type ConfigValueSource = 'env' | 'file' | 'default'
 
-export type AiProvider = 'openai' | 'anthropic' | 'openai-compatible'
-
 export interface ResolvedAiConfig {
-  provider: AiProvider
-  baseURL: string
-  apiKey: string
-  model: string
   defaultTemperature: number
   selectionEditTemperature: number
   defaultMaxOutputTokens: number
@@ -78,6 +68,8 @@ export interface UpdateConfigResult {
   changedEffectiveKeys: PersistedConfigKey[]
   overriddenChangedKeys: PersistedConfigKey[]
 }
+
+type PersistedConfigValue = PersistedAppConfig[PersistedConfigKey]
 
 function hasEnvValue(env: NodeJS.ProcessEnv, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(env, key)
@@ -148,10 +140,11 @@ function resolveConfiguredDataDir(env: NodeJS.ProcessEnv): string {
   return DEFAULT_TEST_DATA_DIR
 }
 
-function normalizeConfigValue(
-  key: PersistedConfigKey,
-  value: unknown
-): PersistedAppConfig[PersistedConfigKey] {
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeConfigValue(key: PersistedConfigKey, value: unknown): PersistedConfigValue {
   const field = CONFIG_FIELD_BY_KEY[key]
 
   if (field.kind === 'string') {
@@ -171,7 +164,6 @@ function normalizeConfigValue(
     return value
   }
 
-  // int
   if (typeof value !== 'number' || !Number.isInteger(value)) {
     return Number(field.defaultValue)
   }
@@ -190,7 +182,7 @@ function normalizeConfigValue(
 function parseConfigValue(
   key: PersistedConfigKey,
   value: unknown
-): PersistedAppConfig[PersistedConfigKey] | undefined {
+): PersistedConfigValue | undefined {
   const field = CONFIG_FIELD_BY_KEY[key]
 
   if (field.kind === 'string') {
@@ -207,20 +199,15 @@ function parseConfigValue(
     return value
   }
 
-  // int
   if (typeof value !== 'number' || !Number.isInteger(value)) return undefined
   if (field.min !== undefined && value < field.min) return undefined
   if (field.max !== undefined && value > field.max) return undefined
   return value
 }
 
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function parseFileConfig(contents: string): Partial<PersistedAppConfig> {
   const parsed: Partial<PersistedAppConfig> = {}
-  const parsedRecord = parsed as Record<PersistedConfigKey, string | number>
+  const parsedRecord = parsed as Partial<Record<PersistedConfigKey, PersistedConfigValue>>
   const document = TOML.parse(contents)
   if (!isRecordValue(document)) return parsed
 
@@ -251,7 +238,7 @@ function readConfigFromFile(configPath: string): Partial<PersistedAppConfig> {
 
 function readConfigFromEnv(env: NodeJS.ProcessEnv): Partial<PersistedAppConfig> {
   const envConfig: Partial<PersistedAppConfig> = {}
-  const envRecord = envConfig as Record<PersistedConfigKey, string | number>
+  const envRecord = envConfig as Partial<Record<PersistedConfigKey, PersistedConfigValue>>
 
   for (const field of CONFIG_FIELD_DEFINITIONS) {
     if (field.kind === 'string') {
@@ -289,7 +276,7 @@ function mergeConfig(
     ...envConfig,
   }
 
-  const normalizedRecord = {} as Record<PersistedConfigKey, string | number>
+  const normalizedRecord = {} as Record<PersistedConfigKey, PersistedConfigValue>
 
   for (const key of PERSISTED_CONFIG_KEYS) {
     normalizedRecord[key] = normalizeConfigValue(key, merged[key])
@@ -311,7 +298,7 @@ function serializeConfig(config: PersistedAppConfig): string {
     sections[field.section][field.tomlKey] = config[field.key]
   }
 
-  const body = TOML.stringify(sections).trimEnd()
+  const body = TOML.stringify(sections as never).trimEnd()
   return `# Plotline application configuration.\n${body}\n`
 }
 
@@ -333,53 +320,6 @@ function writeConfigAtomically(configPath: string, contents: string): void {
   } catch (error) {
     unlinkSync(tempPath)
     throw error
-  }
-}
-
-function guessProviderFromDomain(baseURL: string, model: string): AiProvider {
-  let hostname = ''
-  if (baseURL) {
-    try {
-      hostname = new URL(baseURL).hostname.toLowerCase()
-    } catch {
-      hostname = ''
-    }
-  }
-
-  if (hostname.includes('anthropic')) return 'anthropic'
-  if (hostname.includes('openai')) return 'openai'
-  if (model.toLowerCase().startsWith('claude')) return 'anthropic'
-  if (!baseURL) return 'openai'
-
-  return 'openai-compatible'
-}
-
-function resolveAiConfig(config: PersistedAppConfig): ResolvedAiConfig {
-  const defaultModel = config.aiModel || DEFAULT_AI_MODEL
-  const provider = guessProviderFromDomain(config.aiBaseUrl, defaultModel)
-
-  const shared = {
-    defaultTemperature: config.aiDefaultTemperature,
-    selectionEditTemperature: config.aiSelectionEditTemperature,
-    defaultMaxOutputTokens: config.aiDefaultMaxOutputTokens,
-  }
-
-  if (provider === 'anthropic') {
-    return {
-      provider,
-      apiKey: config.aiApiKey,
-      baseURL: config.aiBaseUrl || DEFAULT_ANTHROPIC_BASE_URL,
-      model: config.aiModel || DEFAULT_ANTHROPIC_MODEL,
-      ...shared,
-    }
-  }
-
-  return {
-    provider,
-    apiKey: config.aiApiKey,
-    baseURL: config.aiBaseUrl || DEFAULT_OPENAI_BASE_URL,
-    model: defaultModel,
-    ...shared,
   }
 }
 
@@ -416,7 +356,6 @@ function buildResolvedConfig(
   configuredDataDir: string,
   configFilePath: string
 ): AppConfig {
-  const aiConfig = resolveAiConfig(rawConfig)
   return freezeResolvedConfig({
     raw: { ...rawConfig },
     runtime: {
@@ -432,7 +371,11 @@ function buildResolvedConfig(
       configFile: configFilePath,
       dbFile: resolveDataFile(configuredDataDir, SQLITE_FILE_NAME),
     },
-    ai: { ...aiConfig },
+    ai: {
+      defaultTemperature: rawConfig.aiDefaultTemperature,
+      selectionEditTemperature: rawConfig.aiSelectionEditTemperature,
+      defaultMaxOutputTokens: rawConfig.aiDefaultMaxOutputTokens,
+    },
     yjs: {
       persistenceFlushIntervalMs: rawConfig.yjsPersistenceFlushMs,
       versionSnapshotIntervalMs: rawConfig.yjsVersionIntervalMs,
@@ -462,14 +405,18 @@ function resolveConfigSources(
   return sources
 }
 
+function configValuesEqual(
+  left: PersistedConfigValue | undefined,
+  right: PersistedConfigValue
+): boolean {
+  return left === right
+}
+
 const editableConfigKeySet = new Set<PersistedConfigKey>(EDITABLE_CONFIG_KEYS)
 
 function sanitizeEditablePatch(patch: Partial<PersistedAppConfig>): Partial<PersistedAppConfig> {
   const sanitized: Partial<PersistedAppConfig> = {}
-  const sanitizedRecord = sanitized as Record<
-    PersistedConfigKey,
-    PersistedAppConfig[PersistedConfigKey] | undefined
-  >
+  const sanitizedRecord = sanitized as Partial<Record<PersistedConfigKey, PersistedConfigValue>>
 
   for (const [rawKey, rawValue] of Object.entries(patch)) {
     if (rawValue === undefined) continue
@@ -543,7 +490,7 @@ export class ConfigManager {
     })
 
     const changedFileKeys: PersistedConfigKey[] = PERSISTED_CONFIG_KEYS.filter(
-      (key) => previousFileConfig[key] !== nextFileConfig[key]
+      (key) => !configValuesEqual(previousFileConfig[key], nextFileConfig[key])
     )
 
     if (changedFileKeys.length > 0) {
@@ -554,7 +501,7 @@ export class ConfigManager {
     const nextState = this.getState()
 
     const changedEffectiveKeys: PersistedConfigKey[] = PERSISTED_CONFIG_KEYS.filter(
-      (key) => previousState.config.raw[key] !== nextState.config.raw[key]
+      (key) => !configValuesEqual(previousState.config.raw[key], nextState.config.raw[key])
     )
     const overriddenChangedKeys: PersistedConfigKey[] = changedFileKeys.filter(
       (key) => nextState.sources[key] === 'env'

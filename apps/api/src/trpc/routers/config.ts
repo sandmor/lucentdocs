@@ -1,7 +1,11 @@
+import { z } from 'zod/v4'
 import {
+  AI_MODEL_SOURCE_TYPES,
   EDITABLE_CONFIG_KEYS,
   PERSISTED_CONFIG_KEYS,
   editableConfigSchema,
+  normalizeBaseURL,
+  parseAndNormalizeHttpBaseURL,
   type PersistedAppConfig,
 } from '@plotline/shared'
 import {
@@ -9,15 +13,14 @@ import {
   type ConfigValueSource,
   configManager,
 } from '../../config/manager.js'
+import { getModelsDevCatalog, getSourceModelCatalog } from '../../ai/model-catalog.js'
+import { AI_PROVIDER_DEFAULT_BASE_URLS } from '../../core/ai/provider-types.js'
 import { resetClient } from '../../ai/provider.js'
 import { router, publicProcedure } from '../index.js'
 
 type EditableConfigKey = (typeof EDITABLE_CONFIG_KEYS)[number]
 
 const AI_RUNTIME_KEYS = [
-  'aiApiKey',
-  'aiBaseUrl',
-  'aiModel',
   'aiDefaultTemperature',
   'aiSelectionEditTemperature',
   'aiDefaultMaxOutputTokens',
@@ -29,6 +32,10 @@ interface ConfigFieldPayload {
   fileValue: string | number | null
   source: ConfigValueSource
   isOverridden: boolean
+}
+
+function isValidHttpBaseURL(value: string): boolean {
+  return parseAndNormalizeHttpBaseURL(value).ok
 }
 
 function isLoopbackHost(host: string): boolean {
@@ -68,17 +75,164 @@ function buildConfigPayload(state: ConfigStateSnapshot) {
   }
 }
 
+const sourceCatalogInputSchema = z.object({
+  providerId: z.string().min(1),
+  type: z.enum(AI_MODEL_SOURCE_TYPES),
+  baseURL: z
+    .string()
+    .refine((value) => value.trim() === '' || isValidHttpBaseURL(value), 'Invalid base URL.'),
+  apiKeyId: z.string().nullable().optional(),
+  forceRefresh: z.boolean().optional(),
+})
+
+const aiProviderInputSchema = z.object({
+  id: z.string().optional(),
+  providerId: z.string().trim().min(1, 'Provider ID is required.'),
+  type: z.enum(AI_MODEL_SOURCE_TYPES),
+  baseURL: z
+    .string()
+    .refine((value) => value.trim() === '' || isValidHttpBaseURL(value), 'Invalid base URL.'),
+  model: z.string().trim().min(1, 'Model is required.'),
+  apiKeyId: z.string().nullable(),
+})
+
+const updateAiSettingsInputSchema = z.object({
+  providers: z.array(aiProviderInputSchema).min(1),
+  activeProviderId: z.string().nullable(),
+})
+
+const createApiKeyInputSchema = z.object({
+  baseURL: z.string().min(1).refine(isValidHttpBaseURL, 'Invalid base URL.'),
+  name: z.string().trim().optional(),
+  apiKey: z.string().trim().min(1, 'API key is required.'),
+  isDefault: z.boolean().optional(),
+})
+
+const updateApiKeyInputSchema = z.object({
+  id: z.string(),
+  name: z.string().trim().optional(),
+  apiKey: z.string().trim().optional(),
+  isDefault: z.boolean().optional(),
+})
+
+const deleteApiKeyInputSchema = z.object({
+  id: z.string(),
+})
+
 export const configRouter = router({
   get: publicProcedure.query(() => {
     const state = configManager.getState()
     return buildConfigPayload(state)
   }),
 
+  modelCatalog: publicProcedure.query(async () => {
+    try {
+      return {
+        providers: await getModelsDevCatalog(),
+      }
+    } catch {
+      return {
+        providers: [],
+      }
+    }
+  }),
+
+  aiSettings: publicProcedure.query(async ({ ctx }) => {
+    return ctx.services.aiSettings.getSnapshot()
+  }),
+
+  updateAiSettings: publicProcedure
+    .input(updateAiSettingsInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.services.aiSettings.updateSettings({
+        providers: input.providers.map((provider) => ({
+          id: provider.id,
+          providerId: provider.providerId.trim(),
+          type: provider.type,
+          baseURL: normalizeBaseURL(provider.baseURL),
+          model: provider.model.trim(),
+          apiKeyId: provider.apiKeyId,
+        })),
+        activeProviderId: input.activeProviderId,
+      })
+
+      resetClient()
+      return result
+    }),
+
+  createAiApiKey: publicProcedure
+    .input(createApiKeyInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.services.aiSettings.createApiKey({
+        baseURL: normalizeBaseURL(input.baseURL),
+        name: input.name?.trim() ?? '',
+        apiKey: input.apiKey.trim(),
+        isDefault: input.isDefault,
+      })
+
+      resetClient()
+      return result
+    }),
+
+  updateAiApiKey: publicProcedure
+    .input(updateApiKeyInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.services.aiSettings.updateApiKey({
+        id: input.id,
+        name: input.name?.trim(),
+        apiKey: input.apiKey?.trim(),
+        isDefault: input.isDefault,
+      })
+
+      resetClient()
+      return result
+    }),
+
+  deleteAiApiKey: publicProcedure
+    .input(deleteApiKeyInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.services.aiSettings.deleteApiKey(input.id)
+      resetClient()
+      return result
+    }),
+
+  sourceModelCatalog: publicProcedure
+    .input(sourceCatalogInputSchema)
+    .query(async ({ ctx, input }) => {
+      const baseURL = normalizeBaseURL(input.baseURL) || AI_PROVIDER_DEFAULT_BASE_URLS[input.type]
+      let apiKey = ''
+
+      if (input.apiKeyId) {
+        const snapshot = await ctx.services.aiSettings.getSnapshot()
+        const selected = snapshot.apiKeys.find((entry) => entry.id === input.apiKeyId)
+        if (!selected) {
+          throw new Error(`API key ${input.apiKeyId} was not found.`)
+        }
+        if (normalizeBaseURL(selected.baseURL) !== baseURL) {
+          throw new Error(
+            `API key ${input.apiKeyId} does not belong to provider base URL ${baseURL}.`
+          )
+        }
+        apiKey = (await ctx.services.aiSettings.resolveApiKeyById(input.apiKeyId)) ?? ''
+      } else {
+        apiKey = (await ctx.services.aiSettings.resolveApiKeyForBaseURL(baseURL)) ?? ''
+      }
+
+      return getSourceModelCatalog(
+        {
+          providerId: input.providerId,
+          type: input.type,
+          baseURL,
+        },
+        apiKey,
+        {
+          forceRefresh: input.forceRefresh === true,
+        }
+      )
+    }),
+
   update: publicProcedure.input(editableConfigSchema).mutation(({ ctx, input }) => {
     const sanitizedInput: Pick<PersistedAppConfig, EditableConfigKey> = {
-      aiApiKey: input.aiApiKey.trim(),
-      aiBaseUrl: input.aiBaseUrl.trim(),
-      aiModel: input.aiModel.trim(),
       aiDefaultTemperature: input.aiDefaultTemperature,
       aiSelectionEditTemperature: input.aiSelectionEditTemperature,
       aiDefaultMaxOutputTokens: input.aiDefaultMaxOutputTokens,

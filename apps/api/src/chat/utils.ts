@@ -73,6 +73,7 @@ export function createObserveState(
     thread: PersistedChatThread | null
     generating: boolean
     generationId: string | null
+    error?: string | null
   }
 ) {
   return {
@@ -82,6 +83,7 @@ export function createObserveState(
     deleted: options.thread === null,
     generating: options.generating,
     generationId: options.generationId,
+    error: options.error ?? null,
     thread: options.thread,
   }
 }
@@ -222,14 +224,6 @@ export function createUserMessage(text: string): UIMessage {
   return {
     id: nanoid(),
     role: 'user',
-    parts: [{ type: 'text', text }],
-  }
-}
-
-export function createAssistantFailureMessage(text: string): UIMessage {
-  return {
-    id: nanoid(),
-    role: 'assistant',
     parts: [{ type: 'text', text }],
   }
 }

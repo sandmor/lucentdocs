@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import { schema, type InlineZoneWriteAction } from '@plotline/shared'
-import { applyInlineZoneWriteActionToDoc, setInlineZoneStreamingInDoc } from './zone-write.js'
+import {
+  applyInlineZoneWriteActionToDoc,
+  getInlineZoneTextFromDoc,
+  setInlineZoneStreamingInDoc,
+} from './zone-write.js'
 
 function createZoneNode(
   zoneId: string,
@@ -23,6 +27,32 @@ function createZoneNode(
 }
 
 describe('applyInlineZoneWriteActionToDoc', () => {
+  test('reads zone text for the active session', () => {
+    const zoneId = 'zone-read'
+    const sessionId = 'session-read'
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.paragraph.create(null, [
+        schema.text('Before '),
+        createZoneNode(zoneId, sessionId, 'alpha'),
+        schema.text(' after'),
+      ]),
+    ])
+
+    const result = getInlineZoneTextFromDoc(doc, sessionId)
+    expect(result.zoneFound).toBe(true)
+    expect(result.text).toBe('alpha')
+  })
+
+  test('returns missing zone text when session is not found', () => {
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.paragraph.create(null, [schema.text('No AI zone here')]),
+    ])
+
+    const result = getInlineZoneTextFromDoc(doc, 'missing-session')
+    expect(result.zoneFound).toBe(false)
+    expect(result.text).toBe('')
+  })
+
   test('keeps in-paragraph selection edits inline without splitting the paragraph', () => {
     const zoneId = 'zone-selection'
     const sessionId = 'session-selection'

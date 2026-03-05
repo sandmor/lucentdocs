@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import TOML from '@iarna/toml'
+import { DEFAULT_PERSISTED_CONFIG } from '@plotline/shared'
 import { CONFIG_FILE_NAME, resolveDataDir, resolveDataFile } from '../paths.js'
 import { ConfigManager } from './manager.js'
-import { DEFAULT_PERSISTED_CONFIG } from '@plotline/shared'
 
 function uniqueDataDir(label: string): string {
   return `data-test/${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -24,8 +24,7 @@ describe('ConfigManager', () => {
       'port = 6000',
       '',
       '[ai]',
-      'base_url = "https://api.openai.com/v1"',
-      'model = "gpt-5"',
+      'default_temperature = 0.4',
       '',
       '[yjs]',
       'persistence_flush_interval_ms = 3333',
@@ -37,9 +36,7 @@ describe('ConfigManager', () => {
       HOST: '127.0.0.9',
       PORT: '1234',
       PLOTLINE_DATA_DIR: dataDir,
-      AI_API_KEY: '',
-      AI_BASE_URL: 'https://api.anthropic.com/v1',
-      AI_MODEL: '',
+      AI_DEFAULT_TEMPERATURE: '0.8',
       YJS_VERSION_INTERVAL_MS: '9000',
     })
 
@@ -50,8 +47,11 @@ describe('ConfigManager', () => {
     expect(config.server.port).toBe(1234)
     expect(config.paths.dataDir).toBe(absoluteDataDir)
 
-    expect(config.ai.provider).toBe('anthropic')
-    expect(config.ai.baseURL).toBe('https://api.anthropic.com/v1')
+    expect(config.ai.defaultTemperature).toBe(0.8)
+    expect(config.ai.selectionEditTemperature).toBe(
+      DEFAULT_PERSISTED_CONFIG.aiSelectionEditTemperature
+    )
+    expect(config.ai.defaultMaxOutputTokens).toBe(DEFAULT_PERSISTED_CONFIG.aiDefaultMaxOutputTokens)
 
     expect(config.yjs.persistenceFlushIntervalMs).toBe(3333)
     expect(config.yjs.versionSnapshotIntervalMs).toBe(9000)
@@ -77,11 +77,13 @@ describe('ConfigManager', () => {
     const parsed = TOML.parse(persisted) as {
       app?: { environment?: string }
       server?: { host?: string; port?: number }
+      ai?: { default_temperature?: number }
     }
 
     expect(parsed.app?.environment).toBe(DEFAULT_PERSISTED_CONFIG.nodeEnv)
     expect(parsed.server?.host).toBe(DEFAULT_PERSISTED_CONFIG.host)
     expect(parsed.server?.port).toBe(DEFAULT_PERSISTED_CONFIG.port)
+    expect(parsed.ai?.default_temperature).toBe(DEFAULT_PERSISTED_CONFIG.aiDefaultTemperature)
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
@@ -96,39 +98,39 @@ describe('ConfigManager', () => {
     const manager = new ConfigManager({
       NODE_ENV: 'test',
       PLOTLINE_DATA_DIR: dataDir,
-      AI_MODEL: 'gpt-from-env',
+      AI_DEFAULT_TEMPERATURE: '1.2',
       YJS_PERSISTENCE_FLUSH_MS: '2500',
       LIMITS_AI_TOOL_STEPS: '11',
     })
 
     const result = manager.updateFileConfig({
-      aiModel: 'gpt-from-file',
+      aiDefaultTemperature: 0.2,
       yjsPersistenceFlushMs: 7777,
       maxAiToolSteps: 7,
     })
 
     expect(result.changedFileKeys.sort()).toEqual([
-      'aiModel',
+      'aiDefaultTemperature',
       'maxAiToolSteps',
       'yjsPersistenceFlushMs',
     ])
     expect(result.changedEffectiveKeys).toEqual([])
     expect(result.overriddenChangedKeys.sort()).toEqual([
-      'aiModel',
+      'aiDefaultTemperature',
       'maxAiToolSteps',
       'yjsPersistenceFlushMs',
     ])
-    expect(result.state.config.ai.model).toBe('gpt-from-env')
+    expect(result.state.config.ai.defaultTemperature).toBe(1.2)
     expect(result.state.config.yjs.persistenceFlushIntervalMs).toBe(2500)
     expect(result.state.config.limits.aiToolSteps).toBe(11)
 
     const persisted = readFileSync(result.state.config.paths.configFile, 'utf8')
     const parsed = TOML.parse(persisted) as {
-      ai?: { model?: string }
+      ai?: { default_temperature?: number }
       yjs?: { persistence_flush_interval_ms?: number }
       limits?: { ai_tool_steps?: number }
     }
-    expect(parsed.ai?.model).toBe('gpt-from-file')
+    expect(parsed.ai?.default_temperature).toBe(0.2)
     expect(parsed.yjs?.persistence_flush_interval_ms).toBe(7777)
     expect(parsed.limits?.ai_tool_steps).toBe(7)
 

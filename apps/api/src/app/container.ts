@@ -5,6 +5,7 @@ import { createSqliteAdapter } from '../infrastructure/sqlite/factory.js'
 import { createYjsRuntime, type YjsRuntime, type YjsRuntimeConfig } from '../yjs/runtime.js'
 import { createChatRuntime, type ChatRuntime } from '../chat/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
+import { configureAiProvider } from '../ai/index.js'
 
 export interface AppContainer {
   services: ServiceSet
@@ -15,8 +16,13 @@ export interface AppContainer {
   inlineRuntime: InlineRuntime
 }
 
-export function createContainer(dbPath: string, yjsConfig: YjsRuntimeConfig): AppContainer {
+export async function createContainer(
+  dbPath: string,
+  yjsConfig: YjsRuntimeConfig
+): Promise<AppContainer> {
   const adapter = createSqliteAdapter(dbPath)
+  await adapter.services.aiSettings.initializeDefaults({ env: process.env })
+  configureAiProvider(adapter.services.aiSettings)
 
   const yjsRuntime = createYjsRuntime(
     {

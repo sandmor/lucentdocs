@@ -349,6 +349,11 @@ export function createAIWriterController(
               chunkPump.stop()
             }
 
+            if (event.error) {
+              rejectGeneration(new Error(event.error))
+              return
+            }
+
             if (activeGenerationId && !event.generating) {
               settleGenerationDone()
             }

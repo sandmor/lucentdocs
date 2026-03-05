@@ -29,6 +29,7 @@ export {
   remapPathInsideDirectory,
 } from './document-path.js'
 export type {
+  AiModelSourceType,
   PersistedAppConfig,
   PersistedConfigKey,
   PersistedConfigSection,
@@ -38,6 +39,7 @@ export type {
   LimitsConfig,
 } from './config.js'
 export {
+  AI_MODEL_SOURCE_TYPES,
   CONFIG_FIELD_DEFINITIONS,
   CONFIG_FIELD_BY_KEY,
   PERSISTED_CONFIG_KEYS,
@@ -46,6 +48,15 @@ export {
   LIMITS_CONFIG_KEYS,
   editableConfigSchema,
 } from './config.js'
+export type { ParsedBaseURLResult } from './ai-provider.js'
+export {
+  AI_PROVIDER_DEFAULT_BASE_URLS,
+  normalizeModelSourceType,
+  normalizeBaseURL,
+  isSameBaseURL,
+  parseAndNormalizeHttpBaseURL,
+  normalizeProviderBaseURL,
+} from './ai-provider.js'
 export type {
   PromptMode,
   PromptSystemSlot,

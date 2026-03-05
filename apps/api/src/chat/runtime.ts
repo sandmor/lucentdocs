@@ -27,6 +27,7 @@ export interface ChatObserveState {
   deleted: boolean
   generating: boolean
   generationId: string | null
+  error: string | null
   thread: PersistedChatThread | null
 }
 
@@ -154,6 +155,7 @@ export class ChatRuntime {
       thread: persistedThread,
       generating: generationState.generating,
       generationId: generationState.generationId,
+      error: null,
     })
   }
 
@@ -223,6 +225,7 @@ export class ChatRuntime {
         thread: null,
         generating: false,
         generationId: null,
+        error: null,
       })
     )
   }
@@ -264,6 +267,7 @@ export class ChatRuntime {
       }
 
       const persistedMessages = await normalizeMessages(existingThread.messages)
+      const rollbackThread = toPersistedThread(existingThread)!
       const userMessage = createUserMessage(promptText)
       const baseMessages: UIMessage[] = [...persistedMessages, userMessage]
 
@@ -305,6 +309,8 @@ export class ChatRuntime {
           scope: input,
           baseThread: liveThread,
           baseMessages,
+          rollbackThread,
+          rollbackMessages: persistedMessages,
           selectionFrom: input.selectionFrom,
           selectionTo: input.selectionTo,
           generationId,
@@ -320,6 +326,7 @@ export class ChatRuntime {
                 thread: state.thread,
                 generating: true,
                 generationId: state.generationId,
+                error: null,
               })
             )
           },
@@ -334,6 +341,7 @@ export class ChatRuntime {
                 thread: result.thread,
                 generating: false,
                 generationId: null,
+                error: result.error ?? null,
               })
             )
           },

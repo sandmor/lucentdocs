@@ -102,6 +102,24 @@ function resolveSessionZone(doc: ProseMirrorNode, sessionId: string): SessionZon
   return zones.find((zone) => zone.streaming) ?? zones[0] ?? null
 }
 
+export function getInlineZoneTextFromDoc(
+  doc: ProseMirrorNode,
+  sessionId: string
+): { zoneFound: boolean; text: string } {
+  const zone = resolveSessionZone(doc, sessionId)
+  if (!zone) {
+    return {
+      zoneFound: false,
+      text: '',
+    }
+  }
+
+  return {
+    zoneFound: true,
+    text: doc.textBetween(zone.nodeFrom, zone.nodeTo, '\n\n', '\n'),
+  }
+}
+
 export function applyInlineZoneWriteActionToDoc(
   doc: ProseMirrorNode,
   sessionId: string,

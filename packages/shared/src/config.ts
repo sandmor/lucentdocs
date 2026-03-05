@@ -1,13 +1,14 @@
 import { z } from 'zod/v4'
 import { INLINE_AI_DEFAULT_TOOL_STEP_LIMIT } from './inline-ai.js'
 
+export const AI_MODEL_SOURCE_TYPES = ['openai', 'anthropic'] as const
+
+export type AiModelSourceType = (typeof AI_MODEL_SOURCE_TYPES)[number]
+
 export interface PersistedAppConfig {
   nodeEnv: string
   host: string
   port: number
-  aiApiKey: string
-  aiBaseUrl: string
-  aiModel: string
   aiDefaultTemperature: number
   aiSelectionEditTemperature: number
   aiDefaultMaxOutputTokens: number
@@ -72,33 +73,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     allowEmptyString: false,
     min: 1,
     max: 65535,
-  },
-  {
-    key: 'aiApiKey',
-    section: 'ai',
-    tomlKey: 'api_key',
-    envVar: 'AI_API_KEY',
-    kind: 'string',
-    defaultValue: '',
-    allowEmptyString: true,
-  },
-  {
-    key: 'aiBaseUrl',
-    section: 'ai',
-    tomlKey: 'base_url',
-    envVar: 'AI_BASE_URL',
-    kind: 'string',
-    defaultValue: '',
-    allowEmptyString: true,
-  },
-  {
-    key: 'aiModel',
-    section: 'ai',
-    tomlKey: 'model',
-    envVar: 'AI_MODEL',
-    kind: 'string',
-    defaultValue: '',
-    allowEmptyString: true,
   },
   {
     key: 'aiDefaultTemperature',
@@ -293,9 +267,6 @@ export const DEFAULT_PERSISTED_CONFIG = Object.freeze(
 )
 
 export const EDITABLE_CONFIG_KEYS = [
-  'aiApiKey',
-  'aiBaseUrl',
-  'aiModel',
   'aiDefaultTemperature',
   'aiSelectionEditTemperature',
   'aiDefaultMaxOutputTokens',
@@ -365,23 +336,6 @@ const aiSelEditTempField = CONFIG_FIELD_BY_KEY.aiSelectionEditTemperature
 const aiDefaultMaxTokensField = CONFIG_FIELD_BY_KEY.aiDefaultMaxOutputTokens
 
 export const editableConfigSchema = z.object({
-  aiApiKey: z.string(),
-  aiBaseUrl: z.string().refine(
-    (value) => {
-      const trimmed = value.trim()
-      if (!trimmed) return true
-      try {
-        const parsed = new URL(trimmed)
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:'
-      } catch {
-        return false
-      }
-    },
-    {
-      message: 'Must be a valid http(s) URL or empty to use provider defaults.',
-    }
-  ),
-  aiModel: z.string(),
   aiDefaultTemperature: z
     .number()
     .min(aiDefaultTempField.min ?? 0)

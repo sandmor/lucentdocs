@@ -19,7 +19,7 @@ import { createContainer } from './app/container.js'
 const appConfig = configManager.getConfig()
 const isProd = appConfig.runtime.isProduction
 const isTestRuntime = appConfig.runtime.nodeEnv === 'test' || process.env.PLOTLINE_TEST_MODE === '1'
-const container = createContainer(appConfig.paths.dbFile, {
+const container = await createContainer(appConfig.paths.dbFile, {
   persistenceFlushIntervalMs: appConfig.yjs.persistenceFlushIntervalMs,
   versionSnapshotIntervalMs: appConfig.yjs.versionSnapshotIntervalMs,
 })

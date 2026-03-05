@@ -15,7 +15,6 @@ import { projectSyncBus } from '../trpc/project-sync.js'
 import { buildReadTools } from './tools.js'
 import {
   buildCurrentFileContext,
-  createAssistantFailureMessage,
   isAbortError,
   readResponseError,
   serializeConversationForPrompt,
@@ -33,6 +32,8 @@ export interface GenerationOptions {
   scope: ChatScope
   baseThread: PersistedChatThread
   baseMessages: UIMessage[]
+  rollbackThread: PersistedChatThread
+  rollbackMessages: UIMessage[]
   selectionFrom?: number
   selectionTo?: number
   generationId: string
@@ -50,6 +51,7 @@ export interface GenerationCallbacks {
     thread: PersistedChatThread | null
     generating: boolean
     generationId: string | null
+    error: string | null
   }) => void
   createRuntimeError: (code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT', message: string) => Error
 }
@@ -122,6 +124,8 @@ export class GenerationEngine {
       scope,
       baseThread,
       baseMessages,
+      rollbackThread,
+      rollbackMessages,
       selectionFrom,
       selectionTo,
       generationId,
@@ -130,6 +134,7 @@ export class GenerationEngine {
 
     let latestAssistantMessage: UIMessage | null = null
     let finalMessages = baseMessages
+    let completionError: string | null = null
     let chunkForwardTask: Promise<void> | null = null
     let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null = null
 
@@ -229,6 +234,7 @@ export class GenerationEngine {
 
       for await (const assistantMessage of readUIMessageStream<UIMessage>({
         stream: messageStream,
+        terminateOnError: true,
       })) {
         const normalizedAssistant: UIMessage = {
           ...assistantMessage,
@@ -249,17 +255,9 @@ export class GenerationEngine {
         : baseMessages
     } catch (error) {
       if (!isAbortError(error) && !abortController.signal.aborted) {
-        const message = error instanceof Error ? error.message : 'Failed to get AI response'
+        completionError = error instanceof Error ? error.message : 'Failed to get AI response'
         console.error('AI chat generation failed', error)
-
-        if (!latestAssistantMessage) {
-          const failureMessage = createAssistantFailureMessage(
-            `Failed to generate a response: ${message}`
-          )
-          finalMessages = [...baseMessages, failureMessage]
-        } else {
-          finalMessages = [...baseMessages, latestAssistantMessage]
-        }
+        finalMessages = rollbackMessages
       } else {
         finalMessages = latestAssistantMessage
           ? [...baseMessages, latestAssistantMessage]
@@ -294,6 +292,7 @@ export class GenerationEngine {
             thread: null,
             generating: false,
             generationId: null,
+            error: completionError,
           })
         } else {
           projectSyncBus.publish({
@@ -315,15 +314,21 @@ export class GenerationEngine {
             },
             generating: false,
             generationId: null,
+            error: completionError,
           })
         }
       } catch (error) {
         console.error('Failed to finalize chat generation', error)
 
         callbacks.onComplete({
-          thread: { ...baseThread, messages: finalMessages, updatedAt: Date.now() },
+          thread: {
+            ...(completionError ? rollbackThread : baseThread),
+            messages: finalMessages,
+            updatedAt: Date.now(),
+          },
           generating: false,
           generationId: null,
+          error: completionError,
         })
       }
     }
