@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { isValidId } from '@plotline/shared'
 import { projectSyncBus } from '../project-sync.js'
-import { publicProcedure, router } from '../index.js'
+import { protectedProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'
 import type { ChatObserveEvent } from '../../chat/runtime.js'
 import { configManager } from '../../config/manager.js'
@@ -62,7 +62,7 @@ function mapRuntimeError(error: unknown): TRPCError {
 }
 
 export const chatRouter = router({
-  listByDocument: publicProcedure
+  listByDocument: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -76,7 +76,7 @@ export const chatRouter = router({
       }
     }),
 
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -108,7 +108,7 @@ export const chatRouter = router({
       }
     }),
 
-  observeById: publicProcedure
+  observeById: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -151,7 +151,7 @@ export const chatRouter = router({
       })
     }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -187,7 +187,7 @@ export const chatRouter = router({
       return created
     }),
 
-  generateById: publicProcedure
+  generateById: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -217,7 +217,7 @@ export const chatRouter = router({
       }
     }),
 
-  cancelGenerationById: publicProcedure
+  cancelGenerationById: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -231,7 +231,7 @@ export const chatRouter = router({
       return { canceled: ctx.chatRuntime.cancelGeneration(input, input.generationId) }
     }),
 
-  deleteById: publicProcedure
+  deleteById: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,

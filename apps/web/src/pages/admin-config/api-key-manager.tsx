@@ -59,11 +59,14 @@ export function ApiKeyManager({
   const [editingKeyValue, setEditingKeyValue] = useState('')
 
   useEffect(() => {
-    if (newKeyBaseURL.trim()) return
     const nextSuggested = suggestedBaseURLs[0] ?? ''
-    if (!nextSuggested || nextSuggested === newKeyBaseURL) return
-    setNewKeyBaseURL(nextSuggested)
-  }, [suggestedBaseURLs, newKeyBaseURL])
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNewKeyBaseURL((prev) => {
+      if (prev.trim()) return prev
+      if (!nextSuggested || nextSuggested === prev) return prev
+      return nextSuggested
+    })
+  }, [suggestedBaseURLs])
 
   const createApiKey = () => {
     const baseURL = newKeyBaseURL.trim()

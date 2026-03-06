@@ -194,7 +194,8 @@ export function sourceBadge(source: FieldSource): {
   return { label: 'Default', variant: 'ghost' }
 }
 
-export function formatDisplayValue(value: string | number | null): string {
+export function formatDisplayValue(value: string | number | boolean | null): string {
+  if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled'
   if (typeof value === 'number') return value.toLocaleString()
   if (typeof value === 'string') return value || '(empty)'
   return '(unset)'
@@ -240,17 +241,24 @@ export function createProviderDraft(
 export function readFieldValue(
   data: ConfigQueryData | undefined,
   key: EditableFieldKey
-): string | number {
+): string | number | boolean {
   return data?.fields[key]?.fileValue ?? DEFAULT_PERSISTED_CONFIG[key]
 }
 
 export function toFormValues(data: ConfigQueryData | undefined): ConfigFormValues {
-  const values: Partial<Record<EditableFieldKey, string | number>> = {}
+  const values: Partial<Record<EditableFieldKey, string | number | boolean>> = {}
 
   for (const key of EDITABLE_CONFIG_KEYS) {
     const fallback = DEFAULT_PERSISTED_CONFIG[key]
     const rawValue = readFieldValue(data, key)
-    values[key] = typeof fallback === 'number' ? Number(rawValue) : String(rawValue)
+
+    if (typeof fallback === 'boolean') {
+      values[key] = Boolean(rawValue)
+    } else if (typeof fallback === 'number') {
+      values[key] = Number(rawValue)
+    } else {
+      values[key] = String(rawValue)
+    }
   }
 
   return values as ConfigFormValues

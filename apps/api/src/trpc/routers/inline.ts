@@ -1,7 +1,7 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
 import { isValidId } from '@plotline/shared'
-import { publicProcedure, router } from '../index.js'
+import { protectedProcedure, router } from '../index.js'
 import { InlineRuntimeError } from '../../inline/runtime.js'
 import { configManager } from '../../config/manager.js'
 
@@ -27,7 +27,7 @@ function mapRuntimeError(error: unknown): TRPCError {
 }
 
 export const inlineRouter = router({
-  getSessions: publicProcedure
+  getSessions: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -52,7 +52,7 @@ export const inlineRouter = router({
       }
     }),
 
-  pruneOrphans: publicProcedure
+  pruneOrphans: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -73,7 +73,7 @@ export const inlineRouter = router({
       }
     }),
 
-  startPromptGeneration: publicProcedure
+  startPromptGeneration: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -121,7 +121,7 @@ export const inlineRouter = router({
       }
     }),
 
-  startContinuationGeneration: publicProcedure
+  startContinuationGeneration: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -153,7 +153,7 @@ export const inlineRouter = router({
       }
     }),
 
-  cancelGeneration: publicProcedure
+  cancelGeneration: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -168,7 +168,7 @@ export const inlineRouter = router({
       }
     }),
 
-  observeSession: publicProcedure
+  observeSession: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,

@@ -2,7 +2,7 @@ export type { Project } from './project.js'
 export type { Document } from './document.js'
 export type { JsonObject, JsonValue } from './json.js'
 export { isJsonObject } from './json.js'
-export { isValidId } from './validators.js'
+export { isValidId, authPasswordSchema } from './validators.js'
 export { schema } from './schema.js'
 export { parseContent, createDefaultContent } from './content.js'
 export {

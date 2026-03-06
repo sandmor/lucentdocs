@@ -9,8 +9,8 @@ export type VisibleNumberFieldKey = NumberFieldKey
 
 export type FieldSource = 'env' | 'file' | 'default'
 export type ConfigFieldPayload = {
-  effectiveValue: string | number
-  fileValue: string | number | null
+  effectiveValue: string | number | boolean
+  fileValue: string | number | boolean | null
   source: FieldSource
   isOverridden: boolean
 }

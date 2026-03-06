@@ -1,6 +1,6 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
-import { router, publicProcedure } from '../index.js'
+import { protectedProcedure, router } from '../index.js'
 import type { ImportDocumentErrorKind } from '../../core/services/documents.service.js'
 import {
   isValidId,
@@ -75,7 +75,7 @@ function normalizeAndValidatePath(inputPath: string, label: string): string {
 }
 
 export const documentsRouter = router({
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -89,7 +89,7 @@ export const documentsRouter = router({
       return docs
     }),
 
-  openOrCreateDefault: publicProcedure
+  openOrCreateDefault: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -106,7 +106,7 @@ export const documentsRouter = router({
       return doc
     }),
 
-  get: publicProcedure
+  get: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -124,7 +124,7 @@ export const documentsRouter = router({
       return doc
     }),
 
-  setDefault: publicProcedure
+  setDefault: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -152,7 +152,7 @@ export const documentsRouter = router({
       return { success: true }
     }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -190,7 +190,7 @@ export const documentsRouter = router({
       return doc
     }),
 
-  update: publicProcedure
+  update: protectedProcedure
     .input(
       z
         .object({
@@ -242,7 +242,7 @@ export const documentsRouter = router({
       return doc
     }),
 
-  versions: publicProcedure
+  versions: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -266,7 +266,7 @@ export const documentsRouter = router({
       return versions
     }),
 
-  createSnapshot: publicProcedure
+  createSnapshot: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -287,7 +287,7 @@ export const documentsRouter = router({
       return snapshot
     }),
 
-  restore: publicProcedure
+  restore: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -320,7 +320,7 @@ export const documentsRouter = router({
       return doc
     }),
 
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -355,7 +355,7 @@ export const documentsRouter = router({
       return { success: true, defaultDocumentId }
     }),
 
-  move: publicProcedure
+  move: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -398,7 +398,7 @@ export const documentsRouter = router({
       return moved
     }),
 
-  createDirectory: publicProcedure
+  createDirectory: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -439,7 +439,7 @@ export const documentsRouter = router({
       return { path: normalizedPath }
     }),
 
-  moveDirectory: publicProcedure
+  moveDirectory: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -494,7 +494,7 @@ export const documentsRouter = router({
       return moved
     }),
 
-  deleteDirectory: publicProcedure
+  deleteDirectory: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -535,7 +535,7 @@ export const documentsRouter = router({
       return deleted
     }),
 
-  export: publicProcedure
+  export: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
@@ -583,7 +583,7 @@ export const documentsRouter = router({
       }
     }),
 
-  import: publicProcedure
+  import: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { trpc } from '@/lib/trpc'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
@@ -24,8 +25,82 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Trash2, BookOpen, SlidersHorizontal, MessagesSquare } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Plus,
+  Trash2,
+  BookOpen,
+  SlidersHorizontal,
+  MessagesSquare,
+  Users,
+  LogOut,
+  ChevronDown,
+} from 'lucide-react'
 import { parseProjectsListSyncEvent } from '@/lib/project-sync-events'
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((part) => part[0] ?? '')
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+}
+
+function UserMenu({
+  name,
+  email,
+  onLogout,
+  isPending,
+}: {
+  name: string
+  email: string
+  onLogout: () => void
+  isPending: boolean
+}) {
+  const initials = getInitials(name)
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            className="sm:size-auto sm:px-2.5 sm:py-2 gap-1.5"
+            aria-label="Account menu"
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-semibold leading-none">
+              {initials || '?'}
+            </span>
+            <ChevronDown className="size-3 text-muted-foreground hidden sm:block" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-52">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex flex-col gap-0.5 py-2.5">
+            <span className="text-sm font-medium text-foreground">{name}</span>
+            <span className="text-xs text-muted-foreground font-normal">{email}</span>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" disabled={isPending} onClick={onLogout}>
+          <LogOut />
+          {isPending ? 'Logging out…' : 'Log out'}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 export function HomePage() {
   const navigate = useNavigate()
@@ -33,6 +108,17 @@ export function HomePage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<{ id: string; title: string } | null>(null)
   const utils = trpc.useUtils()
+  const configQuery = trpc.config.get.useQuery()
+  const authEnabled = Boolean(configQuery.data?.fields.authEnabled.effectiveValue)
+  const meQuery = trpc.auth.me.useQuery(undefined, { enabled: authEnabled })
+  const logoutMutation = trpc.auth.logout.useMutation({
+    onSuccess: () => {
+      window.location.href = '/login'
+    },
+    onError: (error) => {
+      toast.error('Failed to logout', { description: error.message })
+    },
+  })
 
   const projectsQuery = trpc.projects.list.useQuery()
   trpc.sync.onProjectsListEvent.useSubscription(undefined, {
@@ -92,6 +178,25 @@ export function HomePage() {
               <MessagesSquare data-icon="inline-start" />
               <span className="hidden sm:inline">Prompts</span>
             </Button>
+            {authEnabled ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="sm:size-auto sm:px-3 sm:py-2"
+                onClick={() => navigate('/admin/users')}
+              >
+                <Users data-icon="inline-start" />
+                <span className="hidden sm:inline">Users</span>
+              </Button>
+            ) : null}
+            {authEnabled ? (
+              <UserMenu
+                name={meQuery.data?.name ?? ''}
+                email={meQuery.data?.email ?? ''}
+                onLogout={() => logoutMutation.mutate()}
+                isPending={logoutMutation.isPending}
+              />
+            ) : null}
 
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger

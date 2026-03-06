@@ -15,6 +15,11 @@ import { configManager } from './config/manager.js'
 import { setupYjsWebSocket } from './yjs/websocket-handler.js'
 import { setupTrpcWebSocket, type TrpcWebSocketRuntime } from './trpc/websocket.js'
 import { createContainer } from './app/container.js'
+import { requireSafeFetch } from './http/security.js'
+import { injectUserMiddleware, readSessionTokenFromCookieHeader } from './http/auth.js'
+import type { Request } from 'express'
+import type { User } from './core/models/user.js'
+import type { IncomingMessage } from 'http'
 
 const appConfig = configManager.getConfig()
 const isProd = appConfig.runtime.isProduction
@@ -26,13 +31,36 @@ const container = await createContainer(appConfig.paths.dbFile, {
 
 container.yjsRuntime.initialize()
 
-function createTprcContext(): AppContext {
+function createTrpcContext({ req, user }: { req?: Request; user: User | null }): AppContext {
   return {
+    req,
+    user,
     services: container.services,
+    authPort: container.authPort,
     yjsRuntime: container.yjsRuntime,
     chatRuntime: container.chatRuntime,
     inlineRuntime: container.inlineRuntime,
   }
+}
+
+function createHttpTrpcContext(req: Request): AppContext {
+  return createTrpcContext({
+    req,
+    user: req.user ?? null,
+  })
+}
+
+async function createWsTrpcContext(req: IncomingMessage): Promise<AppContext> {
+  if (!container.authPort.isEnabled()) {
+    return createTrpcContext({
+      user: await container.authPort.validateSession(''),
+    })
+  }
+
+  const token = readSessionTokenFromCookieHeader(req.headers.cookie)
+  const user = token ? await container.authPort.validateSession(token) : null
+
+  return createTrpcContext({ user })
 }
 
 function displayHostForLog(bindHost: string): string {
@@ -53,7 +81,10 @@ function registerMetaRoutes(app: Express): void {
 function registerTrpcRoutes(app: Express): void {
   app.use(
     '/api/trpc',
-    createExpressMiddleware({ router: appRouter, createContext: createTprcContext })
+    createExpressMiddleware({
+      router: appRouter,
+      createContext: ({ req }) => createHttpTrpcContext(req),
+    })
   )
 }
 
@@ -245,8 +276,15 @@ function registerProcessHandlers(
 
 async function startServer() {
   const app = express()
+  app.set('trust proxy', 1)
   app.use(express.json({ limit: '10mb' }))
   app.use(cookieParser())
+
+  // Apply SSRF/CSRF Protection globally
+  app.use(requireSafeFetch)
+
+  // Inject User session into request
+  app.use(injectUserMiddleware(container.authPort))
 
   registerMetaRoutes(app)
   registerTrpcRoutes(app)
@@ -264,7 +302,7 @@ async function startServer() {
   })
 
   const yjsWss = setupYjsWebSocket(httpServer, container.yjsRuntime)
-  const trpcWs = setupTrpcWebSocket(httpServer, createTprcContext)
+  const trpcWs = setupTrpcWebSocket(httpServer, ({ req }) => createWsTrpcContext(req))
   container.yjsRuntime.startSnapshotTimer()
 
   yjsWss.on('error', (error) => {

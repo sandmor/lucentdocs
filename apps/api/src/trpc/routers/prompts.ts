@@ -9,7 +9,7 @@ import {
 import { TRPCError } from '@trpc/server'
 import { PromptManagerError, promptManager } from '../../ai/prompt-manager.js'
 import { configManager } from '../../config/manager.js'
-import { router, publicProcedure } from '../index.js'
+import { adminProcedure, router } from '../index.js'
 
 function assertPromptWithinConfiguredLimits(prompt: PromptEditable): void {
   const limits = configManager.getConfig().limits
@@ -57,11 +57,11 @@ function toTrpcPromptError(error: unknown): never {
 }
 
 export const promptsRouter = router({
-  list: publicProcedure.query(() => {
+  list: adminProcedure.query(() => {
     return promptManager.listSummaries()
   }),
 
-  get: publicProcedure.input(promptGetInputSchema).query(({ input }) => {
+  get: adminProcedure.input(promptGetInputSchema).query(({ input }) => {
     try {
       const prompt = promptManager.getPrompt(input.id)
       if (!prompt) {
@@ -76,7 +76,7 @@ export const promptsRouter = router({
     }
   }),
 
-  create: publicProcedure.input(promptCreateInputSchema).mutation(({ input }) => {
+  create: adminProcedure.input(promptCreateInputSchema).mutation(({ input }) => {
     try {
       assertPromptWithinConfiguredLimits(input.prompt)
       const prompt = promptManager.createPrompt(input.prompt)
@@ -89,7 +89,7 @@ export const promptsRouter = router({
     }
   }),
 
-  update: publicProcedure.input(promptUpdateInputSchema).mutation(({ input }) => {
+  update: adminProcedure.input(promptUpdateInputSchema).mutation(({ input }) => {
     try {
       assertPromptWithinConfiguredLimits(input.prompt)
       const result = promptManager.updatePrompt(input.id, input.prompt)
@@ -102,7 +102,7 @@ export const promptsRouter = router({
     }
   }),
 
-  delete: publicProcedure.input(promptDeleteInputSchema).mutation(({ input }) => {
+  delete: adminProcedure.input(promptDeleteInputSchema).mutation(({ input }) => {
     try {
       const deleted = promptManager.deletePrompt(input.id)
       return {
@@ -114,7 +114,7 @@ export const promptsRouter = router({
     }
   }),
 
-  setBinding: publicProcedure.input(promptSetBindingInputSchema).mutation(({ input }) => {
+  setBinding: adminProcedure.input(promptSetBindingInputSchema).mutation(({ input }) => {
     try {
       const result = promptManager.setBinding(input.slot, input.promptId)
       return {

@@ -6,6 +6,7 @@ export const AI_MODEL_SOURCE_TYPES = ['openai', 'anthropic'] as const
 export type AiModelSourceType = (typeof AI_MODEL_SOURCE_TYPES)[number]
 
 export interface PersistedAppConfig {
+  authEnabled: boolean
   nodeEnv: string
   host: string
   port: number
@@ -29,8 +30,8 @@ export interface PersistedAppConfig {
 }
 
 export type PersistedConfigKey = keyof PersistedAppConfig
-export type PersistedConfigSection = 'app' | 'server' | 'ai' | 'yjs' | 'limits'
-export type ConfigValueKind = 'string' | 'int' | 'float'
+export type PersistedConfigSection = 'app' | 'server' | 'auth' | 'ai' | 'yjs' | 'limits'
+export type ConfigValueKind = 'string' | 'int' | 'float' | 'boolean'
 
 export interface ConfigFieldDefinition {
   key: PersistedConfigKey
@@ -38,13 +39,22 @@ export interface ConfigFieldDefinition {
   tomlKey: string
   envVar: string
   kind: ConfigValueKind
-  defaultValue: string | number
+  defaultValue: string | number | boolean
   allowEmptyString: boolean
   min?: number
   max?: number
 }
 
 export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
+  {
+    key: 'authEnabled',
+    section: 'auth',
+    tomlKey: 'enabled',
+    envVar: 'AUTH_ENABLED',
+    kind: 'boolean',
+    defaultValue: false,
+    allowEmptyString: false,
+  },
   {
     key: 'nodeEnv',
     section: 'app',

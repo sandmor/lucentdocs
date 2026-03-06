@@ -116,6 +116,48 @@ const SCHEMA = `
     updatedAt INTEGER NOT NULL,
     FOREIGN KEY (activeProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL
   );
+
+  CREATE TABLE IF NOT EXISTS auth_users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    passwordHash TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    lastLoginAt INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_auth_users_email ON auth_users(email);
+
+  CREATE TABLE IF NOT EXISTS auth_invitations (
+    id TEXT PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    email TEXT,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    createdByUserId TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    expiresAt INTEGER NOT NULL,
+    revokedAt INTEGER,
+    usedAt INTEGER,
+    usedByUserId TEXT,
+    FOREIGN KEY (createdByUserId) REFERENCES auth_users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (usedByUserId) REFERENCES auth_users(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_auth_invitations_token ON auth_invitations(token);
+  CREATE INDEX IF NOT EXISTS idx_auth_invitations_created_at ON auth_invitations(createdAt DESC);
+
+  CREATE TABLE IF NOT EXISTS auth_sessions (
+    token TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    expiresAt INTEGER NOT NULL,
+    FOREIGN KEY (userId) REFERENCES auth_users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(userId);
+  CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires ON auth_sessions(expiresAt);
 `
 
 export class SqliteConnection implements ConnectionPort {

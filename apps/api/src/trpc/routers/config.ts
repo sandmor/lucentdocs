@@ -16,7 +16,7 @@ import {
 import { getModelsDevCatalog, getSourceModelCatalog } from '../../ai/model-catalog.js'
 import { AI_PROVIDER_DEFAULT_BASE_URLS } from '../../core/ai/provider-types.js'
 import { resetClient } from '../../ai/provider.js'
-import { router, publicProcedure } from '../index.js'
+import { adminProcedure, publicProcedure, router } from '../index.js'
 
 type EditableConfigKey = (typeof EDITABLE_CONFIG_KEYS)[number]
 
@@ -28,8 +28,8 @@ const AI_RUNTIME_KEYS = [
 const YJS_RUNTIME_KEYS = ['yjsPersistenceFlushMs', 'yjsVersionIntervalMs'] as const
 
 interface ConfigFieldPayload {
-  effectiveValue: string | number
-  fileValue: string | number | null
+  effectiveValue: string | number | boolean
+  fileValue: string | number | boolean | null
   source: ConfigValueSource
   isOverridden: boolean
 }
@@ -125,7 +125,7 @@ export const configRouter = router({
     return buildConfigPayload(state)
   }),
 
-  modelCatalog: publicProcedure.query(async () => {
+  modelCatalog: adminProcedure.query(async () => {
     try {
       return {
         providers: await getModelsDevCatalog(),
@@ -137,11 +137,11 @@ export const configRouter = router({
     }
   }),
 
-  aiSettings: publicProcedure.query(async ({ ctx }) => {
+  aiSettings: adminProcedure.query(async ({ ctx }) => {
     return ctx.services.aiSettings.getSnapshot()
   }),
 
-  updateAiSettings: publicProcedure
+  updateAiSettings: adminProcedure
     .input(updateAiSettingsInputSchema)
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.services.aiSettings.updateSettings({
@@ -160,43 +160,37 @@ export const configRouter = router({
       return result
     }),
 
-  createAiApiKey: publicProcedure
-    .input(createApiKeyInputSchema)
-    .mutation(async ({ ctx, input }) => {
-      const result = await ctx.services.aiSettings.createApiKey({
-        baseURL: normalizeBaseURL(input.baseURL),
-        name: input.name?.trim() ?? '',
-        apiKey: input.apiKey.trim(),
-        isDefault: input.isDefault,
-      })
+  createAiApiKey: adminProcedure.input(createApiKeyInputSchema).mutation(async ({ ctx, input }) => {
+    const result = await ctx.services.aiSettings.createApiKey({
+      baseURL: normalizeBaseURL(input.baseURL),
+      name: input.name?.trim() ?? '',
+      apiKey: input.apiKey.trim(),
+      isDefault: input.isDefault,
+    })
 
-      resetClient()
-      return result
-    }),
+    resetClient()
+    return result
+  }),
 
-  updateAiApiKey: publicProcedure
-    .input(updateApiKeyInputSchema)
-    .mutation(async ({ ctx, input }) => {
-      const result = await ctx.services.aiSettings.updateApiKey({
-        id: input.id,
-        name: input.name?.trim(),
-        apiKey: input.apiKey?.trim(),
-        isDefault: input.isDefault,
-      })
+  updateAiApiKey: adminProcedure.input(updateApiKeyInputSchema).mutation(async ({ ctx, input }) => {
+    const result = await ctx.services.aiSettings.updateApiKey({
+      id: input.id,
+      name: input.name?.trim(),
+      apiKey: input.apiKey?.trim(),
+      isDefault: input.isDefault,
+    })
 
-      resetClient()
-      return result
-    }),
+    resetClient()
+    return result
+  }),
 
-  deleteAiApiKey: publicProcedure
-    .input(deleteApiKeyInputSchema)
-    .mutation(async ({ ctx, input }) => {
-      const result = await ctx.services.aiSettings.deleteApiKey(input.id)
-      resetClient()
-      return result
-    }),
+  deleteAiApiKey: adminProcedure.input(deleteApiKeyInputSchema).mutation(async ({ ctx, input }) => {
+    const result = await ctx.services.aiSettings.deleteApiKey(input.id)
+    resetClient()
+    return result
+  }),
 
-  sourceModelCatalog: publicProcedure
+  sourceModelCatalog: adminProcedure
     .input(sourceCatalogInputSchema)
     .query(async ({ ctx, input }) => {
       const baseURL = normalizeBaseURL(input.baseURL) || AI_PROVIDER_DEFAULT_BASE_URLS[input.type]
@@ -231,7 +225,7 @@ export const configRouter = router({
       )
     }),
 
-  update: publicProcedure.input(editableConfigSchema).mutation(({ ctx, input }) => {
+  update: adminProcedure.input(editableConfigSchema).mutation(({ ctx, input }) => {
     const sanitizedInput: Pick<PersistedAppConfig, EditableConfigKey> = {
       aiDefaultTemperature: input.aiDefaultTemperature,
       aiSelectionEditTemperature: input.aiSelectionEditTemperature,
@@ -275,7 +269,7 @@ export const configRouter = router({
     }
   }),
 
-  limits: publicProcedure.query(() => {
+  limits: adminProcedure.query(() => {
     return configManager.getConfig().limits
   }),
 })

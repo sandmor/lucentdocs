@@ -35,6 +35,9 @@ export interface ResolvedAiConfig {
 
 export interface AppConfig {
   raw: PersistedAppConfig
+  auth: {
+    enabled: boolean
+  }
   runtime: {
     nodeEnv: string
     isProduction: boolean
@@ -147,6 +150,12 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
 function normalizeConfigValue(key: PersistedConfigKey, value: unknown): PersistedConfigValue {
   const field = CONFIG_FIELD_BY_KEY[key]
 
+  if (field.kind === 'boolean') {
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'string') return isTruthyEnvValue(value)
+    return Boolean(field.defaultValue)
+  }
+
   if (field.kind === 'string') {
     const trimmed = typeof value === 'string' ? value.trim() : ''
     if (!trimmed && !field.allowEmptyString) {
@@ -184,6 +193,12 @@ function parseConfigValue(
   value: unknown
 ): PersistedConfigValue | undefined {
   const field = CONFIG_FIELD_BY_KEY[key]
+
+  if (field.kind === 'boolean') {
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'string') return isTruthyEnvValue(value)
+    return undefined
+  }
 
   if (field.kind === 'string') {
     if (typeof value !== 'string') return undefined
@@ -241,7 +256,7 @@ function readConfigFromEnv(env: NodeJS.ProcessEnv): Partial<PersistedAppConfig> 
   const envRecord = envConfig as Partial<Record<PersistedConfigKey, PersistedConfigValue>>
 
   for (const field of CONFIG_FIELD_DEFINITIONS) {
-    if (field.kind === 'string') {
+    if (field.kind === 'string' || field.kind === 'boolean') {
       const raw = readEnvString(env, field.envVar, { allowEmpty: field.allowEmptyString })
       if (raw === undefined) continue
       const value = parseConfigValue(field.key, raw)
@@ -286,9 +301,10 @@ function mergeConfig(
 }
 
 function serializeConfig(config: PersistedAppConfig): string {
-  const sections: Record<PersistedConfigSection, Record<string, string | number>> = {
+  const sections: Record<PersistedConfigSection, Record<string, string | number | boolean>> = {
     app: {},
     server: {},
+    auth: {},
     ai: {},
     yjs: {},
     limits: {},
@@ -325,6 +341,7 @@ function writeConfigAtomically(configPath: string, contents: string): void {
 
 function freezeResolvedConfig(config: AppConfig): AppConfig {
   Object.freeze(config.raw)
+  Object.freeze(config.auth)
   Object.freeze(config.runtime)
   Object.freeze(config.server)
   Object.freeze(config.paths)
@@ -358,6 +375,9 @@ function buildResolvedConfig(
 ): AppConfig {
   return freezeResolvedConfig({
     raw: { ...rawConfig },
+    auth: {
+      enabled: Boolean(rawConfig.authEnabled),
+    },
     runtime: {
       nodeEnv: rawConfig.nodeEnv,
       isProduction: rawConfig.nodeEnv === 'production',

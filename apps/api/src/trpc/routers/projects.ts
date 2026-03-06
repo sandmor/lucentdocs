@@ -1,6 +1,6 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
-import { router, publicProcedure } from '../index.js'
+import { protectedProcedure, router } from '../index.js'
 import { isValidId, type JsonObject, type JsonValue } from '@plotline/shared'
 import { projectSyncBus } from '../project-sync.js'
 
@@ -19,11 +19,11 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSchema)
 
 export const projectsRouter = router({
-  list: publicProcedure.query(async ({ ctx }) => {
+  list: protectedProcedure.query(async ({ ctx }) => {
     return ctx.services.projects.list()
   }),
 
-  get: publicProcedure.input(z.object({ id: idSchema })).query(async ({ ctx, input }) => {
+  get: protectedProcedure.input(z.object({ id: idSchema })).query(async ({ ctx, input }) => {
     const project = await ctx.services.projects.getById(input.id)
     if (!project) {
       throw new TRPCError({
@@ -34,7 +34,7 @@ export const projectsRouter = router({
     return project
   }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(z.object({ title: titleSchema }))
     .mutation(async ({ ctx, input }) => {
       const project = await ctx.services.projects.create(input.title)
@@ -47,7 +47,7 @@ export const projectsRouter = router({
       return project
     }),
 
-  update: publicProcedure
+  update: protectedProcedure
     .input(
       z
         .object({
@@ -79,7 +79,7 @@ export const projectsRouter = router({
       return project
     }),
 
-  delete: publicProcedure.input(z.object({ id: idSchema })).mutation(async ({ ctx, input }) => {
+  delete: protectedProcedure.input(z.object({ id: idSchema })).mutation(async ({ ctx, input }) => {
     const scopedDocuments = await ctx.services.documents.listForProject(input.id)
 
     const deleted = await ctx.services.projects.delete(input.id)

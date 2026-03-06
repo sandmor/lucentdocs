@@ -1,6 +1,6 @@
 import { z } from 'zod/v4'
 import { isValidId } from '@plotline/shared'
-import { router, publicProcedure } from '../index.js'
+import { protectedProcedure, router } from '../index.js'
 import { projectSyncBus } from '../project-sync.js'
 import type { ProjectSyncEvent } from '../project-sync.js'
 import { observable } from '@trpc/server/observable'
@@ -70,7 +70,7 @@ const projectsListSyncEventSchema = z.discriminatedUnion('type', [
 ])
 
 export const syncRouter = router({
-  onProjectsListEvent: publicProcedure.subscription(({ signal }) => {
+  onProjectsListEvent: protectedProcedure.subscription(({ signal }) => {
     return observable<ProjectsListSyncEvent>((emit) => {
       const unsubscribe = projectSyncBus.subscribe((event) => {
         if (event.type === 'documents.changed' || event.type === 'chats.changed') {
@@ -93,7 +93,7 @@ export const syncRouter = router({
     })
   }),
 
-  onProjectEvent: publicProcedure
+  onProjectEvent: protectedProcedure
     .input(
       z.object({
         projectId: idSchema,
