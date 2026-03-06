@@ -7,7 +7,7 @@ import type { AiSettingsService } from '../core/services/aiSettings.service.js'
 import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
 
 export interface AiConfig {
-  provider: 'openai' | 'anthropic' | 'openai-compatible'
+  provider: 'openai' | 'anthropic' | 'openai-compatible' | 'openrouter'
   source: {
     type: AiModelSourceType
     baseURL: string
@@ -44,9 +44,11 @@ async function resolveRuntimeConfig(): Promise<AiConfig> {
   const provider =
     selection.type === 'anthropic'
       ? 'anthropic'
-      : sourceBaseURL === openaiDefault
-        ? 'openai'
-        : 'openai-compatible'
+      : selection.type === 'openrouter'
+        ? 'openrouter'
+        : sourceBaseURL === openaiDefault
+          ? 'openai'
+          : 'openai-compatible'
 
   return {
     provider,
@@ -78,25 +80,34 @@ async function getProvider(): Promise<ResolvedProvider> {
               baseURL: source.baseURL,
             })(source.model),
           }
-        : config.provider === 'openai-compatible'
+        : config.provider === 'openrouter'
           ? {
               config,
               model: createOpenAICompatible({
-                name: 'openai-compatible',
-                ...(config.apiKey ? { apiKey: config.apiKey } : {}),
-                baseURL: source.baseURL,
-              })(source.model),
-            }
-          : {
-              config,
-              model: createOpenAI({
+                name: 'openrouter',
                 apiKey: config.apiKey,
                 baseURL: source.baseURL,
               })(source.model),
             }
+          : config.provider === 'openai-compatible'
+            ? {
+                config,
+                model: createOpenAICompatible({
+                  name: 'openai-compatible',
+                  ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+                  baseURL: source.baseURL,
+                })(source.model),
+              }
+            : {
+                config,
+                model: createOpenAI({
+                  apiKey: config.apiKey,
+                  baseURL: source.baseURL,
+                })(source.model),
+              }
     )
   }
-  return providerPromise
+  return providerPromise!
 }
 
 export async function getLanguageModel(): Promise<LanguageModel> {

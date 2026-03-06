@@ -5,6 +5,7 @@ const MODELS_DEV_API_URL = 'https://models.dev/api.json'
 const MODELS_DEV_LOGO_BASE_URL = 'https://models.dev/logos'
 const MODELS_DEV_CACHE_TTL_MS = 10 * 60 * 1000
 const PROVIDER_REQUEST_TIMEOUT_MS = 8_000
+const OPENROUTER_MODELS_PATHS = ['/api/v1/models', '/api/frontend/models'] as const
 
 export interface ModelCatalogModel {
   id: string
@@ -61,6 +62,7 @@ function toStringArray(value: unknown): string[] {
 
 function inferProviderType(providerId: string, npmPackages: string[]): AiModelSourceType {
   if (providerId === 'anthropic') return 'anthropic'
+  if (providerId === 'openrouter') return 'openrouter'
   if (npmPackages.some((entry) => entry.toLowerCase().includes('anthropic'))) {
     return 'anthropic'
   }
@@ -272,20 +274,124 @@ function parseProviderModelArray(payload: unknown): ModelCatalogModel[] {
             ? entry
             : null
 
-    let releaseDate: string | null = null
-    if (isRecord(entry) && typeof entry.release_date === 'string') {
-      releaseDate = entry.release_date
-    } else if (
-      isRecord(entry) &&
-      typeof entry.created === 'number' &&
-      Number.isFinite(entry.created)
-    ) {
-      releaseDate = new Date(entry.created * 1000).toISOString().slice(0, 10)
-    }
+    const releaseDate =
+      isRecord(entry) && typeof entry.release_date === 'string'
+        ? normalizeReleaseDate(entry.release_date)
+        : isRecord(entry)
+          ? normalizeReleaseDate(entry.created)
+          : null
 
     deduped.set(id, {
       id,
       name: displayName,
+      releaseDate,
+    })
+  }
+
+  return [...deduped.values()].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function normalizeReleaseDate(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const milliseconds = value > 1_000_000_000_000 ? value : value * 1000
+    const parsed = new Date(milliseconds)
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10)
+    }
+    return null
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10)
+
+    const parsed = new Date(trimmed)
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10)
+    }
+  }
+
+  return null
+}
+
+function isOpenRouterHost(baseURL: string): boolean {
+  try {
+    const parsed = new URL(baseURL)
+    return parsed.hostname === 'openrouter.ai' || parsed.hostname.endsWith('.openrouter.ai')
+  } catch {
+    return false
+  }
+}
+
+function buildOpenRouterModelsEndpoints(baseURL: string): string[] {
+  const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
+  const endpoints = [new URL('models', normalized).toString()]
+
+  if (isOpenRouterHost(baseURL)) {
+    const parsed = new URL(baseURL)
+    for (const path of OPENROUTER_MODELS_PATHS) {
+      endpoints.push(new URL(path, parsed.origin).toString())
+    }
+  }
+
+  return [...new Set(endpoints)]
+}
+
+function parseOpenRouterModelArray(payload: unknown): ModelCatalogModel[] {
+  if (!isRecord(payload)) {
+    throw new ProviderModelListUnavailableError('openrouter response is not a JSON object')
+  }
+
+  const candidates = Array.isArray(payload.data)
+    ? payload.data
+    : Array.isArray(payload.models)
+      ? payload.models
+      : null
+
+  if (!candidates) {
+    throw new ProviderModelListUnavailableError('openrouter response does not include a model list')
+  }
+
+  const deduped = new Map<string, ModelCatalogModel>()
+
+  for (const entry of candidates) {
+    const idRaw =
+      typeof entry === 'string'
+        ? entry
+        : isRecord(entry)
+          ? typeof entry.id === 'string'
+            ? entry.id
+            : typeof entry.slug === 'string'
+              ? entry.slug
+              : typeof entry.model === 'string'
+                ? entry.model
+                : null
+          : null
+    if (typeof idRaw !== 'string') continue
+
+    const id = idRaw.trim()
+    if (!id) continue
+
+    const name =
+      isRecord(entry) && typeof entry.name === 'string'
+        ? entry.name
+        : isRecord(entry) && typeof entry.display_name === 'string'
+          ? entry.display_name
+          : typeof entry === 'string'
+            ? entry
+            : null
+
+    const releaseDate =
+      isRecord(entry) && typeof entry.release_date === 'string'
+        ? normalizeReleaseDate(entry.release_date)
+        : isRecord(entry)
+          ? normalizeReleaseDate(entry.created)
+          : null
+
+    deduped.set(id, {
+      id,
+      name,
       releaseDate,
     })
   }
@@ -298,10 +404,65 @@ function buildModelsEndpoint(baseURL: string): string {
   return new URL('models', normalized).toString()
 }
 
+async function fetchModelsFromOpenRouter(
+  baseURL: string,
+  apiKey: string
+): Promise<ModelCatalogModel[]> {
+  const endpoints = buildOpenRouterModelsEndpoints(baseURL)
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+  }
+  if (apiKey) {
+    headers.authorization = `Bearer ${apiKey}`
+  }
+
+  const failures: string[] = []
+  let unavailableOnly = true
+
+  for (const endpoint of endpoints) {
+    let response: Response
+    try {
+      response = await fetch(endpoint, {
+        headers,
+        signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
+      })
+    } catch (error) {
+      unavailableOnly = false
+      failures.push(`${endpoint}: ${error instanceof Error ? error.message : String(error)}`)
+      continue
+    }
+
+    if (!response.ok) {
+      failures.push(`${endpoint}: ${response.status}`)
+      if (response.status === 404 || response.status === 405 || response.status === 501) {
+        continue
+      }
+      unavailableOnly = false
+      continue
+    }
+
+    const payload = (await response.json()) as unknown
+    return parseOpenRouterModelArray(payload)
+  }
+
+  const reason = failures.length > 0 ? `: ${failures.join('; ')}` : ''
+  if (unavailableOnly) {
+    throw new ProviderModelListUnavailableError(
+      `openrouter endpoint does not expose a model list${reason}`
+    )
+  }
+
+  throw new Error(`openrouter catalog request failed${reason}`)
+}
+
 async function fetchModelsFromProvider(
   source: Pick<ModelCatalogProviderSummary, 'type' | 'apiBaseURL'>,
   apiKey: string
 ): Promise<ModelCatalogModel[]> {
+  if (source.type === 'openrouter') {
+    return fetchModelsFromOpenRouter(source.apiBaseURL, apiKey)
+  }
+
   const endpoint = buildModelsEndpoint(source.apiBaseURL)
   const headers: Record<string, string> = {
     accept: 'application/json',
@@ -363,7 +524,8 @@ export async function getSourceModelCatalog(
     modelsDev.data?.byId[source.providerId] ??
     fallbackModelsDevProvider(source.providerId, source.type, baseURL)
 
-  if (!apiKey) {
+  const shouldQueryProvider = Boolean(apiKey) || source.type === 'openrouter'
+  if (!shouldQueryProvider) {
     return {
       provider: modelsDevProvider,
       source: 'models.dev',

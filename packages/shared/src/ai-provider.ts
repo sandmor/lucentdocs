@@ -4,6 +4,7 @@ export const AI_PROVIDER_DEFAULT_BASE_URLS: Readonly<Record<AiModelSourceType, s
   Object.freeze({
     openai: 'https://api.openai.com/v1',
     anthropic: 'https://api.anthropic.com/v1',
+    openrouter: 'https://openrouter.ai/api/v1',
   })
 
 export interface ParsedBaseURLResult {
@@ -13,7 +14,9 @@ export interface ParsedBaseURLResult {
 }
 
 export function normalizeModelSourceType(value: string): AiModelSourceType {
-  return value === 'anthropic' ? 'anthropic' : 'openai'
+  if (value === 'anthropic') return 'anthropic'
+  if (value === 'openrouter') return 'openrouter'
+  return 'openai'
 }
 
 export function normalizeBaseURL(value: string): string {

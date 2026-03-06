@@ -18,13 +18,13 @@
     "apps/api": {
       "name": "api",
       "dependencies": {
-        "@ai-sdk/anthropic": "^3.0.46",
-        "@ai-sdk/openai": "^3.0.30",
-        "@ai-sdk/openai-compatible": "^2.0.30",
+        "@ai-sdk/anthropic": "^3.0.58",
+        "@ai-sdk/openai": "^3.0.41",
+        "@ai-sdk/openai-compatible": "^2.0.35",
         "@lucentdocs/shared": "workspace:*",
         "@trpc/server": "^11.10.0",
         "@y/websocket-server": "0.1.1",
-        "ai": "^6.0.94",
+        "ai": "^6.0.116",
         "better-sqlite3": "^12.6.2",
         "compression": "^1.8.1",
         "cookie-parser": "^1.4.7",

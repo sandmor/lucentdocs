@@ -86,7 +86,9 @@ function normalizeModel(model: string): string {
 function normalizeProviderId(type: AiModelSourceType, providerId: string): string {
   const trimmed = providerId.trim()
   if (trimmed) return trimmed
-  return type === 'anthropic' ? 'anthropic' : 'openai'
+  if (type === 'anthropic') return 'anthropic'
+  if (type === 'openrouter') return 'openrouter'
+  return 'openai'
 }
 
 function requireProviderId(providerId: string): string {
@@ -135,6 +137,9 @@ function inferBootstrapProviderType(baseURL: string, model: string): AiModelSour
   const lowerModel = model.toLowerCase()
   if (lowerBaseURL.includes('anthropic') || lowerModel.startsWith('claude')) {
     return 'anthropic'
+  }
+  if (lowerBaseURL.includes('openrouter')) {
+    return 'openrouter'
   }
   return 'openai'
 }

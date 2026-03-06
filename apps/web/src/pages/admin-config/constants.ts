@@ -37,6 +37,14 @@ export const DEFAULT_PROVIDER_OPTIONS: ProviderOption[] = [
     docURL: 'https://docs.anthropic.com/en/docs/about-claude/models',
   },
   {
+    value: 'openrouter',
+    label: 'OpenRouter',
+    type: 'openrouter',
+    apiBaseURL: AI_PROVIDER_DEFAULT_BASE_URLS.openrouter,
+    iconURL: 'https://models.dev/logos/openrouter.svg',
+    docURL: 'https://openrouter.ai/docs',
+  },
+  {
     value: 'custom',
     label: 'Custom (OpenAI-compatible)',
     type: 'openai',
@@ -212,11 +220,18 @@ export function isValidHttpBaseURL(value: string): boolean {
 }
 
 export function normalizeProvider(provider: AiProviderDraft): AiProviderDraft {
-  const type = provider.type === 'anthropic' ? 'anthropic' : 'openai'
+  const type =
+    provider.type === 'anthropic'
+      ? 'anthropic'
+      : provider.type === 'openrouter'
+        ? 'openrouter'
+        : 'openai'
 
   return {
     id: provider.id,
-    providerId: provider.providerId.trim() || (type === 'anthropic' ? 'anthropic' : 'openai'),
+    providerId:
+      provider.providerId.trim() ||
+      (type === 'anthropic' ? 'anthropic' : type === 'openrouter' ? 'openrouter' : 'openai'),
     type,
     baseURL: provider.baseURL.trim() || AI_PROVIDER_DEFAULT_BASE_URLS[type],
     model: provider.model.trim(),

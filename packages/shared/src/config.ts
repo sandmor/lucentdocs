@@ -1,7 +1,7 @@
 import { z } from 'zod/v4'
 import { INLINE_AI_DEFAULT_TOOL_STEP_LIMIT } from './inline-ai.js'
 
-export const AI_MODEL_SOURCE_TYPES = ['openai', 'anthropic'] as const
+export const AI_MODEL_SOURCE_TYPES = ['openai', 'anthropic', 'openrouter'] as const
 
 export type AiModelSourceType = (typeof AI_MODEL_SOURCE_TYPES)[number]
 
