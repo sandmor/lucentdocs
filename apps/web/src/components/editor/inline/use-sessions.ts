@@ -7,7 +7,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react'
-import type { InlineZoneSession } from '@plotline/shared'
+import type { InlineZoneSession } from '@lucentdocs/shared'
 import type { AIWriterState } from '../ai/writer-plugin'
 import { getTrpcProxyClient, trpc } from '@/lib/trpc'
 

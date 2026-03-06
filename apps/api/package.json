@@ -12,7 +12,7 @@
     "@ai-sdk/anthropic": "^3.0.46",
     "@ai-sdk/openai": "^3.0.30",
     "@ai-sdk/openai-compatible": "^2.0.30",
-    "@plotline/shared": "workspace:*",
+    "@lucentdocs/shared": "workspace:*",
     "@trpc/server": "^11.10.0",
     "@y/websocket-server": "0.1.1",
     "ai": "^6.0.94",

@@ -6,7 +6,7 @@ import {
   parseContent,
   pathSegments,
   schema,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { Node as ProseMirrorNode } from 'prosemirror-model'
 import { MarkdownSerializer, defaultMarkdownSerializer } from 'prosemirror-markdown'
 import { nanoid } from 'nanoid'

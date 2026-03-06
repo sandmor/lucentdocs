@@ -6,7 +6,7 @@ import {
   type UIMessage,
   type UIMessageChunk,
 } from 'ai'
-import { normalizeDocumentPath } from '@plotline/shared'
+import { normalizeDocumentPath } from '@lucentdocs/shared'
 import { getLanguageModel } from '../ai/index.js'
 import { assertPromptProtocolMode, resolveChatPrompt } from '../ai/prompt-engine.js'
 import { configManager } from '../config/runtime.js'
@@ -58,7 +58,7 @@ export interface GenerationCallbacks {
 
 function isTestRuntime(): boolean {
   return (
-    configManager.getConfig().runtime.nodeEnv === 'test' || process.env.PLOTLINE_TEST_MODE === '1'
+    configManager.getConfig().runtime.nodeEnv === 'test' || process.env.LUCENTDOCS_TEST_MODE === '1'
   )
 }
 
@@ -73,7 +73,7 @@ function extractMessageText(message: UIMessage | undefined): string {
 }
 
 function resolveTestChatResponse(promptSeed: string): string {
-  const envOverride = process.env.PLOTLINE_TEST_CHAT_RESPONSE?.trim()
+  const envOverride = process.env.LUCENTDOCS_TEST_CHAT_RESPONSE?.trim()
   if (envOverride) return envOverride
 
   const normalizedPrompt = promptSeed.trim().toLowerCase()
@@ -82,7 +82,7 @@ function resolveTestChatResponse(promptSeed: string): string {
 }
 
 function resolveTestChatDelayMs(): number {
-  const envDelay = Number(process.env.PLOTLINE_TEST_CHAT_DELAY_MS ?? '')
+  const envDelay = Number(process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS ?? '')
   if (Number.isFinite(envDelay) && envDelay > 0) {
     return Math.round(envDelay)
   }

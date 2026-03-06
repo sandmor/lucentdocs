@@ -6,9 +6,9 @@ import { DEFAULT_DATA_DIR, SQLITE_FILE_NAME, resolveDataDir, resolveDataFile } f
 import type { ConfigStoreHandle } from './manager.js'
 
 const DEFAULT_TEST_DATA_DIR = 'data-test'
-const TEST_MODE_ENV_VAR = 'PLOTLINE_TEST_MODE'
-const TEST_DATA_DIR_ENV_VAR = 'PLOTLINE_TEST_DATA_DIR'
-const ALLOW_UNSAFE_TEST_DB_ENV_VAR = 'PLOTLINE_ALLOW_UNSAFE_TEST_DB'
+const TEST_MODE_ENV_VAR = 'LUCENTDOCS_TEST_MODE'
+const TEST_DATA_DIR_ENV_VAR = 'LUCENTDOCS_TEST_DATA_DIR'
+const ALLOW_UNSAFE_TEST_DB_ENV_VAR = 'LUCENTDOCS_ALLOW_UNSAFE_TEST_DB'
 
 function normalizeDataDir(value: string | undefined): string {
   const trimmed = value?.trim()
@@ -30,7 +30,7 @@ function isMainDataDir(dataDir: string): boolean {
 }
 
 function resolveConfiguredDataDir(env: NodeJS.ProcessEnv): string {
-  const configuredDataDir = normalizeDataDir(env.PLOTLINE_DATA_DIR)
+  const configuredDataDir = normalizeDataDir(env.LUCENTDOCS_DATA_DIR)
   const configuredTestDataDir = env[TEST_DATA_DIR_ENV_VAR]?.trim()
   const desiredDataDir = normalizeDataDir(configuredTestDataDir ?? configuredDataDir)
 
@@ -41,7 +41,7 @@ function resolveConfiguredDataDir(env: NodeJS.ProcessEnv): string {
   if (!isMainDataDir(desiredDataDir)) return desiredDataDir
 
   console.warn(
-    `[plotline:test-safety] Blocking unsafe test database path "${desiredDataDir}". Using "${DEFAULT_TEST_DATA_DIR}" instead.`
+    `[lucentdocs:test-safety] Blocking unsafe test database path "${desiredDataDir}". Using "${DEFAULT_TEST_DATA_DIR}" instead.`
   )
   return DEFAULT_TEST_DATA_DIR
 }

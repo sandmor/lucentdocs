@@ -1,4 +1,4 @@
-import { isJsonObject, type JsonObject } from '@plotline/shared'
+import { isJsonObject, type JsonObject } from '@lucentdocs/shared'
 
 export function toJsonField(value: JsonObject | null): string | null {
   return value ? JSON.stringify(value) : null

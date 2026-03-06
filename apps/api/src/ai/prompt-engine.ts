@@ -1,4 +1,4 @@
-import type { PromptDefinition, PromptMode } from '@plotline/shared'
+import type { PromptDefinition, PromptMode } from '@lucentdocs/shared'
 import { promptManager } from './prompt-manager.js'
 import {
   buildChatVariables,

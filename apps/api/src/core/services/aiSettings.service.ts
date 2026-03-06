@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import type { AiModelSourceType } from '@plotline/shared'
+import type { AiModelSourceType } from '@lucentdocs/shared'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 import type { AiApiKeyEntity, AiProviderConfigEntity } from '../../core/ports/aiSettings.port.js'

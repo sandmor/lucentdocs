@@ -5,7 +5,7 @@ import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
-import type { InlineZoneSession } from '@plotline/shared'
+import type { InlineZoneSession } from '@lucentdocs/shared'
 import type { AnimationPhase, FormatMarkName, InlineControlState } from './types'
 import { selectChoice } from './utils'
 

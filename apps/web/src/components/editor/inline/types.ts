@@ -1,4 +1,4 @@
-import type { InlineZoneSession } from '@plotline/shared'
+import type { InlineZoneSession } from '@lucentdocs/shared'
 
 export type InlineControlState = 'compose' | 'processing' | 'review'
 export type FormatMarkName = 'strong' | 'em'

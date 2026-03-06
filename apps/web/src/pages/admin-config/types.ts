@@ -1,4 +1,4 @@
-import type { AiModelSourceType, EditableConfigInput } from '@plotline/shared'
+import type { AiModelSourceType, EditableConfigInput } from '@lucentdocs/shared'
 
 export type ConfigFormValues = EditableConfigInput
 export type EditableFieldKey = keyof ConfigFormValues

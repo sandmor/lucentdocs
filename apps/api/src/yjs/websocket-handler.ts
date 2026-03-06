@@ -1,6 +1,6 @@
 import { WebSocketServer } from 'ws'
 import { Server as HttpServer } from 'http'
-import { isValidId } from '@plotline/shared'
+import { isValidId } from '@lucentdocs/shared'
 import type { YjsRuntime } from './runtime.js'
 import { setupWSConnection } from './runtime.js'
 

@@ -3,7 +3,7 @@ import {
   INLINE_AI_MAX_ZONE_CHOICES,
   parseInlineZoneWriteAction,
   type InlineZoneWriteAction,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { buildInlineZoneWriteTools, hasValidToolScope } from './tools.js'
 
 describe('buildInlineZoneWriteTools', () => {

@@ -5,14 +5,14 @@ import type {
   PromptSystemSlot,
   SelectionEditProtocol,
   ResponseProtocol,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 
 export const SYSTEM_CONTINUE_PROMPT_ID = 'system.continue.default'
 export const SYSTEM_SELECTION_PROMPT_ID = 'system.selection-edit.default'
 export const SYSTEM_CHAT_PROMPT_ID = 'system.chat.default'
 
-export const WRITING_GAP_MARKER = '<plotline_writing_gap_v1 />'
-export const ESCAPED_WRITING_GAP_MARKER = '<plotline_writing_gap_escaped_v1 />'
+export const WRITING_GAP_MARKER = '<lucentdocs_writing_gap_v1 />'
+export const ESCAPED_WRITING_GAP_MARKER = '<lucentdocs_writing_gap_escaped_v1 />'
 
 export const DEFAULT_SELECTION_EDIT_PROTOCOL: SelectionEditProtocol = {
   type: 'selection-edit-v1',
@@ -36,19 +36,19 @@ const SYSTEM_PROMPT_CONTINUE = `You are a skilled writing assistant. Your role i
 - Never break character or acknowledge that you are an AI
 
 OUTPUT RULES:
-- Output ONLY the new text to insert at the <plotline_writing_gap_v1 /> marker
+- Output ONLY the new text to insert at the <lucentdocs_writing_gap_v1 /> marker
 - NEVER repeat or include any text from before or after the gap
-- NEVER include the <plotline_writing_gap_v1 /> marker itself in your output
+- NEVER include the <lucentdocs_writing_gap_v1 /> marker itself in your output
 
 Example:
-Context: "John walked into the room. <plotline_writing_gap_v1 /> The door slammed behind him."
+Context: "John walked into the room. <lucentdocs_writing_gap_v1 /> The door slammed behind him."
 Good output: "He froze, sensing something was wrong. "
 Bad output: "John walked into the room. He froze... The door slammed behind him."
 
 When continuing text, seamlessly pick up from where the author left off.
 When given a prompt about what to write, produce the requested content in a style matching the existing text.`
 
-const SYSTEM_PROMPT_STRUCTURED = `You are Plotline's inline AI writing assistant for editing the active AI zone or selection.
+const SYSTEM_PROMPT_STRUCTURED = `You are LucentDocs's inline AI writing assistant for editing the active AI zone or selection.
 
 Behavior goals:
 - Prefer acting through tools, not explanations.
@@ -74,7 +74,7 @@ RESPONSE STYLE:
 - Never output markdown code fences for normal replies.
 - User always can see your tool output and the editing result in the document, so you don't need to describe your actions unless asked.`
 
-const SYSTEM_PROMPT_CHAT = `You are Plotline's sidebar AI assistant for document projects.
+const SYSTEM_PROMPT_CHAT = `You are LucentDocs's sidebar AI assistant for document projects.
 
 You can inspect project documents via tools and should use them when needed.
 

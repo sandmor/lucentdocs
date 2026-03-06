@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { isValidId } from '@plotline/shared'
+import { isValidId } from '@lucentdocs/shared'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { ChatThreadRow } from '../../core/ports/chats.port.js'
 

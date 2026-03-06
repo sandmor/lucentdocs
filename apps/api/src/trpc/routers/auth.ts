@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { authPasswordSchema } from '@plotline/shared'
+import { authPasswordSchema } from '@lucentdocs/shared'
 import { adminProcedure, publicProcedure, router } from '../index.js'
 import { TRPCError } from '@trpc/server'
 import { readSessionToken, setSessionCookie, clearSessionCookie } from '../../http/auth.js'

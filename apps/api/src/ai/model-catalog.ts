@@ -1,4 +1,4 @@
-import type { AiModelSourceType } from '@plotline/shared'
+import type { AiModelSourceType } from '@lucentdocs/shared'
 import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
 
 const MODELS_DEV_API_URL = 'https://models.dev/api.json'

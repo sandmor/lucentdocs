@@ -9,7 +9,7 @@ import {
   type InlineZoneWriteAction,
   type InlineZoneReplaceAction,
   type InlineZoneChoicesAction,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import type { ServiceSet } from '../core/services/types.js'
 import {
   buildProjectFileIndex,

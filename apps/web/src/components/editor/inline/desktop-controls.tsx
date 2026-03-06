@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
-import type { InlineZoneSession } from '@plotline/shared'
+import type { InlineZoneSession } from '@lucentdocs/shared'
 import { useAnimatedPresence, useMountAnimationPhase, useSelectionComposeController } from './hooks'
 import { AI_ZONE_CONTROL_LAYOUT_EVENT, emitAIZoneControlLayoutChange } from './layout-events'
 import { AIZoneSurface, SelectionComposeSurface } from './surfaces'

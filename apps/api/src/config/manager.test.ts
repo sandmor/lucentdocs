@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, rmSync } from 'node:fs'
-import { DEFAULT_PERSISTED_CONFIG } from '@plotline/shared'
+import { DEFAULT_PERSISTED_CONFIG } from '@lucentdocs/shared'
 import { createConnection } from '../infrastructure/sqlite/connection.js'
 import { SqliteAppConfigRepository } from '../infrastructure/sqlite/appConfig.adapter.js'
 import { SQLITE_FILE_NAME, resolveDataDir, resolveDataFile } from '../paths.js'
@@ -42,7 +42,7 @@ describe('ConfigManager', () => {
         NODE_ENV: 'test',
         HOST: '127.0.0.9',
         PORT: '1234',
-        PLOTLINE_DATA_DIR: dataDir,
+        LUCENTDOCS_DATA_DIR: dataDir,
         AI_DEFAULT_TEMPERATURE: '0.8',
         YJS_VERSION_INTERVAL_MS: '9000',
       },
@@ -87,7 +87,7 @@ describe('ConfigManager', () => {
     const manager = new ConfigManager(
       {
         NODE_ENV: 'test',
-        PLOTLINE_DATA_DIR: dataDir,
+        LUCENTDOCS_DATA_DIR: dataDir,
       },
       {
         storeProvider: createDefaultConfigStore,
@@ -126,7 +126,7 @@ describe('ConfigManager', () => {
     const manager = new ConfigManager(
       {
         NODE_ENV: 'test',
-        PLOTLINE_DATA_DIR: dataDir,
+        LUCENTDOCS_DATA_DIR: dataDir,
         AI_DEFAULT_TEMPERATURE: '1.2',
         YJS_PERSISTENCE_FLUSH_MS: '2500',
         LIMITS_AI_TOOL_STEPS: '11',
@@ -194,7 +194,7 @@ describe('ConfigManager', () => {
     const manager = new ConfigManager(
       {
         NODE_ENV: 'test',
-        PLOTLINE_DATA_DIR: dataDir,
+        LUCENTDOCS_DATA_DIR: dataDir,
       },
       {
         storeProvider: createDefaultConfigStore,
@@ -228,8 +228,8 @@ describe('ConfigManager', () => {
     const manager = new ConfigManager(
       {
         NODE_ENV: 'test',
-        PLOTLINE_DATA_DIR: './data',
-        PLOTLINE_TEST_DATA_DIR: safeDataDir,
+        LUCENTDOCS_DATA_DIR: './data',
+        LUCENTDOCS_TEST_DATA_DIR: safeDataDir,
       },
       {
         storeProvider: createDefaultConfigStore,
@@ -249,7 +249,7 @@ describe('ConfigManager', () => {
     const manager = new ConfigManager(
       {
         NODE_ENV: 'test',
-        PLOTLINE_DATA_DIR: './data',
+        LUCENTDOCS_DATA_DIR: './data',
       },
       {
         storeProvider: createDefaultConfigStore,
@@ -272,9 +272,9 @@ describe('ConfigManager', () => {
     const manager = new ConfigManager(
       {
         NODE_ENV: 'development',
-        PLOTLINE_TEST_MODE: '1',
-        PLOTLINE_DATA_DIR: './data',
-        PLOTLINE_TEST_DATA_DIR: safeDataDir,
+        LUCENTDOCS_TEST_MODE: '1',
+        LUCENTDOCS_DATA_DIR: './data',
+        LUCENTDOCS_TEST_DATA_DIR: safeDataDir,
       },
       {
         storeProvider: createDefaultConfigStore,

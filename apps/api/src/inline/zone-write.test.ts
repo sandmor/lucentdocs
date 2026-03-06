@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
-import { schema, type InlineZoneWriteAction } from '@plotline/shared'
+import { schema, type InlineZoneWriteAction } from '@lucentdocs/shared'
 import {
   applyInlineZoneWriteActionToDoc,
   getInlineZoneTextFromDoc,

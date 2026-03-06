@@ -11,7 +11,7 @@ declare global {
   }
 }
 
-const AUTH_COOKIE_NAME = 'plotline_auth'
+const AUTH_COOKIE_NAME = 'lucentdocs_auth'
 
 function safeDecodeCookieComponent(value: string): string {
   try {

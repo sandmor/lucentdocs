@@ -5,4 +5,4 @@ export {
   isSameBaseURL,
   parseAndNormalizeHttpBaseURL,
   normalizeProviderBaseURL,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'

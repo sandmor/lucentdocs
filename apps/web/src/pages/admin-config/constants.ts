@@ -4,7 +4,7 @@ import {
   EDITABLE_CONFIG_KEYS,
   normalizeBaseURL,
   parseAndNormalizeHttpBaseURL,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 
 import type {
   AiDraftState,

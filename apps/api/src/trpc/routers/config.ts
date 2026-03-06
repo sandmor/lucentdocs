@@ -7,7 +7,7 @@ import {
   normalizeBaseURL,
   parseAndNormalizeHttpBaseURL,
   type PersistedAppConfig,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { type ConfigStateSnapshot, type ConfigValueSource } from '../../config/manager.js'
 import { configManager } from '../../config/runtime.js'
 import { getModelsDevCatalog, getSourceModelCatalog } from '../../ai/model-catalog.js'

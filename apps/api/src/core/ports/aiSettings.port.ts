@@ -1,4 +1,4 @@
-import type { AiModelSourceType } from '@plotline/shared'
+import type { AiModelSourceType } from '@lucentdocs/shared'
 
 export interface AiProviderConfigEntity {
   id: string

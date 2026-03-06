@@ -1,10 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const TEST_HOST = process.env.PLOTLINE_TEST_HOST ?? '127.0.0.1'
-const TEST_PORT = process.env.PLOTLINE_TEST_PORT ?? '5678'
-const TEST_DATA_DIR = process.env.PLOTLINE_TEST_DATA_DIR ?? 'data-test'
-const TEST_INLINE_DELAY_MS = process.env.PLOTLINE_TEST_INLINE_DELAY_MS ?? '1800'
-const TEST_CHAT_DELAY_MS = process.env.PLOTLINE_TEST_CHAT_DELAY_MS ?? '1800'
+const TEST_HOST = process.env.LUCENTDOCS_TEST_HOST ?? '127.0.0.1'
+const TEST_PORT = process.env.LUCENTDOCS_TEST_PORT ?? '5678'
+const TEST_DATA_DIR = process.env.LUCENTDOCS_TEST_DATA_DIR ?? 'data-test'
+const TEST_INLINE_DELAY_MS = process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS ?? '1800'
+const TEST_CHAT_DELAY_MS = process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS ?? '1800'
 const TEST_URL_HOST = TEST_HOST === '0.0.0.0' || TEST_HOST === '::' ? '127.0.0.1' : TEST_HOST
 const TEST_BASE_URL = `http://${TEST_URL_HOST}:${TEST_PORT}`
 
@@ -15,16 +15,16 @@ function toEnvPrefix(env: Record<string, string>): string {
 }
 
 const sharedTestEnv = {
-  PLOTLINE_TEST_MODE: '1',
-  PLOTLINE_TEST_DATA_DIR: TEST_DATA_DIR,
+  LUCENTDOCS_TEST_MODE: '1',
+  LUCENTDOCS_TEST_DATA_DIR: TEST_DATA_DIR,
 }
 
 const serverTestEnv = {
   ...sharedTestEnv,
   NODE_ENV: 'test',
-  PLOTLINE_DATA_DIR: TEST_DATA_DIR,
-  PLOTLINE_TEST_INLINE_DELAY_MS: TEST_INLINE_DELAY_MS,
-  PLOTLINE_TEST_CHAT_DELAY_MS: TEST_CHAT_DELAY_MS,
+  LUCENTDOCS_DATA_DIR: TEST_DATA_DIR,
+  LUCENTDOCS_TEST_INLINE_DELAY_MS: TEST_INLINE_DELAY_MS,
+  LUCENTDOCS_TEST_CHAT_DELAY_MS: TEST_CHAT_DELAY_MS,
   HOST: TEST_HOST,
   PORT: TEST_PORT,
 }

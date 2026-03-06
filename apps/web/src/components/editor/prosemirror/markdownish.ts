@@ -1,1 +1,1 @@
-export { parseMarkdownishToSlice, type MarkdownishSliceOptions } from '@plotline/shared'
+export { parseMarkdownishToSlice, type MarkdownishSliceOptions } from '@lucentdocs/shared'

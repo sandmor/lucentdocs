@@ -59,7 +59,7 @@ export function LoginPage() {
     <AuthLayout>
       <Card className="w-full max-w-sm">
         <CardHeader className="pb-4">
-          <CardTitle className="text-2xl">Log in to Plotline</CardTitle>
+          <CardTitle className="text-2xl">Log in to LucentDocs</CardTitle>
           <CardDescription>Enter your credentials to continue.</CardDescription>
         </CardHeader>
         <CardContent>

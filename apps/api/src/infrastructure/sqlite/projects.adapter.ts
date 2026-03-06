@@ -1,4 +1,4 @@
-import type { Project } from '@plotline/shared'
+import type { Project } from '@lucentdocs/shared'
 import type { ProjectsRepositoryPort, UpdateProjectData } from '../../core/ports/projects.port.js'
 import type { SqliteConnection } from './connection.js'
 import { toJsonField, fromJsonField, toOptionalJsonField } from './utils.js'

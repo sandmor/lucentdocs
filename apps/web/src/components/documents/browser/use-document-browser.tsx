@@ -14,7 +14,7 @@ import {
   isPathInsideDirectory,
   normalizeDocumentPath,
   pathSegments,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { trpc } from '@/lib/trpc'
 import { parseDropData } from './dnd-utils'
 import {

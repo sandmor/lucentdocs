@@ -1,4 +1,4 @@
-import type { Document, JsonObject } from '@plotline/shared'
+import type { Document, JsonObject } from '@lucentdocs/shared'
 
 export interface UpdateDocumentData {
   title?: string

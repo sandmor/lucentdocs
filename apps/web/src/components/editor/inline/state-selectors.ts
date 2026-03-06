@@ -1,4 +1,4 @@
-import type { InlineZoneSession } from '@plotline/shared'
+import type { InlineZoneSession } from '@lucentdocs/shared'
 import type { AIWriterState } from '../ai/writer-plugin'
 import type { LoadingAnchor, ReviewZone } from './types'
 

@@ -8,8 +8,8 @@
     "build": "vite build --outDir dist/client && vite build --ssr src/entry-server.tsx --outDir dist/server",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test": "PLOTLINE_TEST_MODE=1 PLOTLINE_DATA_DIR=${PLOTLINE_TEST_DATA_DIR:-data-test} bun test src/",
-    "test:e2e": "PLOTLINE_TEST_MODE=1 PLOTLINE_TEST_DATA_DIR=${PLOTLINE_TEST_DATA_DIR:-data-test} NODE_ENV=test playwright test"
+    "test": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun test src/",
+    "test:e2e": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} NODE_ENV=test playwright test"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",
@@ -18,7 +18,7 @@
     "@floating-ui/dom": "^1.7.5",
     "@fontsource-variable/geist": "^5.2.8",
     "@hookform/resolvers": "^5.2.2",
-    "@plotline/shared": "workspace:*",
+    "@lucentdocs/shared": "workspace:*",
     "@tailwindcss/vite": "^4.1.17",
     "@tanstack/react-query": "^5.90.21",
     "@tanstack/react-table": "^8.21.3",

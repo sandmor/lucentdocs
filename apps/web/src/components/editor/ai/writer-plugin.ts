@@ -1,7 +1,7 @@
 import { type Node as ProseMirrorNode, type Slice } from 'prosemirror-model'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
-import { hasMeaningfulGap, parseZoneNodeAttrs } from '@plotline/shared'
+import { hasMeaningfulGap, parseZoneNodeAttrs } from '@lucentdocs/shared'
 
 interface AIZoneSegment {
   nodeFrom: number

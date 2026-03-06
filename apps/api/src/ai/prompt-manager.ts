@@ -10,7 +10,7 @@ import {
   type PromptMode,
   type PromptSummary,
   type PromptSystemSlot,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { configManager } from '../config/runtime.js'
 import {
   type AiDefaultsOptions,

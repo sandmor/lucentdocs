@@ -3,7 +3,7 @@ import {
   isDirectorySentinelPath,
   normalizeDocumentPath,
   pathSegments,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import type { BrowserRow, DocumentItem } from './types'
 
 export function formatDate(timestamp: number): string {

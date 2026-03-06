@@ -10,7 +10,7 @@ function wait(ms: number): Promise<void> {
 }
 
 test('keeps non-transaction reads isolated from in-flight transaction writes', async () => {
-  const tempDir = mkdtempSync(join(tmpdir(), 'plotline-sqlite-tx-'))
+  const tempDir = mkdtempSync(join(tmpdir(), 'lucentdocs-sqlite-tx-'))
   const dbPath = join(tempDir, 'test.db')
 
   const connection = createConnection(dbPath)

@@ -2,7 +2,7 @@ import { type LanguageModel } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import type { AiModelSourceType } from '@plotline/shared'
+import type { AiModelSourceType } from '@lucentdocs/shared'
 import type { AiSettingsService } from '../core/services/aiSettings.service.js'
 import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
 

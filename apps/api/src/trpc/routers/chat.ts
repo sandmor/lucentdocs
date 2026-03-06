@@ -1,7 +1,7 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
-import { isValidId } from '@plotline/shared'
+import { isValidId } from '@lucentdocs/shared'
 import { projectSyncBus } from '../project-sync.js'
 import { protectedProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'

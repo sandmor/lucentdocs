@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
-import { editableConfigSchema } from '@plotline/shared'
+import { editableConfigSchema } from '@lucentdocs/shared'
 import { AlertTriangle, ArrowLeft, Plus, RotateCcw, Save } from 'lucide-react'
 
 import { getTrpcProxyClient, trpc } from '@/lib/trpc'
@@ -513,7 +513,7 @@ export function AdminConfigPage() {
             </Button>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Settings</h1>
             <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              Manage Plotline&apos;s configuration.
+              Manage LucentDocs&apos;s configuration.
             </p>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import type { InlineZoneSession } from '@plotline/shared'
+import type { InlineZoneSession } from '@lucentdocs/shared'
 
 export function createEmptySession(): InlineZoneSession {
   return {

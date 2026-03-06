@@ -11,7 +11,7 @@ import {
   proseMirrorDocToMarkdown,
   type JsonObject,
   type JsonValue,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { configManager } from '../../config/runtime.js'
 import { projectSyncBus } from '../project-sync.js'
 import { YJS_RESTORE_CLOSE_CODE, YJS_RESTORE_CLOSE_REASON } from '../../yjs/runtime.js'

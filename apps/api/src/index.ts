@@ -23,7 +23,8 @@ import type { IncomingMessage } from 'http'
 
 const appConfig = configManager.getConfig()
 const isProd = appConfig.runtime.isProduction
-const isTestRuntime = appConfig.runtime.nodeEnv === 'test' || process.env.PLOTLINE_TEST_MODE === '1'
+const isTestRuntime =
+  appConfig.runtime.nodeEnv === 'test' || process.env.LUCENTDOCS_TEST_MODE === '1'
 const container = await createContainer(appConfig.paths.dbFile, {
   persistenceFlushIntervalMs: appConfig.yjs.persistenceFlushIntervalMs,
   versionSnapshotIntervalMs: appConfig.yjs.versionSnapshotIntervalMs,
@@ -318,7 +319,7 @@ async function startServer() {
 
   httpServer.listen(port, host, () => {
     console.log(
-      `Plotline started at http://${displayHostForLog(host)}:${port} [${isProd ? 'production' : 'development'}]`
+      `LucentDocs started at http://${displayHostForLog(host)}:${port} [${isProd ? 'production' : 'development'}]`
     )
   })
 

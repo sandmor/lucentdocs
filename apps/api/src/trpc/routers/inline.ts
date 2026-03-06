@@ -1,6 +1,6 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
-import { isValidId } from '@plotline/shared'
+import { isValidId } from '@lucentdocs/shared'
 import { protectedProcedure, router } from '../index.js'
 import { InlineRuntimeError } from '../../inline/runtime.js'
 import { configManager } from '../../config/runtime.js'

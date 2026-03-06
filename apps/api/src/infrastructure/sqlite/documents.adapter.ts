@@ -1,4 +1,4 @@
-import type { Document } from '@plotline/shared'
+import type { Document } from '@lucentdocs/shared'
 import type {
   DocumentsRepositoryPort,
   UpdateDocumentData,

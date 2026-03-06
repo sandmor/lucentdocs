@@ -3,7 +3,7 @@ import type { EditorView } from 'prosemirror-view'
 import {
   wrapSliceWithZoneNodes as wrapSliceWithZoneNodesShared,
   type AIZoneAttrs,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { aiWriterPluginKey, getAIZones, type AIZone } from '../writer-plugin'
 import type { AIZoneNodeAttrs, ZoneNodePatch } from './types'
 

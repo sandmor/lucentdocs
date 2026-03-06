@@ -12,7 +12,7 @@ import {
   type PromptMode,
   type PromptSummary,
   type ResponseProtocol,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { ArrowLeft, FilePlus2, Save, Trash2, WandSparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { trpc } from '@/lib/trpc'

@@ -4,7 +4,7 @@ import { EditorView } from 'prosemirror-view'
 import type { UIMessage } from 'ai'
 import { toast } from 'sonner'
 import { aiWriterPluginKey, getAIZones } from './writer-plugin'
-import type { InlineToolChip, InlineZoneSession } from '@plotline/shared'
+import type { InlineToolChip, InlineZoneSession } from '@lucentdocs/shared'
 import { StuckDetector } from './stuck-detector'
 import {
   extractMessageTextFromPartsRaw,

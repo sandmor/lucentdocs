@@ -6,7 +6,7 @@ import {
   type LimitsConfig,
   type PersistedAppConfig,
   type PersistedConfigKey,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import type { AppConfigRepositoryPort } from '../core/ports/appConfig.port.js'
 
 export type ConfigValueSource = 'env' | 'database' | 'default'

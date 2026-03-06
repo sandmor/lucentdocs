@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { docs } from '@y/websocket-server/utils'
 import * as Y from 'yjs'
 import { prosemirrorJSONToYDoc } from 'y-prosemirror'
-import { schema } from '@plotline/shared'
+import { schema } from '@lucentdocs/shared'
 import { createYjsRuntime, type YjsRuntime } from './runtime.js'
 import { createSqliteAdapter, type SqliteAdapter } from '../infrastructure/sqlite/factory.js'
 import {

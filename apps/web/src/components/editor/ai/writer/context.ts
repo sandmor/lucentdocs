@@ -1,5 +1,5 @@
 import type { EditorView } from 'prosemirror-view'
-import type { InlineZoneSession } from '@plotline/shared'
+import type { InlineZoneSession } from '@lucentdocs/shared'
 
 export function getDocumentContext(
   view: EditorView,

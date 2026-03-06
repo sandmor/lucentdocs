@@ -14,7 +14,7 @@ import {
   directoryPathFromSentinel,
   toDirectorySentinelPath,
   isJsonObject,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
@@ -247,7 +247,7 @@ export function createDocumentsService(
       updatedAt: now,
     }
 
-    const { schema } = await import('@plotline/shared')
+    const { schema } = await import('@lucentdocs/shared')
     const parsed = parseContent(docContent)
     const ydoc = prosemirrorJSONToYDoc(schema, parsed.doc)
     const blob = Y.encodeStateAsUpdate(ydoc)
@@ -770,7 +770,7 @@ export function createDocumentsService(
       const content = parseJsonObjectContent(snapshot.content)
       if (!content) return null
 
-      const { schema } = await import('@plotline/shared')
+      const { schema } = await import('@lucentdocs/shared')
       const replacementDoc = prosemirrorJSONToYDoc(schema, content)
       const replacementState = Y.encodeStateAsUpdate(replacementDoc)
       replacementDoc.destroy()

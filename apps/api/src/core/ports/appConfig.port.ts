@@ -1,4 +1,4 @@
-import type { PersistedAppConfig } from '@plotline/shared'
+import type { PersistedAppConfig } from '@lucentdocs/shared'
 
 export interface AppConfigRepositoryPort {
   isEmpty(): boolean

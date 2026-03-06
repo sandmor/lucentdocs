@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorState } from 'prosemirror-state'
 import { parseMarkdownishToSlice } from './markdownish.js'
-import { schema } from '@plotline/shared'
+import { schema } from '@lucentdocs/shared'
 
 function createParagraphDoc(text: string): ProseMirrorNode {
   return schema.node('doc', null, [schema.node('paragraph', null, text ? [schema.text(text)] : [])])

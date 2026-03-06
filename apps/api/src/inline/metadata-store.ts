@@ -5,7 +5,7 @@ import {
   normalizeInlineZoneSessionMap,
   type InlineZoneSession,
   type JsonObject,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import type { RepositorySet } from '../core/ports/types.js'
 
 const INLINE_SESSIONS_METADATA_KEY = 'inline_ai_sessions'

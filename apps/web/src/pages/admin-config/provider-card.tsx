@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '@plotline/shared'
+import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '@lucentdocs/shared'
 import { Check, RefreshCcw, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'

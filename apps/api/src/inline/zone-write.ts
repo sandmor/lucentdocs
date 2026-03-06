@@ -6,7 +6,7 @@ import {
   parseZoneNodeAttrs,
   createWrappedZoneSliceFromText,
   type AIZoneAttrs,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 
 interface SessionZone {
   id: string

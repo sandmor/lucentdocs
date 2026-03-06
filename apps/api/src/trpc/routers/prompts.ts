@@ -5,7 +5,7 @@ import {
   promptGetInputSchema,
   promptSetBindingInputSchema,
   promptUpdateInputSchema,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import { TRPCError } from '@trpc/server'
 import { PromptManagerError, promptManager } from '../../ai/prompt-manager.js'
 import { configManager } from '../../config/runtime.js'

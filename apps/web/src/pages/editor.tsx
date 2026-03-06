@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
-import { isDirectorySentinelPath, normalizeDocumentPath, pathSegments } from '@plotline/shared'
+import { isDirectorySentinelPath, normalizeDocumentPath, pathSegments } from '@lucentdocs/shared'
 import { trpc } from '@/lib/trpc'
 import { Editor, type EditorHandle } from '@/components/editor'
 import { VersionHistory, type VersionSnapshotInfo } from '@/components/version-history'
@@ -25,7 +25,7 @@ import { parseProjectSyncEvent } from '@/lib/project-sync-events'
 import type { PanelImperativeHandle } from 'react-resizable-panels'
 import { cn } from '@/lib/utils'
 
-const DESKTOP_SIDEBAR_STORAGE_KEY_PREFIX = 'plotline:editor:desktop-sidebar:'
+const DESKTOP_SIDEBAR_STORAGE_KEY_PREFIX = 'lucentdocs:editor:desktop-sidebar:'
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH_PERCENTAGE = 25
 const DESKTOP_SIDEBAR_MIN_WIDTH_PERCENTAGE = 10
 const DESKTOP_SIDEBAR_MAX_WIDTH_PERCENTAGE = 40

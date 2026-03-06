@@ -1,7 +1,7 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
 import { protectedProcedure, router } from '../index.js'
-import { isValidId, type JsonObject, type JsonValue } from '@plotline/shared'
+import { isValidId, type JsonObject, type JsonValue } from '@lucentdocs/shared'
 import { projectSyncBus } from '../project-sync.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })

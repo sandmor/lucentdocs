@@ -138,7 +138,7 @@ export function createAuthService(repos: RepositorySet, transaction: Transaction
 
         const now = Date.now()
         const defaultEmail = trimEmail(
-          readTrimmedEnvValue(env, 'AUTH_BOOTSTRAP_ADMIN_EMAIL') ?? 'admin@plotline.local'
+          readTrimmedEnvValue(env, 'AUTH_BOOTSTRAP_ADMIN_EMAIL') ?? 'admin@lucentdocs.local'
         )
         const defaultName = readTrimmedEnvValue(env, 'AUTH_BOOTSTRAP_ADMIN_NAME') ?? 'Admin'
         const defaultPassword =

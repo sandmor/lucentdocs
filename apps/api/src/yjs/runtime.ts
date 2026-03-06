@@ -8,7 +8,7 @@ import {
   updateYFragment,
   yXmlFragmentToProseMirrorRootNode,
 } from 'y-prosemirror'
-import { createDefaultContent, parseContent, schema, type JsonObject } from '@plotline/shared'
+import { createDefaultContent, parseContent, schema, type JsonObject } from '@lucentdocs/shared'
 import { nanoid } from 'nanoid'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 

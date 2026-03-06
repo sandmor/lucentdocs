@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { Document, JsonObject } from '@plotline/shared'
+import type { Document, JsonObject } from '@lucentdocs/shared'
 import { InlineSessionMetadataStore } from './metadata-store.js'
 
 function createDocument(metadata: JsonObject | null): Document {

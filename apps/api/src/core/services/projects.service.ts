@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { isValidId, type Project, type JsonObject } from '@plotline/shared'
+import { isValidId, type Project, type JsonObject } from '@lucentdocs/shared'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 

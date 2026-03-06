@@ -12,7 +12,7 @@ import type {
   InlineToolChip,
   InlineZoneSession,
   InlineZoneWriteAction,
-} from '@plotline/shared'
+} from '@lucentdocs/shared'
 import type { ServiceSet } from '../core/services/types.js'
 import { createStreamCleaner, getLanguageModel } from '../ai/index.js'
 import {
@@ -99,12 +99,12 @@ interface ParsedInlineToolPart {
 
 function isTestRuntime(): boolean {
   return (
-    configManager.getConfig().runtime.nodeEnv === 'test' || process.env.PLOTLINE_TEST_MODE === '1'
+    configManager.getConfig().runtime.nodeEnv === 'test' || process.env.LUCENTDOCS_TEST_MODE === '1'
   )
 }
 
 function resolveTestInlineResponse(prompt: string): string {
-  const envOverride = process.env.PLOTLINE_TEST_INLINE_RESPONSE?.trim()
+  const envOverride = process.env.LUCENTDOCS_TEST_INLINE_RESPONSE?.trim()
   if (envOverride) return envOverride
 
   const normalizedPrompt = prompt.trim().toLowerCase()
@@ -113,7 +113,7 @@ function resolveTestInlineResponse(prompt: string): string {
 }
 
 function resolveTestInlineDelayMs(prompt: string): number {
-  const envDelay = Number(process.env.PLOTLINE_TEST_INLINE_DELAY_MS ?? '')
+  const envDelay = Number(process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS ?? '')
   if (Number.isFinite(envDelay) && envDelay > 0) {
     return Math.round(envDelay)
   }

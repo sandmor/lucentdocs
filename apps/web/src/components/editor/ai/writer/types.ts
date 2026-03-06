@@ -1,5 +1,5 @@
 import type { EditorView } from 'prosemirror-view'
-import type { InlineZoneSession, AIZoneAttrs } from '@plotline/shared'
+import type { InlineZoneSession, AIZoneAttrs } from '@lucentdocs/shared'
 
 export type StreamingHandler = (streaming: boolean) => void
 
