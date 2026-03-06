@@ -32,7 +32,6 @@ export type {
   AiModelSourceType,
   PersistedAppConfig,
   PersistedConfigKey,
-  PersistedConfigSection,
   ConfigValueKind,
   ConfigFieldDefinition,
   EditableConfigInput,

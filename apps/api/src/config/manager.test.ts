@@ -1,46 +1,58 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import TOML from '@iarna/toml'
+import { mkdirSync, rmSync } from 'node:fs'
 import { DEFAULT_PERSISTED_CONFIG } from '@plotline/shared'
-import { CONFIG_FILE_NAME, resolveDataDir, resolveDataFile } from '../paths.js'
+import { createConnection } from '../infrastructure/sqlite/connection.js'
+import { SqliteAppConfigRepository } from '../infrastructure/sqlite/appConfig.adapter.js'
+import { SQLITE_FILE_NAME, resolveDataDir, resolveDataFile } from '../paths.js'
+import { createDefaultConfigStore } from './default-store.js'
 import { ConfigManager } from './manager.js'
 
 function uniqueDataDir(label: string): string {
   return `data-test/${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function seedPersistedConfig(
+  dataDir: string,
+  values: Partial<typeof DEFAULT_PERSISTED_CONFIG>
+): void {
+  const dbFilePath = resolveDataFile(dataDir, SQLITE_FILE_NAME)
+  const connection = createConnection(dbFilePath)
+  const repository = new SqliteAppConfigRepository(connection)
+  repository.upsertMany(values, Date.now())
+  connection.close()
+}
+
 describe('ConfigManager', () => {
-  test('merges env over file over defaults while keeping persisted TOML file-scoped', () => {
+  test('merges env over database over defaults while preserving persisted values', () => {
     const dataDir = uniqueDataDir('config-manager-priority')
     const absoluteDataDir = resolveDataDir(dataDir)
-    const configFile = resolveDataFile(dataDir, CONFIG_FILE_NAME)
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
     mkdirSync(absoluteDataDir, { recursive: true })
 
-    const initialToml = [
-      '[server]',
-      'host = "0.0.0.0"',
-      'port = 6000',
-      '',
-      '[ai]',
-      'default_temperature = 0.4',
-      '',
-      '[yjs]',
-      'persistence_flush_interval_ms = 3333',
-    ].join('\n')
-    writeFileSync(configFile, initialToml)
-
-    const manager = new ConfigManager({
-      NODE_ENV: 'test',
-      HOST: '127.0.0.9',
-      PORT: '1234',
-      PLOTLINE_DATA_DIR: dataDir,
-      AI_DEFAULT_TEMPERATURE: '0.8',
-      YJS_VERSION_INTERVAL_MS: '9000',
+    seedPersistedConfig(dataDir, {
+      host: '0.0.0.0',
+      port: 6000,
+      aiDefaultTemperature: 0.4,
+      yjsPersistenceFlushMs: 3333,
     })
 
-    const config = manager.getConfig()
+    const manager = new ConfigManager(
+      {
+        NODE_ENV: 'test',
+        HOST: '127.0.0.9',
+        PORT: '1234',
+        PLOTLINE_DATA_DIR: dataDir,
+        AI_DEFAULT_TEMPERATURE: '0.8',
+        YJS_VERSION_INTERVAL_MS: '9000',
+      },
+      {
+        storeProvider: createDefaultConfigStore,
+      }
+    )
+
+    const state = manager.getState()
+    const config = state.config
 
     expect(config.runtime.nodeEnv).toBe('test')
     expect(config.server.host).toBe('127.0.0.9')
@@ -56,60 +68,81 @@ describe('ConfigManager', () => {
     expect(config.yjs.persistenceFlushIntervalMs).toBe(3333)
     expect(config.yjs.versionSnapshotIntervalMs).toBe(9000)
 
-    const persisted = readFileSync(config.paths.configFile, 'utf8')
-    expect(persisted).toBe(initialToml)
+    expect(state.persistedConfig.host).toBe('0.0.0.0')
+    expect(state.persistedConfig.port).toBe(6000)
+    expect(state.persistedConfig.aiDefaultTemperature).toBe(0.4)
+    expect(state.sources.host).toBe('env')
+    expect(state.sources.port).toBe('env')
+    expect(state.sources.aiDefaultTemperature).toBe('env')
 
+    manager.resetForTests()
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
 
-  test('creates a default config.toml when missing', () => {
-    const dataDir = uniqueDataDir('config-manager-default-file')
+  test('creates default persisted config records when database is empty', () => {
+    const dataDir = uniqueDataDir('config-manager-default-db')
     const absoluteDataDir = resolveDataDir(dataDir)
     rmSync(absoluteDataDir, { recursive: true, force: true })
 
-    const manager = new ConfigManager({
-      NODE_ENV: 'test',
-      PLOTLINE_DATA_DIR: dataDir,
-    })
+    const manager = new ConfigManager(
+      {
+        NODE_ENV: 'test',
+        PLOTLINE_DATA_DIR: dataDir,
+      },
+      {
+        storeProvider: createDefaultConfigStore,
+      }
+    )
 
-    const config = manager.getConfig()
-    const persisted = readFileSync(config.paths.configFile, 'utf8')
-    const parsed = TOML.parse(persisted) as {
-      app?: { environment?: string }
-      server?: { host?: string; port?: number }
-      ai?: { default_temperature?: number }
-    }
+    const state = manager.getState()
 
-    expect(parsed.app?.environment).toBe(DEFAULT_PERSISTED_CONFIG.nodeEnv)
-    expect(parsed.server?.host).toBe(DEFAULT_PERSISTED_CONFIG.host)
-    expect(parsed.server?.port).toBe(DEFAULT_PERSISTED_CONFIG.port)
-    expect(parsed.ai?.default_temperature).toBe(DEFAULT_PERSISTED_CONFIG.aiDefaultTemperature)
+    expect(state.persistedConfig.nodeEnv).toBe(DEFAULT_PERSISTED_CONFIG.nodeEnv)
+    expect(state.persistedConfig.host).toBe(DEFAULT_PERSISTED_CONFIG.host)
+    expect(state.persistedConfig.port).toBe(DEFAULT_PERSISTED_CONFIG.port)
+    expect(state.persistedConfig.aiDefaultTemperature).toBe(
+      DEFAULT_PERSISTED_CONFIG.aiDefaultTemperature
+    )
 
+    const dbFilePath = resolveDataFile(dataDir, SQLITE_FILE_NAME)
+    const connection = createConnection(dbFilePath)
+    const countRow = connection.get<{ total: number }>(
+      'SELECT COUNT(*) as total FROM app_config_values',
+      []
+    )
+    expect(countRow?.total).toBeGreaterThanOrEqual(1)
+    connection.close()
+
+    manager.resetForTests()
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
 
-  test('updates file config and reports env-overridden fields', () => {
+  test('updates database config and reports env-overridden fields', () => {
     const dataDir = uniqueDataDir('config-manager-update')
     const absoluteDataDir = resolveDataDir(dataDir)
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
     mkdirSync(absoluteDataDir, { recursive: true })
 
-    const manager = new ConfigManager({
-      NODE_ENV: 'test',
-      PLOTLINE_DATA_DIR: dataDir,
-      AI_DEFAULT_TEMPERATURE: '1.2',
-      YJS_PERSISTENCE_FLUSH_MS: '2500',
-      LIMITS_AI_TOOL_STEPS: '11',
-    })
+    const manager = new ConfigManager(
+      {
+        NODE_ENV: 'test',
+        PLOTLINE_DATA_DIR: dataDir,
+        AI_DEFAULT_TEMPERATURE: '1.2',
+        YJS_PERSISTENCE_FLUSH_MS: '2500',
+        LIMITS_AI_TOOL_STEPS: '11',
+      },
+      {
+        storeProvider: createDefaultConfigStore,
+      }
+    )
 
-    const result = manager.updateFileConfig({
+    const result = manager.updatePersistedConfig({
       aiDefaultTemperature: 0.2,
       yjsPersistenceFlushMs: 7777,
       maxAiToolSteps: 7,
     })
 
-    expect(result.changedFileKeys.sort()).toEqual([
+    expect(result.changedPersistedKeys.sort()).toEqual([
       'aiDefaultTemperature',
       'maxAiToolSteps',
       'yjsPersistenceFlushMs',
@@ -124,38 +157,49 @@ describe('ConfigManager', () => {
     expect(result.state.config.yjs.persistenceFlushIntervalMs).toBe(2500)
     expect(result.state.config.limits.aiToolSteps).toBe(11)
 
-    const persisted = readFileSync(result.state.config.paths.configFile, 'utf8')
-    const parsed = TOML.parse(persisted) as {
-      ai?: { default_temperature?: number }
-      yjs?: { persistence_flush_interval_ms?: number }
-      limits?: { ai_tool_steps?: number }
-    }
-    expect(parsed.ai?.default_temperature).toBe(0.2)
-    expect(parsed.yjs?.persistence_flush_interval_ms).toBe(7777)
-    expect(parsed.limits?.ai_tool_steps).toBe(7)
+    const dbFilePath = resolveDataFile(dataDir, SQLITE_FILE_NAME)
+    const connection = createConnection(dbFilePath)
+    const rows = connection.all<{ key: string; value: string }>(
+      'SELECT key, value FROM app_config_values WHERE key IN (?, ?, ?)',
+      ['aiDefaultTemperature', 'yjsPersistenceFlushMs', 'maxAiToolSteps']
+    )
+    const rowMap = Object.fromEntries(rows.map((row) => [row.key, row.value]))
 
+    expect(rowMap.aiDefaultTemperature).toBe('0.2')
+    expect(rowMap.yjsPersistenceFlushMs).toBe('7777')
+    expect(rowMap.maxAiToolSteps).toBe('7')
+
+    connection.close()
+    manager.resetForTests()
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
 
-  test('ignores invalid file values and keeps source as default', () => {
-    const dataDir = uniqueDataDir('config-manager-invalid-file-values')
+  test('ignores invalid persisted values and keeps source as default', () => {
+    const dataDir = uniqueDataDir('config-manager-invalid-db-values')
     const absoluteDataDir = resolveDataDir(dataDir)
-    const configFile = resolveDataFile(dataDir, CONFIG_FILE_NAME)
+    const dbFilePath = resolveDataFile(dataDir, SQLITE_FILE_NAME)
 
     rmSync(absoluteDataDir, { recursive: true, force: true })
     mkdirSync(absoluteDataDir, { recursive: true })
 
-    writeFileSync(
-      configFile,
-      ['[server]', 'host = ""', 'port = -1', '', '[yjs]', 'persistence_flush_interval_ms = 0'].join(
-        '\n'
-      )
+    const connection = createConnection(dbFilePath)
+    connection.run(
+      `INSERT INTO app_config_values (key, value, updatedAt)
+       VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+      ['host', '', Date.now(), 'port', '-1', Date.now(), 'yjsPersistenceFlushMs', '0', Date.now()]
     )
+    connection.close()
 
-    const manager = new ConfigManager({
-      NODE_ENV: 'test',
-      PLOTLINE_DATA_DIR: dataDir,
-    })
+    const manager = new ConfigManager(
+      {
+        NODE_ENV: 'test',
+        PLOTLINE_DATA_DIR: dataDir,
+      },
+      {
+        storeProvider: createDefaultConfigStore,
+      }
+    )
 
     const state = manager.getState()
 
@@ -167,10 +211,11 @@ describe('ConfigManager', () => {
     expect(state.sources.host).toBe('default')
     expect(state.sources.port).toBe('default')
     expect(state.sources.yjsPersistenceFlushMs).toBe('default')
-    expect(state.fileConfig.host).toBeUndefined()
-    expect(state.fileConfig.port).toBeUndefined()
-    expect(state.fileConfig.yjsPersistenceFlushMs).toBeUndefined()
+    expect(state.persistedConfig.host).toBeUndefined()
+    expect(state.persistedConfig.port).toBeUndefined()
+    expect(state.persistedConfig.yjsPersistenceFlushMs).toBeUndefined()
 
+    manager.resetForTests()
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
 
@@ -180,30 +225,42 @@ describe('ConfigManager', () => {
 
     rmSync(absoluteSafeDataDir, { recursive: true, force: true })
 
-    const manager = new ConfigManager({
-      NODE_ENV: 'test',
-      PLOTLINE_DATA_DIR: './data',
-      PLOTLINE_TEST_DATA_DIR: safeDataDir,
-    })
+    const manager = new ConfigManager(
+      {
+        NODE_ENV: 'test',
+        PLOTLINE_DATA_DIR: './data',
+        PLOTLINE_TEST_DATA_DIR: safeDataDir,
+      },
+      {
+        storeProvider: createDefaultConfigStore,
+      }
+    )
 
     const config = manager.getConfig()
 
     expect(config.paths.dataDir).toBe(absoluteSafeDataDir)
     expect(config.paths.dataDir).not.toBe(resolveDataDir('./data'))
 
+    manager.resetForTests()
     rmSync(absoluteSafeDataDir, { recursive: true, force: true })
   })
 
   test('falls back to data-test when test runtime points to main data directory', () => {
-    const manager = new ConfigManager({
-      NODE_ENV: 'test',
-      PLOTLINE_DATA_DIR: './data',
-    })
+    const manager = new ConfigManager(
+      {
+        NODE_ENV: 'test',
+        PLOTLINE_DATA_DIR: './data',
+      },
+      {
+        storeProvider: createDefaultConfigStore,
+      }
+    )
 
     const config = manager.getConfig()
     expect(config.paths.dataDir).toBe(resolveDataDir('data-test'))
     expect(config.paths.dataDir).not.toBe(resolveDataDir('./data'))
 
+    manager.resetForTests()
     rmSync(resolveDataDir('data-test'), { recursive: true, force: true })
   })
 
@@ -212,17 +269,23 @@ describe('ConfigManager', () => {
     const absoluteSafeDataDir = resolveDataDir(safeDataDir)
     rmSync(absoluteSafeDataDir, { recursive: true, force: true })
 
-    const manager = new ConfigManager({
-      NODE_ENV: 'development',
-      PLOTLINE_TEST_MODE: '1',
-      PLOTLINE_DATA_DIR: './data',
-      PLOTLINE_TEST_DATA_DIR: safeDataDir,
-    })
+    const manager = new ConfigManager(
+      {
+        NODE_ENV: 'development',
+        PLOTLINE_TEST_MODE: '1',
+        PLOTLINE_DATA_DIR: './data',
+        PLOTLINE_TEST_DATA_DIR: safeDataDir,
+      },
+      {
+        storeProvider: createDefaultConfigStore,
+      }
+    )
 
     const config = manager.getConfig()
     expect(config.paths.dataDir).toBe(absoluteSafeDataDir)
     expect(config.paths.dataDir).not.toBe(resolveDataDir('./data'))
 
+    manager.resetForTests()
     rmSync(absoluteSafeDataDir, { recursive: true, force: true })
   })
 })

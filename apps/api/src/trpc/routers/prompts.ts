@@ -8,7 +8,7 @@ import {
 } from '@plotline/shared'
 import { TRPCError } from '@trpc/server'
 import { PromptManagerError, promptManager } from '../../ai/prompt-manager.js'
-import { configManager } from '../../config/manager.js'
+import { configManager } from '../../config/runtime.js'
 import { adminProcedure, router } from '../index.js'
 
 function assertPromptWithinConfiguredLimits(prompt: PromptEditable): void {

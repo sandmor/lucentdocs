@@ -11,7 +11,7 @@ import {
   type PromptSummary,
   type PromptSystemSlot,
 } from '@plotline/shared'
-import { configManager } from '../config/manager.js'
+import { configManager } from '../config/runtime.js'
 import {
   type AiDefaultsOptions,
   createDefaultPromptBindings,

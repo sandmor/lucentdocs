@@ -9,7 +9,7 @@ import {
 import { normalizeDocumentPath } from '@plotline/shared'
 import { getLanguageModel } from '../ai/index.js'
 import { assertPromptProtocolMode, resolveChatPrompt } from '../ai/prompt-engine.js'
-import { configManager } from '../config/manager.js'
+import { configManager } from '../config/runtime.js'
 import type { ServiceSet } from '../core/services/types.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
 import { buildReadTools } from './tools.js'

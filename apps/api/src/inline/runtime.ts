@@ -20,7 +20,7 @@ import {
   resolveContinuePrompt,
   resolveSelectionPrompt,
 } from '../ai/prompt-engine.js'
-import { configManager } from '../config/manager.js'
+import { configManager } from '../config/runtime.js'
 import { buildInlineZoneWriteTools, buildReadTools, hasValidToolScope } from '../chat/tools.js'
 import {
   createInlineSessionMetadataStore,

@@ -6,7 +6,6 @@ const SRC_DIR = path.dirname(fileURLToPath(import.meta.url))
 // Project root is 3 levels up from this file (apps/api/src/)
 export const PROJECT_ROOT = path.join(SRC_DIR, '../../..')
 export const DEFAULT_DATA_DIR = './data'
-export const CONFIG_FILE_NAME = 'config.toml'
 export const SQLITE_FILE_NAME = 'sqlite.db'
 
 /**

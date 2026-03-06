@@ -1,31 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
-import TOML from '@iarna/toml'
 import {
   CONFIG_FIELD_BY_KEY,
-  CONFIG_FIELD_DEFINITIONS,
   DEFAULT_PERSISTED_CONFIG,
   EDITABLE_CONFIG_KEYS,
   PERSISTED_CONFIG_KEYS,
   type LimitsConfig,
   type PersistedAppConfig,
   type PersistedConfigKey,
-  type PersistedConfigSection,
 } from '@plotline/shared'
-import {
-  CONFIG_FILE_NAME,
-  DEFAULT_DATA_DIR,
-  SQLITE_FILE_NAME,
-  resolveDataDir,
-  resolveDataFile,
-} from '../paths.js'
+import type { AppConfigRepositoryPort } from '../core/ports/appConfig.port.js'
 
-const DEFAULT_TEST_DATA_DIR = 'data-test'
-const TEST_MODE_ENV_VAR = 'PLOTLINE_TEST_MODE'
-const TEST_DATA_DIR_ENV_VAR = 'PLOTLINE_TEST_DATA_DIR'
-const ALLOW_UNSAFE_TEST_DB_ENV_VAR = 'PLOTLINE_ALLOW_UNSAFE_TEST_DB'
-
-export type ConfigValueSource = 'env' | 'file' | 'default'
+export type ConfigValueSource = 'env' | 'database' | 'default'
 
 export interface ResolvedAiConfig {
   defaultTemperature: number
@@ -48,7 +32,6 @@ export interface AppConfig {
   }
   paths: {
     dataDir: string
-    configFile: string
     dbFile: string
   }
   ai: ResolvedAiConfig
@@ -61,18 +44,31 @@ export interface AppConfig {
 
 export interface ConfigStateSnapshot {
   config: AppConfig
-  fileConfig: Partial<PersistedAppConfig>
+  persistedConfig: Partial<PersistedAppConfig>
   sources: Record<PersistedConfigKey, ConfigValueSource>
 }
 
 export interface UpdateConfigResult {
   state: ConfigStateSnapshot
-  changedFileKeys: PersistedConfigKey[]
+  changedPersistedKeys: PersistedConfigKey[]
   changedEffectiveKeys: PersistedConfigKey[]
   overriddenChangedKeys: PersistedConfigKey[]
 }
 
 type PersistedConfigValue = PersistedAppConfig[PersistedConfigKey]
+
+export interface ConfigStoreHandle {
+  dataDirPath: string
+  dbFilePath: string
+  repository: AppConfigRepositoryPort
+  dispose: () => void
+}
+
+export type ConfigStoreProvider = (env: NodeJS.ProcessEnv) => ConfigStoreHandle
+
+interface ConfigManagerOptions {
+  storeProvider: ConfigStoreProvider
+}
 
 function hasEnvValue(env: NodeJS.ProcessEnv, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(env, key)
@@ -107,44 +103,10 @@ function readEnvFloat(env: NodeJS.ProcessEnv, key: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
-function normalizeDataDir(value: string | undefined): string {
-  const trimmed = value?.trim()
-  return trimmed ? trimmed : DEFAULT_DATA_DIR
-}
-
 function isTruthyEnvValue(value: string | undefined): boolean {
   if (!value) return false
   const normalized = value.trim().toLowerCase()
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
-}
-
-function isTestRuntime(env: NodeJS.ProcessEnv): boolean {
-  return env.NODE_ENV?.trim() === 'test' || isTruthyEnvValue(env[TEST_MODE_ENV_VAR])
-}
-
-function isMainDataDir(dataDir: string): boolean {
-  return path.resolve(resolveDataDir(dataDir)) === path.resolve(resolveDataDir(DEFAULT_DATA_DIR))
-}
-
-function resolveConfiguredDataDir(env: NodeJS.ProcessEnv): string {
-  const configuredDataDir = normalizeDataDir(readEnvString(env, 'PLOTLINE_DATA_DIR'))
-  const configuredTestDataDir = readEnvString(env, TEST_DATA_DIR_ENV_VAR)
-  const desiredDataDir = normalizeDataDir(configuredTestDataDir ?? configuredDataDir)
-
-  if (!isTestRuntime(env) || isTruthyEnvValue(env[ALLOW_UNSAFE_TEST_DB_ENV_VAR])) {
-    return desiredDataDir
-  }
-
-  if (!isMainDataDir(desiredDataDir)) return desiredDataDir
-
-  console.warn(
-    `[plotline:test-safety] Blocking unsafe test database path "${desiredDataDir}". Using "${DEFAULT_TEST_DATA_DIR}" instead.`
-  )
-  return DEFAULT_TEST_DATA_DIR
-}
-
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function normalizeConfigValue(key: PersistedConfigKey, value: unknown): PersistedConfigValue {
@@ -220,42 +182,11 @@ function parseConfigValue(
   return value
 }
 
-function parseFileConfig(contents: string): Partial<PersistedAppConfig> {
-  const parsed: Partial<PersistedAppConfig> = {}
-  const parsedRecord = parsed as Partial<Record<PersistedConfigKey, PersistedConfigValue>>
-  const document = TOML.parse(contents)
-  if (!isRecordValue(document)) return parsed
-
-  for (const field of CONFIG_FIELD_DEFINITIONS) {
-    const section = document[field.section]
-    if (!isRecordValue(section)) continue
-
-    const value = parseConfigValue(field.key, section[field.tomlKey])
-    if (value !== undefined) parsedRecord[field.key] = value
-  }
-
-  return parsed
-}
-
-function readConfigFromFile(configPath: string): Partial<PersistedAppConfig> {
-  if (!existsSync(configPath)) return {}
-
-  try {
-    const contents = readFileSync(configPath, 'utf8')
-    return parseFileConfig(contents)
-  } catch (error) {
-    console.warn(
-      `Failed to read config file at ${configPath}. Falling back to env/default values. ${error instanceof Error ? error.message : String(error)}`
-    )
-    return {}
-  }
-}
-
 function readConfigFromEnv(env: NodeJS.ProcessEnv): Partial<PersistedAppConfig> {
   const envConfig: Partial<PersistedAppConfig> = {}
   const envRecord = envConfig as Partial<Record<PersistedConfigKey, PersistedConfigValue>>
 
-  for (const field of CONFIG_FIELD_DEFINITIONS) {
+  for (const field of Object.values(CONFIG_FIELD_BY_KEY)) {
     if (field.kind === 'string' || field.kind === 'boolean') {
       const raw = readEnvString(env, field.envVar, { allowEmpty: field.allowEmptyString })
       if (raw === undefined) continue
@@ -281,13 +212,32 @@ function readConfigFromEnv(env: NodeJS.ProcessEnv): Partial<PersistedAppConfig> 
   return envConfig
 }
 
+function sanitizePersistedConfig(
+  persistedConfig: Partial<PersistedAppConfig>
+): Partial<PersistedAppConfig> {
+  const sanitized: Partial<PersistedAppConfig> = {}
+  const sanitizedRecord = sanitized as Partial<Record<PersistedConfigKey, PersistedConfigValue>>
+
+  for (const key of PERSISTED_CONFIG_KEYS) {
+    const rawValue = persistedConfig[key]
+    if (rawValue === undefined) continue
+
+    const parsedValue = parseConfigValue(key, rawValue)
+    if (parsedValue === undefined) continue
+
+    sanitizedRecord[key] = parsedValue
+  }
+
+  return sanitized
+}
+
 function mergeConfig(
-  fileConfig: Partial<PersistedAppConfig>,
+  persistedConfig: Partial<PersistedAppConfig>,
   envConfig: Partial<PersistedAppConfig> = {}
 ): PersistedAppConfig {
   const merged: Partial<PersistedAppConfig> = {
     ...DEFAULT_PERSISTED_CONFIG,
-    ...fileConfig,
+    ...persistedConfig,
     ...envConfig,
   }
 
@@ -298,45 +248,6 @@ function mergeConfig(
   }
 
   return normalizedRecord as unknown as PersistedAppConfig
-}
-
-function serializeConfig(config: PersistedAppConfig): string {
-  const sections: Record<PersistedConfigSection, Record<string, string | number | boolean>> = {
-    app: {},
-    server: {},
-    auth: {},
-    ai: {},
-    yjs: {},
-    limits: {},
-  }
-
-  for (const field of CONFIG_FIELD_DEFINITIONS) {
-    sections[field.section][field.tomlKey] = config[field.key]
-  }
-
-  const body = TOML.stringify(sections as never).trimEnd()
-  return `# Plotline application configuration.\n${body}\n`
-}
-
-function writeConfigAtomically(configPath: string, contents: string): void {
-  const existingContents = existsSync(configPath) ? readFileSync(configPath, 'utf8') : null
-  if (existingContents === contents) return
-
-  const directory = path.dirname(configPath)
-  mkdirSync(directory, { recursive: true })
-
-  const tempPath = path.join(
-    directory,
-    `.${path.basename(configPath)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  )
-
-  writeFileSync(tempPath, contents, 'utf8')
-  try {
-    renameSync(tempPath, configPath)
-  } catch (error) {
-    unlinkSync(tempPath)
-    throw error
-  }
 }
 
 function freezeResolvedConfig(config: AppConfig): AppConfig {
@@ -368,11 +279,7 @@ function buildLimitsConfig(rawConfig: PersistedAppConfig): LimitsConfig {
   }
 }
 
-function buildResolvedConfig(
-  rawConfig: PersistedAppConfig,
-  configuredDataDir: string,
-  configFilePath: string
-): AppConfig {
+function buildResolvedConfig(rawConfig: PersistedAppConfig, store: ConfigStoreHandle): AppConfig {
   return freezeResolvedConfig({
     raw: { ...rawConfig },
     auth: {
@@ -387,9 +294,8 @@ function buildResolvedConfig(
       port: rawConfig.port,
     },
     paths: {
-      dataDir: resolveDataDir(configuredDataDir),
-      configFile: configFilePath,
-      dbFile: resolveDataFile(configuredDataDir, SQLITE_FILE_NAME),
+      dataDir: store.dataDirPath,
+      dbFile: store.dbFilePath,
     },
     ai: {
       defaultTemperature: rawConfig.aiDefaultTemperature,
@@ -405,7 +311,7 @@ function buildResolvedConfig(
 }
 
 function resolveConfigSources(
-  fileConfig: Partial<PersistedAppConfig>,
+  persistedConfig: Partial<PersistedAppConfig>,
   envConfig: Partial<PersistedAppConfig>
 ): Record<PersistedConfigKey, ConfigValueSource> {
   const sources = {} as Record<PersistedConfigKey, ConfigValueSource>
@@ -415,8 +321,8 @@ function resolveConfigSources(
       sources[key] = 'env'
       continue
     }
-    if (fileConfig[key] !== undefined) {
-      sources[key] = 'file'
+    if (persistedConfig[key] !== undefined) {
+      sources[key] = 'database'
       continue
     }
     sources[key] = 'default'
@@ -457,32 +363,59 @@ function sanitizeEditablePatch(patch: Partial<PersistedAppConfig>): Partial<Pers
   return sanitized
 }
 
+function buildChangedPersistedPatch(
+  beforeConfig: PersistedAppConfig,
+  afterConfig: PersistedAppConfig,
+  changedKeys: PersistedConfigKey[]
+): Partial<PersistedAppConfig> {
+  const patch: Partial<PersistedAppConfig> = {}
+  const patchRecord = patch as Partial<Record<PersistedConfigKey, PersistedConfigValue>>
+
+  for (const key of changedKeys) {
+    if (beforeConfig[key] === afterConfig[key]) continue
+    patchRecord[key] = afterConfig[key]
+  }
+
+  return patch
+}
+
 export class ConfigManager {
   private resolvedConfig: AppConfig | null = null
 
   private readonly env: NodeJS.ProcessEnv
 
-  constructor(env: NodeJS.ProcessEnv = process.env) {
+  private readonly storeProvider: ConfigStoreProvider
+
+  private storeHandle: ConfigStoreHandle | null = null
+
+  constructor(env: NodeJS.ProcessEnv, options: ConfigManagerOptions) {
     this.env = env
+    this.storeProvider = options.storeProvider
+  }
+
+  private getStoreHandle(): ConfigStoreHandle {
+    if (this.storeHandle) return this.storeHandle
+
+    const nextStoreHandle = this.storeProvider(this.env)
+
+    if (nextStoreHandle.repository.isEmpty()) {
+      nextStoreHandle.repository.upsertMany(DEFAULT_PERSISTED_CONFIG, Date.now())
+    }
+
+    this.storeHandle = nextStoreHandle
+    return nextStoreHandle
   }
 
   private loadState(): ConfigStateSnapshot {
-    const configuredDataDir = resolveConfiguredDataDir(this.env)
-    const configFilePath = resolveDataFile(configuredDataDir, CONFIG_FILE_NAME)
-
-    mkdirSync(resolveDataDir(configuredDataDir), { recursive: true })
-    if (!existsSync(configFilePath)) {
-      writeConfigAtomically(configFilePath, serializeConfig(DEFAULT_PERSISTED_CONFIG))
-    }
-
-    const fileConfigPartial = readConfigFromFile(configFilePath)
+    const storeHandle = this.getStoreHandle()
+    const persistedConfig = sanitizePersistedConfig(storeHandle.repository.readAll())
     const envConfig = readConfigFromEnv(this.env)
-    const rawConfig = mergeConfig(fileConfigPartial, envConfig)
+    const rawConfig = mergeConfig(persistedConfig, envConfig)
 
     return {
-      config: buildResolvedConfig(rawConfig, configuredDataDir, configFilePath),
-      fileConfig: fileConfigPartial,
-      sources: resolveConfigSources(fileConfigPartial, envConfig),
+      config: buildResolvedConfig(rawConfig, storeHandle),
+      persistedConfig,
+      sources: resolveConfigSources(persistedConfig, envConfig),
     }
   }
 
@@ -500,21 +433,26 @@ export class ConfigManager {
     return state
   }
 
-  updateFileConfig(patch: Partial<PersistedAppConfig>): UpdateConfigResult {
+  updatePersistedConfig(patch: Partial<PersistedAppConfig>): UpdateConfigResult {
     const previousState = this.getState()
-    const previousFileConfig = mergeConfig(previousState.fileConfig)
+    const previousPersistedConfig = mergeConfig(previousState.persistedConfig)
     const validatedPatch = sanitizeEditablePatch(patch)
-    const nextFileConfig = mergeConfig({
-      ...previousFileConfig,
+    const nextPersistedConfig = mergeConfig({
+      ...previousPersistedConfig,
       ...validatedPatch,
     })
 
-    const changedFileKeys: PersistedConfigKey[] = PERSISTED_CONFIG_KEYS.filter(
-      (key) => !configValuesEqual(previousFileConfig[key], nextFileConfig[key])
+    const changedPersistedKeys: PersistedConfigKey[] = PERSISTED_CONFIG_KEYS.filter(
+      (key) => !configValuesEqual(previousPersistedConfig[key], nextPersistedConfig[key])
     )
 
-    if (changedFileKeys.length > 0) {
-      writeConfigAtomically(previousState.config.paths.configFile, serializeConfig(nextFileConfig))
+    if (changedPersistedKeys.length > 0) {
+      const changedPersistedPatch = buildChangedPersistedPatch(
+        previousPersistedConfig,
+        nextPersistedConfig,
+        changedPersistedKeys
+      )
+      this.getStoreHandle().repository.upsertMany(changedPersistedPatch, Date.now())
     }
 
     this.resolvedConfig = null
@@ -523,13 +461,13 @@ export class ConfigManager {
     const changedEffectiveKeys: PersistedConfigKey[] = PERSISTED_CONFIG_KEYS.filter(
       (key) => !configValuesEqual(previousState.config.raw[key], nextState.config.raw[key])
     )
-    const overriddenChangedKeys: PersistedConfigKey[] = changedFileKeys.filter(
+    const overriddenChangedKeys: PersistedConfigKey[] = changedPersistedKeys.filter(
       (key) => nextState.sources[key] === 'env'
     )
 
     return {
       state: nextState,
-      changedFileKeys,
+      changedPersistedKeys,
       changedEffectiveKeys,
       overriddenChangedKeys,
     }
@@ -537,7 +475,10 @@ export class ConfigManager {
 
   resetForTests(): void {
     this.resolvedConfig = null
+
+    if (this.storeHandle) {
+      this.storeHandle.dispose()
+      this.storeHandle = null
+    }
   }
 }
-
-export const configManager = new ConfigManager()

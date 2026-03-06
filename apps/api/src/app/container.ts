@@ -9,7 +9,7 @@ import { configureAiProvider } from '../ai/index.js'
 import type { AuthPort } from '../core/ports/auth.port.js'
 import { LocalAuthAdapter } from '../infrastructure/auth/local-auth.adapter.js'
 import { SqliteAuthAdapter } from '../infrastructure/auth/sqlite-auth.adapter.js'
-import { configManager } from '../config/manager.js'
+import { configManager } from '../config/runtime.js'
 
 export interface AppContainer {
   services: ServiceSet

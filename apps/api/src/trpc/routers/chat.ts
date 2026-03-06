@@ -6,7 +6,7 @@ import { projectSyncBus } from '../project-sync.js'
 import { protectedProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'
 import type { ChatObserveEvent } from '../../chat/runtime.js'
-import { configManager } from '../../config/manager.js'
+import { configManager } from '../../config/runtime.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 

@@ -190,7 +190,7 @@ export function sourceBadge(source: FieldSource): {
   variant: 'outline' | 'secondary' | 'ghost'
 } {
   if (source === 'env') return { label: 'Env Override', variant: 'outline' }
-  if (source === 'file') return { label: 'Config File', variant: 'secondary' }
+  if (source === 'database') return { label: 'Database', variant: 'secondary' }
   return { label: 'Default', variant: 'ghost' }
 }
 
@@ -242,7 +242,7 @@ export function readFieldValue(
   data: ConfigQueryData | undefined,
   key: EditableFieldKey
 ): string | number | boolean {
-  return data?.fields[key]?.fileValue ?? DEFAULT_PERSISTED_CONFIG[key]
+  return data?.fields[key]?.persistedValue ?? DEFAULT_PERSISTED_CONFIG[key]
 }
 
 export function toFormValues(data: ConfigQueryData | undefined): ConfigFormValues {

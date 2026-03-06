@@ -117,6 +117,36 @@ const SCHEMA = `
     FOREIGN KEY (activeProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL
   );
 
+  CREATE TABLE IF NOT EXISTS app_config_values (
+    key TEXT PRIMARY KEY CHECK (
+      key IN (
+        'authEnabled',
+        'nodeEnv',
+        'host',
+        'port',
+        'aiDefaultTemperature',
+        'aiSelectionEditTemperature',
+        'aiDefaultMaxOutputTokens',
+        'yjsPersistenceFlushMs',
+        'yjsVersionIntervalMs',
+        'maxContextChars',
+        'maxPromptChars',
+        'maxToolEntries',
+        'maxToolReadChars',
+        'maxAiToolSteps',
+        'maxChatMessageChars',
+        'maxPromptNameChars',
+        'maxPromptDescChars',
+        'maxPromptSystemChars',
+        'maxPromptUserChars',
+        'maxDocImportChars',
+        'maxDocExportChars'
+      )
+    ),
+    value TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL CHECK (updatedAt > 0)
+  );
+
   CREATE TABLE IF NOT EXISTS auth_users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

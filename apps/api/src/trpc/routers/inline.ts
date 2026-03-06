@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { isValidId } from '@plotline/shared'
 import { protectedProcedure, router } from '../index.js'
 import { InlineRuntimeError } from '../../inline/runtime.js'
-import { configManager } from '../../config/manager.js'
+import { configManager } from '../../config/runtime.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 

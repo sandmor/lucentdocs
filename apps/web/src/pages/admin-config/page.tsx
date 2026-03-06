@@ -129,7 +129,7 @@ export function AdminConfigPage() {
       onSuccess: async (payload) => {
         const overriddenCount = payload.overriddenChangedKeys.length
         const effectiveCount = payload.changedEffectiveKeys.length
-        const changedCount = payload.changedFileKeys.length
+        const changedCount = payload.changedPersistedKeys.length
 
         form.reset(toFormValues(payload))
         await utils.config.get.invalidate()
@@ -137,7 +137,7 @@ export function AdminConfigPage() {
         toast.success(changedCount === 0 ? 'No config changes detected' : 'Configuration saved', {
           description:
             changedCount === 0
-              ? 'All values already matched config.toml.'
+              ? 'All values already matched persisted database settings.'
               : overriddenCount > 0
                 ? `${effectiveCount} applied now, ${overriddenCount} overridden by env vars.`
                 : `${effectiveCount} applied immediately with no restart.`,
@@ -730,10 +730,6 @@ export function AdminConfigPage() {
                     <p className="font-medium">{item.value}</p>
                   </div>
                 ))}
-                <div className="bg-muted/40 rounded-xl border px-3 py-2">
-                  <p className="text-muted-foreground mb-1 text-sm">Config file</p>
-                  <p className="font-mono text-xs">{runtime.configFilePath}</p>
-                </div>
                 <div className="bg-muted/40 rounded-xl border px-3 py-2 sm:col-span-2">
                   <p className="text-muted-foreground mb-1 text-sm">Data directory</p>
                   <p className="font-mono text-xs">{runtime.dataDir}</p>

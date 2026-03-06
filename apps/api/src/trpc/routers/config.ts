@@ -8,11 +8,8 @@ import {
   parseAndNormalizeHttpBaseURL,
   type PersistedAppConfig,
 } from '@plotline/shared'
-import {
-  type ConfigStateSnapshot,
-  type ConfigValueSource,
-  configManager,
-} from '../../config/manager.js'
+import { type ConfigStateSnapshot, type ConfigValueSource } from '../../config/manager.js'
+import { configManager } from '../../config/runtime.js'
 import { getModelsDevCatalog, getSourceModelCatalog } from '../../ai/model-catalog.js'
 import { AI_PROVIDER_DEFAULT_BASE_URLS } from '../../core/ai/provider-types.js'
 import { resetClient } from '../../ai/provider.js'
@@ -29,7 +26,7 @@ const YJS_RUNTIME_KEYS = ['yjsPersistenceFlushMs', 'yjsVersionIntervalMs'] as co
 
 interface ConfigFieldPayload {
   effectiveValue: string | number | boolean
-  fileValue: string | number | boolean | null
+  persistedValue: string | number | boolean | null
   source: ConfigValueSource
   isOverridden: boolean
 }
@@ -54,7 +51,7 @@ function buildConfigPayload(state: ConfigStateSnapshot) {
   for (const key of PERSISTED_CONFIG_KEYS) {
     fields[key] = {
       effectiveValue: state.config.raw[key],
-      fileValue: state.fileConfig[key] ?? null,
+      persistedValue: state.persistedConfig[key] ?? null,
       source: state.sources[key],
       isOverridden: state.sources[key] === 'env',
     }
@@ -68,7 +65,6 @@ function buildConfigPayload(state: ConfigStateSnapshot) {
       nodeEnv: state.config.runtime.nodeEnv,
       host: state.config.server.host,
       port: state.config.server.port,
-      configFilePath: state.config.paths.configFile,
       dataDir: state.config.paths.dataDir,
       isLoopbackHost: isLoopbackHost(host),
     },
@@ -246,7 +242,7 @@ export const configRouter = router({
       maxDocExportChars: input.maxDocExportChars,
     }
 
-    const result = configManager.updateFileConfig(sanitizedInput)
+    const result = configManager.updatePersistedConfig(sanitizedInput)
     const changedEffectiveSet = new Set(result.changedEffectiveKeys)
 
     if (AI_RUNTIME_KEYS.some((key) => changedEffectiveSet.has(key))) {
@@ -263,7 +259,7 @@ export const configRouter = router({
 
     return {
       ...buildConfigPayload(result.state),
-      changedFileKeys: result.changedFileKeys,
+      changedPersistedKeys: result.changedPersistedKeys,
       changedEffectiveKeys: result.changedEffectiveKeys,
       overriddenChangedKeys: result.overriddenChangedKeys,
     }

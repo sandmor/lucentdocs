@@ -12,7 +12,7 @@ import {
   type JsonObject,
   type JsonValue,
 } from '@plotline/shared'
-import { configManager } from '../../config/manager.js'
+import { configManager } from '../../config/runtime.js'
 import { projectSyncBus } from '../project-sync.js'
 import { YJS_RESTORE_CLOSE_CODE, YJS_RESTORE_CLOSE_REASON } from '../../yjs/runtime.js'
 

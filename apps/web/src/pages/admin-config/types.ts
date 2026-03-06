@@ -7,10 +7,10 @@ export type NumberFieldKey = {
 }[EditableFieldKey]
 export type VisibleNumberFieldKey = NumberFieldKey
 
-export type FieldSource = 'env' | 'file' | 'default'
+export type FieldSource = 'env' | 'database' | 'default'
 export type ConfigFieldPayload = {
   effectiveValue: string | number | boolean
-  fileValue: string | number | boolean | null
+  persistedValue: string | number | boolean | null
   source: FieldSource
   isOverridden: boolean
 }
@@ -21,7 +21,6 @@ export type ConfigQueryData = {
     nodeEnv: string
     host: string
     port: number
-    configFilePath: string
     dataDir: string
     isLoopbackHost: boolean
   }

@@ -30,13 +30,10 @@ export interface PersistedAppConfig {
 }
 
 export type PersistedConfigKey = keyof PersistedAppConfig
-export type PersistedConfigSection = 'app' | 'server' | 'auth' | 'ai' | 'yjs' | 'limits'
 export type ConfigValueKind = 'string' | 'int' | 'float' | 'boolean'
 
 export interface ConfigFieldDefinition {
   key: PersistedConfigKey
-  section: PersistedConfigSection
-  tomlKey: string
   envVar: string
   kind: ConfigValueKind
   defaultValue: string | number | boolean
@@ -48,8 +45,6 @@ export interface ConfigFieldDefinition {
 export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   {
     key: 'authEnabled',
-    section: 'auth',
-    tomlKey: 'enabled',
     envVar: 'AUTH_ENABLED',
     kind: 'boolean',
     defaultValue: false,
@@ -57,8 +52,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'nodeEnv',
-    section: 'app',
-    tomlKey: 'environment',
     envVar: 'NODE_ENV',
     kind: 'string',
     defaultValue: 'development',
@@ -66,8 +59,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'host',
-    section: 'server',
-    tomlKey: 'host',
     envVar: 'HOST',
     kind: 'string',
     defaultValue: '127.0.0.1',
@@ -75,8 +66,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'port',
-    section: 'server',
-    tomlKey: 'port',
     envVar: 'PORT',
     kind: 'int',
     defaultValue: 5677,
@@ -86,8 +75,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'aiDefaultTemperature',
-    section: 'ai',
-    tomlKey: 'default_temperature',
     envVar: 'AI_DEFAULT_TEMPERATURE',
     kind: 'float',
     defaultValue: 1.0,
@@ -97,8 +84,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'aiSelectionEditTemperature',
-    section: 'ai',
-    tomlKey: 'selection_edit_temperature',
     envVar: 'AI_SELECTION_EDIT_TEMPERATURE',
     kind: 'float',
     defaultValue: 1.0,
@@ -108,8 +93,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'aiDefaultMaxOutputTokens',
-    section: 'ai',
-    tomlKey: 'default_max_output_tokens',
     envVar: 'AI_DEFAULT_MAX_OUTPUT_TOKENS',
     kind: 'int',
     defaultValue: 4096,
@@ -118,8 +101,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'yjsPersistenceFlushMs',
-    section: 'yjs',
-    tomlKey: 'persistence_flush_interval_ms',
     envVar: 'YJS_PERSISTENCE_FLUSH_MS',
     kind: 'int',
     defaultValue: 2000,
@@ -128,8 +109,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'yjsVersionIntervalMs',
-    section: 'yjs',
-    tomlKey: 'version_snapshot_interval_ms',
     envVar: 'YJS_VERSION_INTERVAL_MS',
     kind: 'int',
     defaultValue: 300000,
@@ -138,8 +117,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxContextChars',
-    section: 'limits',
-    tomlKey: 'context_chars',
     envVar: 'LIMITS_CONTEXT_CHARS',
     kind: 'int',
     defaultValue: 1_000_000,
@@ -148,8 +125,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxPromptChars',
-    section: 'limits',
-    tomlKey: 'prompt_chars',
     envVar: 'LIMITS_PROMPT_CHARS',
     kind: 'int',
     defaultValue: 50_000,
@@ -158,8 +133,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxToolEntries',
-    section: 'limits',
-    tomlKey: 'tool_entries',
     envVar: 'LIMITS_TOOL_ENTRIES',
     kind: 'int',
     defaultValue: 2_000,
@@ -168,8 +141,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxToolReadChars',
-    section: 'limits',
-    tomlKey: 'tool_read_chars',
     envVar: 'LIMITS_TOOL_READ_CHARS',
     kind: 'int',
     defaultValue: 120_000,
@@ -178,8 +149,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxAiToolSteps',
-    section: 'limits',
-    tomlKey: 'ai_tool_steps',
     envVar: 'LIMITS_AI_TOOL_STEPS',
     kind: 'int',
     defaultValue: INLINE_AI_DEFAULT_TOOL_STEP_LIMIT,
@@ -188,8 +157,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxChatMessageChars',
-    section: 'limits',
-    tomlKey: 'chat_message_chars',
     envVar: 'LIMITS_CHAT_MESSAGE_CHARS',
     kind: 'int',
     defaultValue: 20_000,
@@ -198,8 +165,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxPromptNameChars',
-    section: 'limits',
-    tomlKey: 'prompt_name_chars',
     envVar: 'LIMITS_PROMPT_NAME_CHARS',
     kind: 'int',
     defaultValue: 160,
@@ -208,8 +173,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxPromptDescChars',
-    section: 'limits',
-    tomlKey: 'prompt_desc_chars',
     envVar: 'LIMITS_PROMPT_DESC_CHARS',
     kind: 'int',
     defaultValue: 2_000,
@@ -218,8 +181,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxPromptSystemChars',
-    section: 'limits',
-    tomlKey: 'prompt_system_chars',
     envVar: 'LIMITS_PROMPT_SYSTEM_CHARS',
     kind: 'int',
     defaultValue: 80_000,
@@ -228,8 +189,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxPromptUserChars',
-    section: 'limits',
-    tomlKey: 'prompt_user_chars',
     envVar: 'LIMITS_PROMPT_USER_CHARS',
     kind: 'int',
     defaultValue: 200_000,
@@ -238,8 +197,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxDocImportChars',
-    section: 'limits',
-    tomlKey: 'doc_import_chars',
     envVar: 'LIMITS_DOC_IMPORT_CHARS',
     kind: 'int',
     defaultValue: 500_000,
@@ -248,8 +205,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
   },
   {
     key: 'maxDocExportChars',
-    section: 'limits',
-    tomlKey: 'doc_export_chars',
     envVar: 'LIMITS_DOC_EXPORT_CHARS',
     kind: 'int',
     defaultValue: 1_000_000,

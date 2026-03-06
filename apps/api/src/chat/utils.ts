@@ -11,7 +11,7 @@ import { Node as ProseMirrorNode } from 'prosemirror-model'
 import { MarkdownSerializer, defaultMarkdownSerializer } from 'prosemirror-markdown'
 import { nanoid } from 'nanoid'
 import { safeValidateUIMessages, type UIMessage } from 'ai'
-import { configManager } from '../config/manager.js'
+import { configManager } from '../config/runtime.js'
 import type { ChatThread } from '../core/services/chats.service.js'
 
 const markdownSerializer = new MarkdownSerializer(

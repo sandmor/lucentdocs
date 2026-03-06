@@ -1,4 +1,4 @@
-import { configManager } from './manager.js'
+import { configManager } from './runtime.js'
 
 export const YJS_CONFIG = {
   get persistenceFlushIntervalMs(): number {
