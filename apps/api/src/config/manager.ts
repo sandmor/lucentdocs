@@ -17,6 +17,11 @@ export interface ResolvedAiConfig {
   defaultMaxOutputTokens: number
 }
 
+export interface ResolvedEmbeddingConfig {
+  debounceMs: number
+  batchMaxWaitMs: number
+}
+
 export interface AppConfig {
   raw: PersistedAppConfig
   auth: {
@@ -35,6 +40,7 @@ export interface AppConfig {
     dbFile: string
   }
   ai: ResolvedAiConfig
+  embeddings: ResolvedEmbeddingConfig
   yjs: {
     persistenceFlushIntervalMs: number
     versionSnapshotIntervalMs: number
@@ -257,6 +263,7 @@ function freezeResolvedConfig(config: AppConfig): AppConfig {
   Object.freeze(config.server)
   Object.freeze(config.paths)
   Object.freeze(config.ai)
+  Object.freeze(config.embeddings)
   Object.freeze(config.yjs)
   Object.freeze(config.limits)
   return Object.freeze(config)
@@ -301,6 +308,10 @@ function buildResolvedConfig(rawConfig: PersistedAppConfig, store: ConfigStoreHa
       defaultTemperature: rawConfig.aiDefaultTemperature,
       selectionEditTemperature: rawConfig.aiSelectionEditTemperature,
       defaultMaxOutputTokens: rawConfig.aiDefaultMaxOutputTokens,
+    },
+    embeddings: {
+      debounceMs: rawConfig.embeddingDebounceMs,
+      batchMaxWaitMs: rawConfig.embeddingBatchMaxWaitMs,
     },
     yjs: {
       persistenceFlushIntervalMs: rawConfig.yjsPersistenceFlushMs,

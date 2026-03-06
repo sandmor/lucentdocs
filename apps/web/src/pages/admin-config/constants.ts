@@ -15,6 +15,7 @@ import type {
   FieldSource,
   ModelCatalogProvider,
   ModelCatalogProviderSummary,
+  ProviderSectionKind,
   ProviderOption,
   VisibleNumberFieldKey,
 } from './types'
@@ -54,10 +55,42 @@ export const DEFAULT_PROVIDER_OPTIONS: ProviderOption[] = [
   },
 ]
 
+export const DEFAULT_EMBEDDING_PROVIDER_OPTIONS: ProviderOption[] = [
+  {
+    value: 'openrouter',
+    label: 'OpenRouter',
+    type: 'openrouter',
+    apiBaseURL: AI_PROVIDER_DEFAULT_BASE_URLS.openrouter,
+    iconURL: 'https://models.dev/logos/openrouter.svg',
+    docURL: 'https://openrouter.ai/docs/api-reference/embeddings/get-embedding-models',
+  },
+  {
+    value: 'openai',
+    label: 'OpenAI',
+    type: 'openai',
+    apiBaseURL: AI_PROVIDER_DEFAULT_BASE_URLS.openai,
+    iconURL: 'https://models.dev/logos/openai.svg',
+    docURL: 'https://platform.openai.com/docs/guides/embeddings',
+  },
+  {
+    value: 'custom',
+    label: 'Custom (OpenAI-compatible)',
+    type: 'openai',
+    apiBaseURL: '',
+    iconURL: 'https://models.dev/logos/openai.svg',
+    docURL: null,
+  },
+]
+
 export const AI_TUNING_FIELD_KEYS = [
   'aiDefaultTemperature',
   'aiSelectionEditTemperature',
   'aiDefaultMaxOutputTokens',
+] as const satisfies ReadonlyArray<VisibleNumberFieldKey>
+
+export const EMBEDDING_RUNTIME_FIELD_KEYS = [
+  'embeddingDebounceMs',
+  'embeddingBatchMaxWaitMs',
 ] as const satisfies ReadonlyArray<VisibleNumberFieldKey>
 
 export const COLLABORATION_FIELD_KEYS = [
@@ -116,6 +149,20 @@ export const VISIBLE_FIELD_META: Record<
     id: 'ai-default-max-output-tokens',
     label: 'Max Output Tokens',
     description: 'Default maximum tokens for AI responses.',
+  },
+  embeddingDebounceMs: {
+    id: 'embedding-debounce-ms',
+    label: 'Embedding debounce (ms)',
+    description:
+      'How long a changed document stays quiet before it becomes eligible for embedding.',
+    overrideSuffix: ' ms',
+  },
+  embeddingBatchMaxWaitMs: {
+    id: 'embedding-batch-max-wait-ms',
+    label: 'Embedding max batch wait (ms)',
+    description:
+      'Maximum age of the oldest queued document before the pending embedding batch is flushed.',
+    overrideSuffix: ' ms',
   },
   yjsPersistenceFlushMs: {
     id: 'flush-ms',
@@ -239,8 +286,22 @@ export function normalizeProvider(provider: AiProviderDraft): AiProviderDraft {
   }
 }
 
+export function defaultModelForProvider(
+  kind: ProviderSectionKind,
+  type: ProviderOption['type']
+): string {
+  if (kind === 'embedding') {
+    return type === 'openrouter' ? 'openai/text-embedding-3-small' : 'text-embedding-3-small'
+  }
+
+  return type === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-5'
+}
+
 export function createProviderDraft(
-  option: ProviderOption = DEFAULT_PROVIDER_OPTIONS[0]
+  kind: ProviderSectionKind,
+  option: ProviderOption = kind === 'embedding'
+    ? DEFAULT_EMBEDDING_PROVIDER_OPTIONS[0]
+    : DEFAULT_PROVIDER_OPTIONS[0]
 ): AiProviderDraft {
   const type = option.type
   return {
@@ -248,7 +309,7 @@ export function createProviderDraft(
     providerId: option.value,
     type,
     baseURL: option.apiBaseURL || AI_PROVIDER_DEFAULT_BASE_URLS[type],
-    model: '',
+    model: defaultModelForProvider(kind, type),
     apiKeyId: null,
   }
 }
@@ -280,12 +341,13 @@ export function toFormValues(data: ConfigQueryData | undefined): ConfigFormValue
 }
 
 export function sourceCatalogCacheKey(
+  kind: ProviderSectionKind,
   providerId: string,
   type: string,
   baseURL: string,
   apiKeyId: string | null
 ): string {
-  return `${providerId.trim().toLowerCase()}|${type}|${baseURL.trim().toLowerCase()}|${apiKeyId ?? 'none'}`
+  return `${kind}|${providerId.trim().toLowerCase()}|${type}|${baseURL.trim().toLowerCase()}|${apiKeyId ?? 'none'}`
 }
 
 export function serializeAiDraft(draft: AiDraftState): string {

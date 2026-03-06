@@ -1,7 +1,9 @@
 import type { AiModelSourceType } from '@lucentdocs/shared'
+import type { AiProviderUsage } from '../ai/provider-usage.js'
 
 export interface AiProviderConfigEntity {
   id: string
+  usage: AiProviderUsage
   providerId: string
   type: AiModelSourceType
   baseURL: string
@@ -23,12 +25,14 @@ export interface AiApiKeyEntity {
 }
 
 export interface AiRuntimeSettingsEntity {
-  activeProviderId: string | null
+  activeGenerationProviderId: string | null
+  activeEmbeddingProviderId: string | null
   updatedAt: number
 }
 
 export interface UpsertAiProviderConfigInput {
   id: string
+  usage: AiProviderUsage
   providerId: string
   type: AiModelSourceType
   baseURL: string
@@ -47,11 +51,15 @@ export interface UpdateAiApiKeyData {
 }
 
 export interface AiSettingsRepositoryPort {
-  listProviderConfigs(): Promise<AiProviderConfigEntity[]>
+  listProviderConfigs(usage: AiProviderUsage): Promise<AiProviderConfigEntity[]>
   upsertProviderConfig(input: UpsertAiProviderConfigInput): Promise<void>
-  deleteProviderConfigsNotIn(ids: string[]): Promise<void>
+  deleteProviderConfigsNotIn(usage: AiProviderUsage, ids: string[]): Promise<void>
   readRuntimeSettings(): Promise<AiRuntimeSettingsEntity | undefined>
-  upsertRuntimeSettings(activeProviderId: string | null, updatedAt: number): Promise<void>
+  upsertRuntimeSettings(input: {
+    activeGenerationProviderId: string | null
+    activeEmbeddingProviderId: string | null
+    updatedAt: number
+  }): Promise<void>
   listApiKeys(): Promise<AiApiKeyEntity[]>
   findApiKeyById(id: string): Promise<AiApiKeyEntity | undefined>
   clearDefaultApiKeys(baseURL: string, updatedAt: number): Promise<void>

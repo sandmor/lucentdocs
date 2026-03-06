@@ -112,6 +112,11 @@ export interface DocumentsService {
   ): Promise<DocumentWithContent | null>
 }
 
+export interface DocumentContentObserver {
+  onDocumentContentStored?(documentId: string): Promise<void> | void
+  onDocumentDeleted?(documentId: string): Promise<void> | void
+}
+
 function listVisibleDocuments(docs: Document[]): Document[] {
   return docs.filter((doc) => !isDirectorySentinelPath(normalizeDocumentPath(doc.title)))
 }
@@ -208,7 +213,8 @@ async function getProjectScopedDocument(
 
 export function createDocumentsService(
   repos: RepositorySet,
-  transaction: TransactionPort
+  transaction: TransactionPort,
+  observer: DocumentContentObserver = {}
 ): DocumentsService {
   const getDocumentContent = async (id: string): Promise<string> => {
     const yjsData = await repos.yjsDocuments.getLatest(id)
@@ -258,6 +264,8 @@ export function createDocumentsService(
       await repos.documents.insert(doc)
       await repos.yjsDocuments.set(id, buffer)
     })
+
+    await observer.onDocumentContentStored?.(id)
 
     return { ...doc, content: docContent }
   }
@@ -420,6 +428,8 @@ export function createDocumentsService(
         await repos.documents.deleteById(id)
         await repos.yjsDocuments.delete(id)
       })
+
+      await observer.onDocumentDeleted?.(id)
 
       return true
     },
@@ -649,6 +659,10 @@ export function createDocumentsService(
         }
       })
 
+      for (const doc of docsToDelete) {
+        await observer.onDocumentDeleted?.(doc.id)
+      }
+
       return { deletedDocumentIds: docsToDelete.map((d) => d.id) }
     },
 
@@ -786,6 +800,8 @@ export function createDocumentsService(
         await repos.yjsDocuments.set(documentId, Buffer.from(replacementState))
         await repos.documents.update(documentId, { updatedAt: restoredAt })
       })
+
+      await observer.onDocumentContentStored?.(documentId)
 
       return {
         ...doc,

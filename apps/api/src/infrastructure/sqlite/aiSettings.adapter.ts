@@ -7,10 +7,12 @@ import type {
   UpsertAiProviderConfigInput,
 } from '../../core/ports/aiSettings.port.js'
 import { normalizeModelSourceType } from '../../core/ai/provider-types.js'
+import type { AiProviderUsage } from '../../core/ai/provider-usage.js'
 import type { SqliteConnection } from './connection.js'
 
 interface ProviderRow {
   id: string
+  usage: AiProviderUsage
   providerId: string
   type: string
   baseUrl: string
@@ -32,13 +34,15 @@ interface ApiKeyRow {
 }
 
 interface RuntimeRow {
-  activeProviderId: string | null
+  activeGenerationProviderId: string | null
+  activeEmbeddingProviderId: string | null
   updatedAt: number
 }
 
 function fromProviderRow(row: ProviderRow): AiProviderConfigEntity {
   return {
     id: row.id,
+    usage: row.usage,
     providerId: row.providerId,
     type: normalizeModelSourceType(row.type),
     baseURL: row.baseUrl,
@@ -65,12 +69,13 @@ function fromApiKeyRow(row: ApiKeyRow): AiApiKeyEntity {
 export class AiSettingsRepository implements AiSettingsRepositoryPort {
   constructor(private connection: SqliteConnection) {}
 
-  async listProviderConfigs(): Promise<AiProviderConfigEntity[]> {
+  async listProviderConfigs(usage: AiProviderUsage): Promise<AiProviderConfigEntity[]> {
     const rows = this.connection.all<ProviderRow>(
-      `SELECT id, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt
+      `SELECT id, usage, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt
        FROM ai_provider_configs
+       WHERE usage = ?
        ORDER BY sortOrder ASC, createdAt ASC`,
-      []
+      [usage]
     )
     return rows.map(fromProviderRow)
   }
@@ -78,9 +83,10 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
   async upsertProviderConfig(input: UpsertAiProviderConfigInput): Promise<void> {
     this.connection.run(
       `INSERT INTO ai_provider_configs
-        (id, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, usage, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
+         usage = excluded.usage,
          providerId = excluded.providerId,
          type = excluded.type,
          baseUrl = excluded.baseUrl,
@@ -90,6 +96,7 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
          updatedAt = excluded.updatedAt`,
       [
         input.id,
+        input.usage,
         input.providerId,
         input.type,
         input.baseURL,
@@ -102,35 +109,48 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
     )
   }
 
-  async deleteProviderConfigsNotIn(ids: string[]): Promise<void> {
+  async deleteProviderConfigsNotIn(usage: AiProviderUsage, ids: string[]): Promise<void> {
     if (ids.length === 0) {
-      this.connection.run('DELETE FROM ai_provider_configs', [])
+      this.connection.run('DELETE FROM ai_provider_configs WHERE usage = ?', [usage])
       return
     }
 
     const placeholders = ids.map(() => '?').join(', ')
-    this.connection.run(`DELETE FROM ai_provider_configs WHERE id NOT IN (${placeholders})`, ids)
+    this.connection.run(
+      `DELETE FROM ai_provider_configs WHERE usage = ? AND id NOT IN (${placeholders})`,
+      [usage, ...ids]
+    )
   }
 
   async readRuntimeSettings(): Promise<AiRuntimeSettingsEntity | undefined> {
     const row = this.connection.get<RuntimeRow>(
-      'SELECT activeProviderId, updatedAt FROM ai_runtime_settings WHERE id = 1',
+      `SELECT activeGenerationProviderId, activeEmbeddingProviderId, updatedAt
+       FROM ai_runtime_settings
+       WHERE id = 1`,
       []
     )
     return row
       ? {
-          activeProviderId: row.activeProviderId,
+          activeGenerationProviderId: row.activeGenerationProviderId,
+          activeEmbeddingProviderId: row.activeEmbeddingProviderId,
           updatedAt: row.updatedAt,
         }
       : undefined
   }
 
-  async upsertRuntimeSettings(activeProviderId: string | null, updatedAt: number): Promise<void> {
+  async upsertRuntimeSettings(input: {
+    activeGenerationProviderId: string | null
+    activeEmbeddingProviderId: string | null
+    updatedAt: number
+  }): Promise<void> {
     this.connection.run(
-      `INSERT INTO ai_runtime_settings (id, activeProviderId, updatedAt)
-       VALUES (1, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET activeProviderId = excluded.activeProviderId, updatedAt = excluded.updatedAt`,
-      [activeProviderId, updatedAt]
+      `INSERT INTO ai_runtime_settings (id, activeGenerationProviderId, activeEmbeddingProviderId, updatedAt)
+       VALUES (1, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         activeGenerationProviderId = excluded.activeGenerationProviderId,
+         activeEmbeddingProviderId = excluded.activeEmbeddingProviderId,
+         updatedAt = excluded.updatedAt`,
+      [input.activeGenerationProviderId, input.activeEmbeddingProviderId, input.updatedAt]
     )
   }
 

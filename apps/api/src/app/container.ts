@@ -6,6 +6,8 @@ import { createYjsRuntime, type YjsRuntime, type YjsRuntimeConfig } from '../yjs
 import { createChatRuntime, type ChatRuntime } from '../chat/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
 import { configureAiProvider } from '../ai/index.js'
+import { configureEmbeddingProvider } from '../embeddings/provider.js'
+import { createEmbeddingRuntime, type EmbeddingRuntime } from '../embeddings/runtime.js'
 import type { AuthPort } from '../core/ports/auth.port.js'
 import { LocalAuthAdapter } from '../infrastructure/auth/local-auth.adapter.js'
 import { SqliteAuthAdapter } from '../infrastructure/auth/sqlite-auth.adapter.js'
@@ -17,6 +19,7 @@ export interface AppContainer {
   transaction: TransactionPort
   authPort: AuthPort
   yjsRuntime: YjsRuntime
+  embeddingRuntime: EmbeddingRuntime
   chatRuntime: ChatRuntime
   inlineRuntime: InlineRuntime
 }
@@ -28,6 +31,7 @@ export async function createContainer(
   const adapter = createSqliteAdapter(dbPath)
   await adapter.services.aiSettings.initializeDefaults({ env: process.env })
   configureAiProvider(adapter.services.aiSettings)
+  configureEmbeddingProvider(adapter.services.aiSettings)
 
   const appConfig = configManager.getConfig()
   let authPort: AuthPort
@@ -39,12 +43,21 @@ export async function createContainer(
     authPort = new LocalAuthAdapter()
   }
 
+  const embeddingRuntime = createEmbeddingRuntime(adapter.services.embeddingIndex, {
+    debounceMs: appConfig.embeddings.debounceMs,
+    batchMaxWaitMs: appConfig.embeddings.batchMaxWaitMs,
+  })
+
   const yjsRuntime = createYjsRuntime(
     {
       yjsDocuments: adapter.repositories.yjsDocuments,
       versionSnapshots: adapter.repositories.versionSnapshots,
     },
-    yjsConfig
+    yjsConfig,
+    {
+      onDocumentPersisted: (documentId) =>
+        adapter.services.embeddingIndex.enqueueDocument(documentId),
+    }
   )
 
   const chatRuntime = createChatRuntime(adapter.services)
@@ -64,6 +77,7 @@ export async function createContainer(
     transaction: adapter.transaction,
     authPort,
     yjsRuntime,
+    embeddingRuntime,
     chatRuntime,
     inlineRuntime,
   }

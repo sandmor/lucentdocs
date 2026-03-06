@@ -10,12 +10,15 @@ import { ChatsRepository } from './chats.adapter.js'
 import { VersionSnapshotsRepository } from './versionSnapshots.adapter.js'
 import { YjsDocumentsRepository } from './yjsDocuments.adapter.js'
 import { AiSettingsRepository } from './aiSettings.adapter.js'
+import { DocumentEmbeddingsRepository } from './documentEmbeddings.adapter.js'
 import { AuthDataRepository } from './authData.adapter.js'
 import { createProjectsService } from '../../core/services/projects.service.js'
 import { createDocumentsService } from '../../core/services/documents.service.js'
 import { createChatsService } from '../../core/services/chats.service.js'
 import { createAiSettingsService } from '../../core/services/aiSettings.service.js'
+import { createEmbeddingIndexService } from '../../core/services/embeddingIndex.service.js'
 import { createAuthService } from '../../core/services/auth.service.js'
+import { configManager } from '../../config/runtime.js'
 
 export interface SqliteAdapter {
   connection: SqliteConnection
@@ -36,14 +39,24 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
     versionSnapshots: new VersionSnapshotsRepository(connection),
     yjsDocuments: new YjsDocumentsRepository(connection),
     aiSettings: new AiSettingsRepository(connection),
+    documentEmbeddings: new DocumentEmbeddingsRepository(connection),
     authData: new AuthDataRepository(connection),
   }
 
+  const aiSettings = createAiSettingsService(repositories, transaction)
+  const embeddingIndex = createEmbeddingIndexService(repositories, transaction, aiSettings, {
+    getRuntimeConfig: () => configManager.getConfig().embeddings,
+  })
+
   const services: ServiceSet = {
     projects: createProjectsService(repositories, transaction),
-    documents: createDocumentsService(repositories, transaction),
+    documents: createDocumentsService(repositories, transaction, {
+      onDocumentContentStored: (documentId) => embeddingIndex.enqueueDocument(documentId),
+      onDocumentDeleted: (documentId) => embeddingIndex.deleteDocument(documentId),
+    }),
     chats: createChatsService(repositories),
-    aiSettings: createAiSettingsService(repositories, transaction),
+    aiSettings,
+    embeddingIndex,
     auth: createAuthService(repositories, transaction),
   }
 

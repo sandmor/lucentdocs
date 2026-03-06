@@ -5,6 +5,7 @@ import type { ChatsRepositoryPort } from './chats.port.js'
 import type { VersionSnapshotsRepositoryPort } from './versionSnapshots.port.js'
 import type { YjsDocumentsRepositoryPort } from './yjsDocuments.port.js'
 import type { AiSettingsRepositoryPort } from './aiSettings.port.js'
+import type { DocumentEmbeddingsRepositoryPort } from './documentEmbeddings.port.js'
 import type { AuthDataRepositoryPort } from './authData.port.js'
 
 export interface RepositorySet {
@@ -15,5 +16,6 @@ export interface RepositorySet {
   versionSnapshots: VersionSnapshotsRepositoryPort
   yjsDocuments: YjsDocumentsRepositoryPort
   aiSettings: AiSettingsRepositoryPort
+  documentEmbeddings: DocumentEmbeddingsRepositoryPort
   authData: AuthDataRepositoryPort
 }

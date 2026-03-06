@@ -37,7 +37,7 @@ function getAiSettingsService(): AiSettingsService {
 }
 
 async function resolveRuntimeConfig(): Promise<AiConfig> {
-  const selection = await getAiSettingsService().resolveRuntimeSelection()
+  const selection = await getAiSettingsService().resolveRuntimeSelection('generation')
   const openaiDefault = normalizeBaseURL(AI_PROVIDER_DEFAULT_BASE_URLS.openai)
   const sourceBaseURL = normalizeBaseURL(selection.baseURL)
 

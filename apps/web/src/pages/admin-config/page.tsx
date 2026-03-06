@@ -19,6 +19,7 @@ import type {
   ConfigFormValues,
   ModelCatalogProviderSummary,
   NumberFieldKey,
+  ProviderSectionKind,
   ProviderOption,
   ProviderWithCatalog,
   SourceModelCatalogResult,
@@ -38,6 +39,8 @@ import {
   serializeAiDraft,
   sourceBadge,
   sourceCatalogCacheKey,
+  DEFAULT_EMBEDDING_PROVIDER_OPTIONS,
+  EMBEDDING_RUNTIME_FIELD_KEYS,
   toFormValues,
 } from './constants'
 import { ProviderCard } from './provider-card'
@@ -56,14 +59,15 @@ export function AdminConfigPage() {
   const [sourceCatalogErrorMap, setSourceCatalogErrorMap] = useState<Record<string, string>>({})
 
   // AI provider draft state
-  const [aiDraft, setAiDraft] = useState<AiDraftState | null>(null)
+  const [generationDraft, setGenerationDraft] = useState<AiDraftState | null>(null)
+  const [embeddingDraft, setEmbeddingDraft] = useState<AiDraftState | null>(null)
 
   const configQuery = trpc.config.get.useQuery()
   const modelCatalogQuery = trpc.config.modelCatalog.useQuery()
   const aiSettingsQuery = trpc.config.aiSettings.useQuery()
 
   const updateMutation = trpc.config.update.useMutation()
-  const updateAiSettingsMutation = trpc.config.updateAiSettings.useMutation()
+  const updateProvidersMutation = trpc.config.updateProviders.useMutation()
   const createAiKeyMutation = trpc.config.createAiApiKey.useMutation()
   const updateAiKeyMutation = trpc.config.updateAiApiKey.useMutation()
   const deleteAiKeyMutation = trpc.config.deleteAiApiKey.useMutation()
@@ -86,39 +90,70 @@ export function AdminConfigPage() {
   useEffect(() => {
     if (!aiSettingsQuery.data) return
 
-    const incoming: AiDraftState = {
-      providers: aiSettingsQuery.data.providers.map(normalizeProvider),
-      activeProviderId: aiSettingsQuery.data.activeProviderId,
+    const incomingGeneration: AiDraftState = {
+      providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
+      activeProviderId: aiSettingsQuery.data.activeGenerationProviderId,
+    }
+    const incomingEmbedding: AiDraftState = {
+      providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
+      activeProviderId: aiSettingsQuery.data.activeEmbeddingProviderId,
     }
 
-    setAiDraft((current) => {
-      if (!current) return incoming
+    setGenerationDraft((current) => {
+      if (!current) return incomingGeneration
 
       const baseline = serializeAiDraft({
-        providers: aiSettingsQuery.data.providers.map(normalizeProvider),
-        activeProviderId: aiSettingsQuery.data.activeProviderId,
+        providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
+        activeProviderId: aiSettingsQuery.data.activeGenerationProviderId,
       })
 
       const currentSerialized = serializeAiDraft(current)
       const isDirty = currentSerialized !== baseline
 
-      return isDirty ? current : incoming
+      return isDirty ? current : incomingGeneration
+    })
+
+    setEmbeddingDraft((current) => {
+      if (!current) return incomingEmbedding
+
+      const baseline = serializeAiDraft({
+        providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
+        activeProviderId: aiSettingsQuery.data.activeEmbeddingProviderId,
+      })
+
+      const currentSerialized = serializeAiDraft(current)
+      const isDirty = currentSerialized !== baseline
+
+      return isDirty ? current : incomingEmbedding
     })
   }, [aiSettingsQuery.data])
 
   // Dirty detection
-  const aiBaseline = useMemo(() => {
+  const generationBaseline = useMemo(() => {
     if (!aiSettingsQuery.data) return null
     return serializeAiDraft({
-      providers: aiSettingsQuery.data.providers.map(normalizeProvider),
-      activeProviderId: aiSettingsQuery.data.activeProviderId,
+      providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
+      activeProviderId: aiSettingsQuery.data.activeGenerationProviderId,
     })
   }, [aiSettingsQuery.data])
 
-  const aiDirty = useMemo(() => {
-    if (!aiDraft || !aiBaseline) return false
-    return serializeAiDraft(aiDraft) !== aiBaseline
-  }, [aiDraft, aiBaseline])
+  const embeddingBaseline = useMemo(() => {
+    if (!aiSettingsQuery.data) return null
+    return serializeAiDraft({
+      providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
+      activeProviderId: aiSettingsQuery.data.activeEmbeddingProviderId,
+    })
+  }, [aiSettingsQuery.data])
+
+  const generationDirty = useMemo(() => {
+    if (!generationDraft || !generationBaseline) return false
+    return serializeAiDraft(generationDraft) !== generationBaseline
+  }, [generationDraft, generationBaseline])
+
+  const embeddingDirty = useMemo(() => {
+    if (!embeddingDraft || !embeddingBaseline) return false
+    return serializeAiDraft(embeddingDraft) !== embeddingBaseline
+  }, [embeddingDraft, embeddingBaseline])
 
   const handleDiscard = () => {
     form.reset(toFormValues(configQuery.data))
@@ -151,20 +186,36 @@ export function AdminConfigPage() {
     })
   })
 
-  const handleDiscardAiDraft = () => {
+  const handleDiscardDraft = (kind: ProviderSectionKind) => {
     if (!aiSettingsQuery.data) return
-    setAiDraft({
-      providers: aiSettingsQuery.data.providers.map(normalizeProvider),
-      activeProviderId: aiSettingsQuery.data.activeProviderId,
-    })
+
+    const nextDraft: AiDraftState =
+      kind === 'embedding'
+        ? {
+            providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
+            activeProviderId: aiSettingsQuery.data.activeEmbeddingProviderId,
+          }
+        : {
+            providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
+            activeProviderId: aiSettingsQuery.data.activeGenerationProviderId,
+          }
+
+    if (kind === 'embedding') {
+      setEmbeddingDraft(nextDraft)
+      return
+    }
+
+    setGenerationDraft(nextDraft)
   }
 
-  const saveAiDraft = () => {
-    if (!aiDraft) return
+  const saveDraft = (kind: ProviderSectionKind) => {
+    const draft = kind === 'embedding' ? embeddingDraft : generationDraft
+    if (!draft) return
 
-    updateAiSettingsMutation.mutate(
+    updateProvidersMutation.mutate(
       {
-        providers: aiDraft.providers.map((provider) => ({
+        usage: kind,
+        providers: draft.providers.map((provider) => ({
           id: provider.id,
           providerId: provider.providerId,
           type: provider.type,
@@ -172,38 +223,51 @@ export function AdminConfigPage() {
           model: provider.model,
           apiKeyId: provider.apiKeyId,
         })),
-        activeProviderId: aiDraft.activeProviderId,
+        activeProviderId: draft.activeProviderId,
       },
       {
         onSuccess: async () => {
           await Promise.all([utils.config.aiSettings.invalidate(), utils.config.get.invalidate()])
-          toast.success('AI providers saved')
+          toast.success(kind === 'embedding' ? 'Embedding providers saved' : 'AI providers saved')
         },
         onError: (error) => {
-          toast.error('Failed to save AI providers', {
-            description: error.message,
-          })
+          toast.error(
+            kind === 'embedding'
+              ? 'Failed to save embedding providers'
+              : 'Failed to save AI providers',
+            {
+              description: error.message,
+            }
+          )
         },
       }
     )
   }
 
-  const updateProvider = useCallback((id: string, patch: Partial<AiProviderDraft>) => {
-    setAiDraft((current) => {
-      if (!current) return current
-      return {
-        ...current,
-        providers: current.providers.map((item) => (item.id === id ? { ...item, ...patch } : item)),
-      }
-    })
+  const updateProvider = useCallback(
+    (kind: ProviderSectionKind, id: string, patch: Partial<AiProviderDraft>) => {
+      const setter = kind === 'embedding' ? setEmbeddingDraft : setGenerationDraft
+      setter((current) => {
+        if (!current) return current
+        return {
+          ...current,
+          providers: current.providers.map((item) =>
+            item.id === id ? { ...item, ...patch } : item
+          ),
+        }
+      })
+    },
+    []
+  )
+
+  const setActiveProvider = useCallback((kind: ProviderSectionKind, id: string) => {
+    const setter = kind === 'embedding' ? setEmbeddingDraft : setGenerationDraft
+    setter((current) => (current ? { ...current, activeProviderId: id } : current))
   }, [])
 
-  const setActiveProvider = useCallback((id: string) => {
-    setAiDraft((current) => (current ? { ...current, activeProviderId: id } : current))
-  }, [])
-
-  const removeProvider = useCallback((id: string) => {
-    setAiDraft((current) => {
+  const removeProvider = useCallback((kind: ProviderSectionKind, id: string) => {
+    const setter = kind === 'embedding' ? setEmbeddingDraft : setGenerationDraft
+    setter((current) => {
       if (!current) return current
 
       const nextProviders = current.providers.filter((item) => item.id !== id)
@@ -217,22 +281,25 @@ export function AdminConfigPage() {
     })
   }, [])
 
-  const addProvider = useCallback((options: ProviderOption[]) => {
-    setAiDraft((current) => {
+  const addProvider = useCallback((kind: ProviderSectionKind, options: ProviderOption[]) => {
+    const setter = kind === 'embedding' ? setEmbeddingDraft : setGenerationDraft
+    setter((current) => {
       if (!current) return current
       return {
         ...current,
-        providers: [...current.providers, createProviderDraft(options[0])],
+        providers: [...current.providers, createProviderDraft(kind, options[0])],
       }
     })
   }, [])
 
   const refreshSourceCatalog = useCallback(
     async (
+      kind: ProviderSectionKind,
       provider: AiProviderDraft,
       options: { forceRefresh?: boolean; notify?: boolean } = {}
     ) => {
       const key = sourceCatalogCacheKey(
+        kind,
         provider.providerId,
         provider.type,
         provider.baseURL,
@@ -242,7 +309,8 @@ export function AdminConfigPage() {
       setLoadingSourceCatalogMap((current) => ({ ...current, [key]: true }))
 
       try {
-        const result = await getTrpcProxyClient().config.sourceModelCatalog.query({
+        const result = await getTrpcProxyClient().config.sourceCatalog.query({
+          usage: kind,
           providerId: provider.providerId,
           type: provider.type,
           baseURL: provider.baseURL,
@@ -259,9 +327,12 @@ export function AdminConfigPage() {
         })
 
         if (options.notify && result.source === 'provider') {
-          toast.success('Provider model list updated', {
-            description: `${result.provider.models.length} models fetched from provider endpoint.`,
-          })
+          toast.success(
+            kind === 'embedding' ? 'Embedding model list updated' : 'Provider model list updated',
+            {
+              description: `${result.provider.models.length} model${result.provider.models.length === 1 ? '' : 's'} fetched from provider endpoint.`,
+            }
+          )
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -278,28 +349,37 @@ export function AdminConfigPage() {
   )
 
   useEffect(() => {
-    if (!aiDraft) return
-
     const timer = setTimeout(() => {
-      for (const provider of aiDraft.providers) {
-        if (provider.baseURL.trim() && !isValidHttpBaseURL(provider.baseURL)) continue
+      const sections: Array<[ProviderSectionKind, AiDraftState | null]> = [
+        ['generation', generationDraft],
+        ['embedding', embeddingDraft],
+      ]
 
-        const key = sourceCatalogCacheKey(
-          provider.providerId,
-          provider.type,
-          provider.baseURL,
-          provider.apiKeyId
-        )
-        if (sourceCatalogMap[key] || loadingSourceCatalogMap[key] || sourceCatalogErrorMap[key]) {
-          continue
+      for (const [kind, draft] of sections) {
+        if (!draft) continue
+
+        for (const provider of draft.providers) {
+          if (provider.baseURL.trim() && !isValidHttpBaseURL(provider.baseURL)) continue
+
+          const key = sourceCatalogCacheKey(
+            kind,
+            provider.providerId,
+            provider.type,
+            provider.baseURL,
+            provider.apiKeyId
+          )
+          if (sourceCatalogMap[key] || loadingSourceCatalogMap[key] || sourceCatalogErrorMap[key]) {
+            continue
+          }
+          void refreshSourceCatalog(kind, provider)
         }
-        void refreshSourceCatalog(provider)
       }
     }, 350)
 
     return () => clearTimeout(timer)
   }, [
-    aiDraft,
+    embeddingDraft,
+    generationDraft,
     loadingSourceCatalogMap,
     refreshSourceCatalog,
     sourceCatalogErrorMap,
@@ -352,15 +432,17 @@ export function AdminConfigPage() {
             await utils.config.aiSettings.refetch()
             // Nullify stale apiKeyId references in the draft so no provider
             // silently points to a key that no longer exists.
-            setAiDraft((current) => {
-              if (!current) return current
-              if (!current.providers.some((p) => p.apiKeyId === id)) return current
-              return {
-                ...current,
-                providers: current.providers.map((p) =>
-                  p.apiKeyId === id ? { ...p, apiKeyId: null } : p
-                ),
-              }
+            ;[setGenerationDraft, setEmbeddingDraft].forEach((setter) => {
+              setter((current) => {
+                if (!current) return current
+                if (!current.providers.some((p) => p.apiKeyId === id)) return current
+                return {
+                  ...current,
+                  providers: current.providers.map((p) =>
+                    p.apiKeyId === id ? { ...p, apiKeyId: null } : p
+                  ),
+                }
+              })
             })
             toast.success('API key removed')
           },
@@ -403,39 +485,82 @@ export function AdminConfigPage() {
     return map
   }, [modelCatalogQuery.data?.providers])
 
-  const providersWithCatalog: ProviderWithCatalog[] = useMemo(() => {
-    if (!aiDraft) return []
+  const embeddingProviderOptions = useMemo<ProviderOption[]>(
+    () => DEFAULT_EMBEDDING_PROVIDER_OPTIONS,
+    []
+  )
 
-    return aiDraft.providers.map((provider) => {
-      const key = sourceCatalogCacheKey(
-        provider.providerId,
-        provider.type,
-        provider.baseURL,
-        provider.apiKeyId
-      )
-      const dynamicCatalog = sourceCatalogMap[key]
-      const fallbackCatalog = providerCatalogById.get(provider.providerId) ?? null
-      const catalog = dynamicCatalog?.provider ?? fallbackCatalog
+  const embeddingProviderOptionByValue = useMemo(
+    () => new Map(embeddingProviderOptions.map((option) => [option.value, option])),
+    [embeddingProviderOptions]
+  )
 
-      return {
-        provider,
-        catalog,
-        catalogSource: dynamicCatalog?.source ?? 'models.dev',
-        warning: dynamicCatalog?.warning ?? sourceCatalogErrorMap[key] ?? null,
-        isCatalogLoading: loadingSourceCatalogMap[key] === true,
-      }
-    })
-  }, [
-    aiDraft,
-    loadingSourceCatalogMap,
-    providerCatalogById,
-    sourceCatalogErrorMap,
-    sourceCatalogMap,
-  ])
+  const mapProvidersWithCatalog = useCallback(
+    (kind: ProviderSectionKind, draft: AiDraftState | null): ProviderWithCatalog[] => {
+      if (!draft) return []
+
+      return draft.providers.map((provider) => {
+        const key = sourceCatalogCacheKey(
+          kind,
+          provider.providerId,
+          provider.type,
+          provider.baseURL,
+          provider.apiKeyId
+        )
+        const dynamicCatalog = sourceCatalogMap[key]
+        const embeddingOption = embeddingProviderOptionByValue.get(provider.providerId)
+        const fallbackCatalog =
+          kind === 'generation'
+            ? (providerCatalogById.get(provider.providerId) ?? null)
+            : embeddingOption
+              ? {
+                  id: provider.providerId,
+                  name: embeddingOption.label,
+                  type: provider.type,
+                  iconURL:
+                    embeddingOption.iconURL ??
+                    `https://models.dev/logos/${provider.providerId}.svg`,
+                  docURL: embeddingOption.docURL ?? null,
+                  apiBaseURL: embeddingOption.apiBaseURL || provider.baseURL,
+                }
+              : null
+        const catalog = dynamicCatalog?.provider ?? fallbackCatalog
+
+        return {
+          provider,
+          catalog,
+          catalogSource:
+            dynamicCatalog?.source ?? (kind === 'generation' ? 'models.dev' : 'provider'),
+          warning: dynamicCatalog?.warning ?? sourceCatalogErrorMap[key] ?? null,
+          isCatalogLoading: loadingSourceCatalogMap[key] === true,
+        }
+      })
+    },
+    [
+      embeddingProviderOptionByValue,
+      loadingSourceCatalogMap,
+      providerCatalogById,
+      sourceCatalogErrorMap,
+      sourceCatalogMap,
+    ]
+  )
+
+  const generationProvidersWithCatalog = useMemo(
+    () => mapProvidersWithCatalog('generation', generationDraft),
+    [generationDraft, mapProvidersWithCatalog]
+  )
+
+  const embeddingProvidersWithCatalog = useMemo(
+    () => mapProvidersWithCatalog('embedding', embeddingDraft),
+    [embeddingDraft, mapProvidersWithCatalog]
+  )
 
   const uniqueProviderBaseURLs = useMemo(() => {
-    return aiDraft ? getUniqueProviderBaseURLs(aiDraft.providers) : []
-  }, [aiDraft])
+    return getUniqueProviderBaseURLs([
+      ...(generationDraft?.providers ?? []),
+      ...(embeddingDraft?.providers ?? []),
+    ])
+  }, [embeddingDraft, generationDraft])
 
   if (configQuery.isLoading || aiSettingsQuery.isLoading) {
     return (
@@ -450,7 +575,8 @@ export function AdminConfigPage() {
     !configQuery.data ||
     aiSettingsQuery.error ||
     !aiSettingsQuery.data ||
-    !aiDraft
+    !generationDraft ||
+    !embeddingDraft
   ) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
@@ -502,6 +628,100 @@ export function AdminConfigPage() {
     )
   }
 
+  const renderProviderSection = (options: {
+    kind: ProviderSectionKind
+    title: string
+    description: string
+    draft: AiDraftState
+    entries: ProviderWithCatalog[]
+    providerOptions: ProviderOption[]
+    isDirty: boolean
+    isSaving: boolean
+  }) => (
+    <Card>
+      <CardHeader>
+        <CardTitle>{options.title}</CardTitle>
+        <CardDescription>{options.description}</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm text-muted-foreground">
+            {options.draft.providers.length === 0
+              ? 'No providers configured.'
+              : `${options.draft.providers.length} provider${options.draft.providers.length === 1 ? '' : 's'} configured`}
+          </div>
+          <div className="flex items-center gap-2">
+            {options.isDirty && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={options.isSaving}
+                onClick={() => handleDiscardDraft(options.kind)}
+              >
+                <RotateCcw data-icon="inline-start" />
+                Discard
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => addProvider(options.kind, options.providerOptions)}
+            >
+              <Plus data-icon="inline-start" />
+              Add provider
+            </Button>
+            {options.isDirty && (
+              <Button
+                type="button"
+                size="sm"
+                disabled={options.isSaving}
+                onClick={() => saveDraft(options.kind)}
+              >
+                <Save data-icon="inline-start" />
+                {options.isSaving ? 'Saving…' : 'Save providers'}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {options.draft.providers.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-12 text-center">
+            <p className="text-muted-foreground text-sm">No providers configured yet.</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => addProvider(options.kind, options.providerOptions)}
+            >
+              <Plus data-icon="inline-start" />
+              Add your first provider
+            </Button>
+          </div>
+        )}
+
+        {options.entries.map((entry, index) => (
+          <ProviderCard
+            key={entry.provider.id}
+            kind={options.kind}
+            entry={entry}
+            index={index}
+            providerOptions={options.providerOptions}
+            apiKeys={aiSettingsQuery.data.apiKeys}
+            isActive={options.draft.activeProviderId === entry.provider.id}
+            canRemove={options.draft.providers.length > 1}
+            onUpdate={(id, patch) => updateProvider(options.kind, id, patch)}
+            onSetActive={(id) => setActiveProvider(options.kind, id)}
+            onRemove={(id) => removeProvider(options.kind, id)}
+            onRefreshCatalog={(provider, refreshOptions) =>
+              void refreshSourceCatalog(options.kind, provider, refreshOptions)
+            }
+          />
+        ))}
+      </CardContent>
+    </Card>
+  )
+
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-5xl px-4 sm:px-6 py-6 sm:py-12">
@@ -536,89 +756,42 @@ export function AdminConfigPage() {
         )}
 
         <div className="grid gap-6">
+          {renderProviderSection({
+            kind: 'generation',
+            title: 'AI Providers',
+            description:
+              'Configure text generation providers and their models. Provider settings are stored in the database and take effect immediately.',
+            draft: generationDraft,
+            entries: generationProvidersWithCatalog,
+            providerOptions,
+            isDirty: generationDirty,
+            isSaving:
+              updateProvidersMutation.isPending &&
+              updateProvidersMutation.variables?.usage === 'generation',
+          })}
+
+          {renderProviderSection({
+            kind: 'embedding',
+            title: 'Embedding Providers',
+            description:
+              'Configure embedding providers and their models. OpenRouter embedding catalogs are fetched live from the provider endpoint.',
+            draft: embeddingDraft,
+            entries: embeddingProvidersWithCatalog,
+            providerOptions: embeddingProviderOptions,
+            isDirty: embeddingDirty,
+            isSaving:
+              updateProvidersMutation.isPending &&
+              updateProvidersMutation.variables?.usage === 'embedding',
+          })}
+
           <Card>
             <CardHeader>
-              <CardTitle>AI Providers</CardTitle>
+              <CardTitle>API Keys</CardTitle>
               <CardDescription>
-                Configure AI providers and their models. Provider settings are stored in the
-                database and take effect immediately.
+                API keys are shared by generation and embedding providers using the same base URL.
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-6">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm text-muted-foreground">
-                  {aiDraft.providers.length === 0
-                    ? 'No providers configured.'
-                    : `${aiDraft.providers.length} provider${aiDraft.providers.length === 1 ? '' : 's'} configured`}
-                </div>
-                <div className="flex items-center gap-2">
-                  {aiDirty && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={updateAiSettingsMutation.isPending}
-                      onClick={handleDiscardAiDraft}
-                    >
-                      <RotateCcw data-icon="inline-start" />
-                      Discard
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => addProvider(providerOptions)}
-                  >
-                    <Plus data-icon="inline-start" />
-                    Add provider
-                  </Button>
-                  {aiDirty && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={updateAiSettingsMutation.isPending}
-                      onClick={saveAiDraft}
-                    >
-                      <Save data-icon="inline-start" />
-                      {updateAiSettingsMutation.isPending ? 'Saving…' : 'Save providers'}
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {aiDraft.providers.length === 0 && (
-                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-12 text-center">
-                  <p className="text-muted-foreground text-sm">No AI providers configured yet.</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => addProvider(providerOptions)}
-                  >
-                    <Plus data-icon="inline-start" />
-                    Add your first provider
-                  </Button>
-                </div>
-              )}
-
-              {providersWithCatalog.map((entry, index) => (
-                <ProviderCard
-                  key={entry.provider.id}
-                  entry={entry}
-                  index={index}
-                  providerOptions={providerOptions}
-                  apiKeys={aiSettingsQuery.data.apiKeys}
-                  isActive={aiDraft.activeProviderId === entry.provider.id}
-                  canRemove={aiDraft.providers.length > 1}
-                  onUpdate={updateProvider}
-                  onSetActive={setActiveProvider}
-                  onRemove={removeProvider}
-                  onRefreshCatalog={(provider, options) =>
-                    void refreshSourceCatalog(provider, options)
-                  }
-                />
-              ))}
-
+            <CardContent>
               <ApiKeyManager
                 apiKeys={aiSettingsQuery.data.apiKeys}
                 suggestedBaseURLs={uniqueProviderBaseURLs}
@@ -666,6 +839,19 @@ export function AdminConfigPage() {
               </CardHeader>
               <CardContent className="grid gap-6 sm:grid-cols-3">
                 {AI_TUNING_FIELD_KEYS.map(renderNumberField)}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Embeddings Runtime</CardTitle>
+                <CardDescription>
+                  Controls how document changes are debounced and batched before embeddings are
+                  regenerated.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-6 sm:grid-cols-2">
+                {EMBEDDING_RUNTIME_FIELD_KEYS.map(renderNumberField)}
               </CardContent>
             </Card>
 

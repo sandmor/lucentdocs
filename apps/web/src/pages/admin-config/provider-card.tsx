@@ -32,12 +32,14 @@ import type {
   AiApiKeySummary,
   AiProviderDraft,
   OptionItem,
+  ProviderSectionKind,
   ProviderOption,
   ProviderWithCatalog,
 } from './types'
-import { hasCatalogModels } from './constants'
+import { defaultModelForProvider, hasCatalogModels } from './constants'
 
 interface ProviderCardProps {
+  kind: ProviderSectionKind
   entry: ProviderWithCatalog
   index: number
   providerOptions: ProviderOption[]
@@ -54,6 +56,7 @@ interface ProviderCardProps {
 }
 
 export function ProviderCard({
+  kind,
   entry,
   index,
   providerOptions,
@@ -112,6 +115,12 @@ export function ProviderCard({
         label: provider.model,
       })
     : null
+
+  const selectedModelMetadata = hasCatalogModels(entry.catalog)
+    ? (entry.catalog.models.find((model) => model.id === provider.model) ?? null)
+    : null
+
+  const isEmbedding = kind === 'embedding'
 
   const keyOptions: OptionItem[] = [
     { value: '__none__', label: 'Auto (default key for URL)' },
@@ -173,7 +182,9 @@ export function ProviderCard({
             >
               <RefreshCcw className={entry.isCatalogLoading ? 'animate-spin' : ''} />
             </TooltipTrigger>
-            <TooltipContent>Refresh models</TooltipContent>
+            <TooltipContent>
+              {isEmbedding ? 'Refresh embedding models' : 'Refresh models'}
+            </TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
@@ -236,6 +247,7 @@ export function ProviderCard({
                 providerId: value.value,
                 type: value.type,
                 baseURL: value.apiBaseURL || AI_PROVIDER_DEFAULT_BASE_URLS[value.type],
+                model: defaultModelForProvider(kind, value.type),
                 apiKeyId: null,
               }
               onUpdate(provider.id, patch)
@@ -302,7 +314,7 @@ export function ProviderCard({
         </Field>
 
         <Field>
-          <FieldLabel>Model</FieldLabel>
+          <FieldLabel>{isEmbedding ? 'Embedding model' : 'Model'}</FieldLabel>
           {providerModels.length > 0 ? (
             <Combobox
               items={providerModels}
@@ -355,6 +367,16 @@ export function ProviderCard({
               placeholder="Or type a custom model ID"
             />
           )}
+          {selectedModelMetadata?.contextLength ? (
+            <FieldDescription>
+              Context length: {selectedModelMetadata.contextLength.toLocaleString()} tokens
+            </FieldDescription>
+          ) : null}
+          {isEmbedding && selectedModelMetadata?.description ? (
+            <FieldDescription className="line-clamp-3">
+              {selectedModelMetadata.description}
+            </FieldDescription>
+          ) : null}
           {entry.isCatalogLoading && (
             <FieldDescription className="text-muted-foreground">Loading models…</FieldDescription>
           )}

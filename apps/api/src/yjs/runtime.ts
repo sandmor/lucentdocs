@@ -24,6 +24,10 @@ export interface YjsRuntimeConfig {
   versionSnapshotIntervalMs: number
 }
 
+export interface YjsContentObserver {
+  onDocumentPersisted?(documentName: string): Promise<void> | void
+}
+
 interface ProsemirrorTransformResult<T> {
   changed: boolean
   nextDoc: ProseMirrorNode
@@ -39,15 +43,21 @@ export class YjsRuntime {
   #persistenceFlushTimer: ReturnType<typeof setInterval> | null = null
   #config: YjsRuntimeConfig
   #repos: YjsRepositorySet
+  #observer: YjsContentObserver
   #initializedDocs = new Set<string>()
   #initializingDocs = new Map<string, Promise<void>>()
   #dirtyDocs = new Set<string>()
   #documentEpochs = new Map<string, number>()
   #docEpochs = new WeakMap<Y.Doc, number>()
 
-  constructor(repos: YjsRepositorySet, config: YjsRuntimeConfig) {
+  constructor(
+    repos: YjsRepositorySet,
+    config: YjsRuntimeConfig,
+    observer: YjsContentObserver = {}
+  ) {
     this.#repos = repos
     this.#config = config
+    this.#observer = observer
   }
 
   initialize(): void {
@@ -342,6 +352,7 @@ export class YjsRuntime {
     const buffer = Buffer.from(state)
 
     await this.#repos.yjsDocuments.set(documentName, buffer)
+    await this.#observer.onDocumentPersisted?.(documentName)
   }
 
   async #insertSnapshot(documentName: string, doc: Y.Doc): Promise<void> {
@@ -439,6 +450,10 @@ export class YjsRuntime {
   }
 }
 
-export function createYjsRuntime(repos: YjsRepositorySet, config: YjsRuntimeConfig): YjsRuntime {
-  return new YjsRuntime(repos, config)
+export function createYjsRuntime(
+  repos: YjsRepositorySet,
+  config: YjsRuntimeConfig,
+  observer: YjsContentObserver = {}
+): YjsRuntime {
+  return new YjsRuntime(repos, config, observer)
 }

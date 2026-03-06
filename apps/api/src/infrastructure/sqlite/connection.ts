@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite'
+import * as sqliteVec from 'sqlite-vec'
 import { mkdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -65,6 +66,7 @@ const SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS ai_provider_configs (
     id TEXT PRIMARY KEY,
+    usage TEXT NOT NULL CHECK (usage IN ('generation', 'embedding')),
     providerId TEXT NOT NULL,
     type TEXT NOT NULL,
     baseUrl TEXT NOT NULL,
@@ -77,7 +79,7 @@ const SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_ai_provider_configs_order
-    ON ai_provider_configs(sortOrder ASC, createdAt ASC);
+    ON ai_provider_configs(usage ASC, sortOrder ASC, createdAt ASC);
 
   CREATE TABLE IF NOT EXISTS ai_api_keys (
     id TEXT PRIMARY KEY,
@@ -112,10 +114,41 @@ const SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS ai_runtime_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    activeProviderId TEXT,
+    activeGenerationProviderId TEXT,
+    activeEmbeddingProviderId TEXT,
     updatedAt INTEGER NOT NULL,
-    FOREIGN KEY (activeProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL
+    FOREIGN KEY (activeGenerationProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL,
+    FOREIGN KEY (activeEmbeddingProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL
   );
+
+  CREATE TABLE IF NOT EXISTS document_embedding_jobs (
+    documentId TEXT PRIMARY KEY,
+    firstQueuedAt INTEGER NOT NULL,
+    lastQueuedAt INTEGER NOT NULL,
+    debounceUntil INTEGER NOT NULL,
+    FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_document_embedding_jobs_schedule
+    ON document_embedding_jobs(debounceUntil ASC, firstQueuedAt ASC);
+
+  CREATE TABLE IF NOT EXISTS document_embeddings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    documentId TEXT NOT NULL,
+    providerConfigId TEXT,
+    providerId TEXT NOT NULL,
+    type TEXT NOT NULL,
+    baseUrl TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL CHECK (dimensions > 0),
+    contentHash TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    UNIQUE(documentId, baseUrl, model)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_document_embeddings_model
+    ON document_embeddings(baseUrl ASC, model ASC, documentId ASC);
 
   CREATE TABLE IF NOT EXISTS app_config_values (
     key TEXT PRIMARY KEY CHECK (
@@ -127,6 +160,8 @@ const SCHEMA = `
         'aiDefaultTemperature',
         'aiSelectionEditTemperature',
         'aiDefaultMaxOutputTokens',
+        'embeddingDebounceMs',
+        'embeddingBatchMaxWaitMs',
         'yjsPersistenceFlushMs',
         'yjsVersionIntervalMs',
         'maxContextChars',
@@ -273,6 +308,7 @@ export class SqliteConnection implements ConnectionPort {
     }
     db.run('PRAGMA foreign_keys = ON')
     db.run('PRAGMA busy_timeout = 5000')
+    sqliteVec.load(db)
   }
 }
 

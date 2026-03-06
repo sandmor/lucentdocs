@@ -13,15 +13,19 @@ import { configManager } from '../../config/runtime.js'
 import { getModelsDevCatalog, getSourceModelCatalog } from '../../ai/model-catalog.js'
 import { AI_PROVIDER_DEFAULT_BASE_URLS } from '../../core/ai/provider-types.js'
 import { resetClient } from '../../ai/provider.js'
+import { resetEmbeddingClient } from '../../embeddings/provider.js'
 import { adminProcedure, publicProcedure, router } from '../index.js'
 
 type EditableConfigKey = (typeof EDITABLE_CONFIG_KEYS)[number]
+
+const PROVIDER_USAGE_SCHEMA = z.enum(['generation', 'embedding'])
 
 const AI_RUNTIME_KEYS = [
   'aiDefaultTemperature',
   'aiSelectionEditTemperature',
   'aiDefaultMaxOutputTokens',
 ] as const
+const EMBEDDING_RUNTIME_KEYS = ['embeddingDebounceMs', 'embeddingBatchMaxWaitMs'] as const
 const YJS_RUNTIME_KEYS = ['yjsPersistenceFlushMs', 'yjsVersionIntervalMs'] as const
 
 interface ConfigFieldPayload {
@@ -72,6 +76,7 @@ function buildConfigPayload(state: ConfigStateSnapshot) {
 }
 
 const sourceCatalogInputSchema = z.object({
+  usage: PROVIDER_USAGE_SCHEMA,
   providerId: z.string().min(1),
   type: z.enum(AI_MODEL_SOURCE_TYPES),
   baseURL: z
@@ -92,7 +97,8 @@ const aiProviderInputSchema = z.object({
   apiKeyId: z.string().nullable(),
 })
 
-const updateAiSettingsInputSchema = z.object({
+const updateProvidersInputSchema = z.object({
+  usage: PROVIDER_USAGE_SCHEMA,
   providers: z.array(aiProviderInputSchema).min(1),
   activeProviderId: z.string().nullable(),
 })
@@ -137,10 +143,11 @@ export const configRouter = router({
     return ctx.services.aiSettings.getSnapshot()
   }),
 
-  updateAiSettings: adminProcedure
-    .input(updateAiSettingsInputSchema)
+  updateProviders: adminProcedure
+    .input(updateProvidersInputSchema)
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.services.aiSettings.updateSettings({
+        usage: input.usage,
         providers: input.providers.map((provider) => ({
           id: provider.id,
           providerId: provider.providerId.trim(),
@@ -152,7 +159,12 @@ export const configRouter = router({
         activeProviderId: input.activeProviderId,
       })
 
-      resetClient()
+      if (input.usage === 'generation') {
+        resetClient()
+      } else {
+        resetEmbeddingClient()
+      }
+
       return result
     }),
 
@@ -165,6 +177,7 @@ export const configRouter = router({
     })
 
     resetClient()
+    resetEmbeddingClient()
     return result
   }),
 
@@ -177,55 +190,58 @@ export const configRouter = router({
     })
 
     resetClient()
+    resetEmbeddingClient()
     return result
   }),
 
   deleteAiApiKey: adminProcedure.input(deleteApiKeyInputSchema).mutation(async ({ ctx, input }) => {
     const result = await ctx.services.aiSettings.deleteApiKey(input.id)
     resetClient()
+    resetEmbeddingClient()
     return result
   }),
 
-  sourceModelCatalog: adminProcedure
-    .input(sourceCatalogInputSchema)
-    .query(async ({ ctx, input }) => {
-      const baseURL = normalizeBaseURL(input.baseURL) || AI_PROVIDER_DEFAULT_BASE_URLS[input.type]
-      let apiKey = ''
+  sourceCatalog: adminProcedure.input(sourceCatalogInputSchema).query(async ({ ctx, input }) => {
+    const baseURL = normalizeBaseURL(input.baseURL) || AI_PROVIDER_DEFAULT_BASE_URLS[input.type]
+    let apiKey = ''
 
-      if (input.apiKeyId) {
-        const snapshot = await ctx.services.aiSettings.getSnapshot()
-        const selected = snapshot.apiKeys.find((entry) => entry.id === input.apiKeyId)
-        if (!selected) {
-          throw new Error(`API key ${input.apiKeyId} was not found.`)
-        }
-        if (normalizeBaseURL(selected.baseURL) !== baseURL) {
-          throw new Error(
-            `API key ${input.apiKeyId} does not belong to provider base URL ${baseURL}.`
-          )
-        }
-        apiKey = (await ctx.services.aiSettings.resolveApiKeyById(input.apiKeyId)) ?? ''
-      } else {
-        apiKey = (await ctx.services.aiSettings.resolveApiKeyForBaseURL(baseURL)) ?? ''
+    if (input.apiKeyId) {
+      const snapshot = await ctx.services.aiSettings.getSnapshot()
+      const selected = snapshot.apiKeys.find((entry) => entry.id === input.apiKeyId)
+      if (!selected) {
+        throw new Error('Selected API key was not found.')
       }
 
-      return getSourceModelCatalog(
-        {
-          providerId: input.providerId,
-          type: input.type,
-          baseURL,
-        },
-        apiKey,
-        {
-          forceRefresh: input.forceRefresh === true,
-        }
-      )
-    }),
+      if (normalizeBaseURL(selected.baseURL) !== baseURL) {
+        throw new Error('Selected API key does not match the provider base URL.')
+      }
+
+      apiKey = (await ctx.services.aiSettings.resolveApiKeyById(input.apiKeyId)) ?? ''
+    } else {
+      apiKey = (await ctx.services.aiSettings.resolveApiKeyForBaseURL(baseURL)) ?? ''
+    }
+
+    return getSourceModelCatalog(
+      {
+        providerId: input.providerId,
+        type: input.type,
+        baseURL,
+      },
+      apiKey,
+      input.usage,
+      {
+        forceRefresh: input.forceRefresh === true,
+      }
+    )
+  }),
 
   update: adminProcedure.input(editableConfigSchema).mutation(({ ctx, input }) => {
     const sanitizedInput: Pick<PersistedAppConfig, EditableConfigKey> = {
       aiDefaultTemperature: input.aiDefaultTemperature,
       aiSelectionEditTemperature: input.aiSelectionEditTemperature,
       aiDefaultMaxOutputTokens: input.aiDefaultMaxOutputTokens,
+      embeddingDebounceMs: input.embeddingDebounceMs,
+      embeddingBatchMaxWaitMs: input.embeddingBatchMaxWaitMs,
       yjsPersistenceFlushMs: input.yjsPersistenceFlushMs,
       yjsVersionIntervalMs: input.yjsVersionIntervalMs,
       maxContextChars: input.maxContextChars,
@@ -247,6 +263,15 @@ export const configRouter = router({
 
     if (AI_RUNTIME_KEYS.some((key) => changedEffectiveSet.has(key))) {
       resetClient()
+    }
+
+    if (EMBEDDING_RUNTIME_KEYS.some((key) => changedEffectiveSet.has(key))) {
+      resetEmbeddingClient()
+      const config = configManager.getConfig()
+      ctx.embeddingRuntime.reloadConfig({
+        debounceMs: config.embeddings.debounceMs,
+        batchMaxWaitMs: config.embeddings.batchMaxWaitMs,
+      })
     }
 
     if (YJS_RUNTIME_KEYS.some((key) => changedEffectiveSet.has(key))) {

@@ -48,7 +48,9 @@ export type AiApiKeySummary = {
 export type ModelCatalogModel = {
   id: string
   name: string | null
-  releaseDate: string | null
+  releaseDate?: string | null
+  contextLength?: number | null
+  description?: string | null
 }
 
 export type ModelCatalogProviderSummary = {
@@ -94,3 +96,5 @@ export type AiDraftState = {
   providers: AiProviderDraft[]
   activeProviderId: string | null
 }
+
+export type ProviderSectionKind = 'generation' | 'embedding'

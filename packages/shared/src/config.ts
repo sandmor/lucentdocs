@@ -13,6 +13,8 @@ export interface PersistedAppConfig {
   aiDefaultTemperature: number
   aiSelectionEditTemperature: number
   aiDefaultMaxOutputTokens: number
+  embeddingDebounceMs: number
+  embeddingBatchMaxWaitMs: number
   yjsPersistenceFlushMs: number
   yjsVersionIntervalMs: number
   maxContextChars: number
@@ -96,6 +98,22 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     envVar: 'AI_DEFAULT_MAX_OUTPUT_TOKENS',
     kind: 'int',
     defaultValue: 4096,
+    allowEmptyString: false,
+    min: 1,
+  },
+  {
+    key: 'embeddingDebounceMs',
+    envVar: 'EMBEDDING_DEBOUNCE_MS',
+    kind: 'int',
+    defaultValue: 30_000,
+    allowEmptyString: false,
+    min: 0,
+  },
+  {
+    key: 'embeddingBatchMaxWaitMs',
+    envVar: 'EMBEDDING_BATCH_MAX_WAIT_MS',
+    kind: 'int',
+    defaultValue: 300_000,
     allowEmptyString: false,
     min: 1,
   },
@@ -235,6 +253,8 @@ export const EDITABLE_CONFIG_KEYS = [
   'aiDefaultTemperature',
   'aiSelectionEditTemperature',
   'aiDefaultMaxOutputTokens',
+  'embeddingDebounceMs',
+  'embeddingBatchMaxWaitMs',
   'yjsPersistenceFlushMs',
   'yjsVersionIntervalMs',
   'maxContextChars',
@@ -299,6 +319,8 @@ const limitsDocExportCharsField = CONFIG_FIELD_BY_KEY.maxDocExportChars
 const aiDefaultTempField = CONFIG_FIELD_BY_KEY.aiDefaultTemperature
 const aiSelEditTempField = CONFIG_FIELD_BY_KEY.aiSelectionEditTemperature
 const aiDefaultMaxTokensField = CONFIG_FIELD_BY_KEY.aiDefaultMaxOutputTokens
+const embeddingDebounceField = CONFIG_FIELD_BY_KEY.embeddingDebounceMs
+const embeddingBatchMaxWaitField = CONFIG_FIELD_BY_KEY.embeddingBatchMaxWaitMs
 
 export const editableConfigSchema = z.object({
   aiDefaultTemperature: z
@@ -313,6 +335,14 @@ export const editableConfigSchema = z.object({
     .number()
     .int()
     .min(aiDefaultMaxTokensField.min ?? 1),
+  embeddingDebounceMs: z
+    .number()
+    .int()
+    .min(embeddingDebounceField.min ?? 0),
+  embeddingBatchMaxWaitMs: z
+    .number()
+    .int()
+    .min(embeddingBatchMaxWaitField.min ?? 1),
   yjsPersistenceFlushMs: z
     .number()
     .int()

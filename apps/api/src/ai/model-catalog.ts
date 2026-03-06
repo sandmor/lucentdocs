@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto'
 import type { AiModelSourceType } from '@lucentdocs/shared'
 import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
 
 const MODELS_DEV_API_URL = 'https://models.dev/api.json'
 const MODELS_DEV_LOGO_BASE_URL = 'https://models.dev/logos'
 const MODELS_DEV_CACHE_TTL_MS = 10 * 60 * 1000
+const PROVIDER_CACHE_TTL_MS = 10 * 60 * 1000
 const PROVIDER_REQUEST_TIMEOUT_MS = 8_000
 const OPENROUTER_MODELS_PATHS = ['/api/v1/models', '/api/frontend/models'] as const
 
@@ -11,6 +13,8 @@ export interface ModelCatalogModel {
   id: string
   name: string | null
   releaseDate: string | null
+  contextLength?: number | null
+  description?: string | null
 }
 
 export interface ModelCatalogProviderSummary {
@@ -32,6 +36,8 @@ export interface SourceModelCatalogResult {
   warning: string | null
 }
 
+export type ModelCatalogUsage = 'generation' | 'embedding'
+
 type ModelsDevCatalogById = Record<string, ModelCatalogProvider>
 
 interface CachedModelsDevCatalog {
@@ -42,6 +48,13 @@ interface CachedModelsDevCatalog {
 
 let modelsDevCache: CachedModelsDevCatalog | null = null
 let modelsDevInFlight: Promise<CachedModelsDevCatalog> | null = null
+
+interface CachedProviderCatalog {
+  expiresAt: number
+  provider: ModelCatalogProvider
+}
+
+const providerCache = new Map<string, CachedProviderCatalog>()
 
 class ProviderModelListUnavailableError extends Error {
   constructor(message: string) {
@@ -102,17 +115,9 @@ function modelSupportsTextInputAndOutput(model: Record<string, unknown>): boolea
   return input.includes('text') && output.includes('text')
 }
 
-function shouldExcludeModel(modelId: string, model: Record<string, unknown>): boolean {
-  const name = typeof model.name === 'string' ? model.name : ''
-  const family = typeof model.family === 'string' ? model.family : ''
-  const haystack = `${modelId} ${name} ${family}`.toLowerCase()
-
-  return (
-    haystack.includes('embedding') ||
-    haystack.includes('embed') ||
-    haystack.includes('image') ||
-    haystack.includes('dall')
-  )
+function isLikelyEmbeddingModelId(modelId: string): boolean {
+  const haystack = modelId.trim().toLowerCase()
+  return haystack.includes('embedding') || haystack.includes('embed')
 }
 
 function normalizeModelEntries(models: Record<string, unknown>): ModelCatalogModel[] {
@@ -120,16 +125,23 @@ function normalizeModelEntries(models: Record<string, unknown>): ModelCatalogMod
 
   for (const [id, modelValue] of Object.entries(models)) {
     const model = isRecord(modelValue) ? modelValue : {}
-    if (!modelSupportsTextInputAndOutput(model)) continue
-    if (shouldExcludeModel(id, model)) continue
+    const isEmbeddingModel = isLikelyEmbeddingModelId(id)
+    if (!isEmbeddingModel && !modelSupportsTextInputAndOutput(model)) continue
 
     const name = typeof model.name === 'string' ? model.name : null
     const releaseDate = typeof model.release_date === 'string' ? model.release_date : null
+    const contextLength =
+      typeof model.context_length === 'number' && Number.isFinite(model.context_length)
+        ? model.context_length
+        : null
+    const description = typeof model.description === 'string' ? model.description : null
 
     entries.push({
       id,
       name,
       releaseDate,
+      contextLength,
+      description,
     })
   }
 
@@ -280,11 +292,25 @@ function parseProviderModelArray(payload: unknown): ModelCatalogModel[] {
         : isRecord(entry)
           ? normalizeReleaseDate(entry.created)
           : null
+    const contextLength =
+      isRecord(entry) &&
+      typeof entry.context_length === 'number' &&
+      Number.isFinite(entry.context_length)
+        ? entry.context_length
+        : isRecord(entry) &&
+            typeof entry.context_window === 'number' &&
+            Number.isFinite(entry.context_window)
+          ? entry.context_window
+          : null
+    const description =
+      isRecord(entry) && typeof entry.description === 'string' ? entry.description : null
 
     deduped.set(id, {
       id,
       name: displayName,
       releaseDate,
+      contextLength,
+      description,
     })
   }
 
@@ -322,6 +348,16 @@ function isOpenRouterHost(baseURL: string): boolean {
   } catch {
     return false
   }
+}
+
+function fingerprintApiKey(apiKey: string): string {
+  if (!apiKey) return 'anonymous'
+  return createHash('sha256').update(apiKey).digest('hex').slice(0, 16)
+}
+
+function buildEmbeddingsModelsEndpoint(baseURL: string): string {
+  const normalized = baseURL.endsWith('/') ? baseURL : `${baseURL}/`
+  return new URL('embeddings/models', normalized).toString()
 }
 
 function buildOpenRouterModelsEndpoints(baseURL: string): string[] {
@@ -388,15 +424,69 @@ function parseOpenRouterModelArray(payload: unknown): ModelCatalogModel[] {
         : isRecord(entry)
           ? normalizeReleaseDate(entry.created)
           : null
+    const contextLength =
+      isRecord(entry) &&
+      typeof entry.context_length === 'number' &&
+      Number.isFinite(entry.context_length)
+        ? entry.context_length
+        : isRecord(entry) &&
+            typeof entry.context_window === 'number' &&
+            Number.isFinite(entry.context_window)
+          ? entry.context_window
+          : null
+    const description =
+      isRecord(entry) && typeof entry.description === 'string' ? entry.description : null
 
     deduped.set(id, {
       id,
       name,
       releaseDate,
+      contextLength,
+      description,
     })
   }
 
   return [...deduped.values()].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function filterModelsForUsage(
+  models: ModelCatalogModel[],
+  usage: ModelCatalogUsage
+): ModelCatalogModel[] {
+  return models.filter((model) => {
+    const isEmbedding = isLikelyEmbeddingModelId(model.id)
+    if (usage === 'embedding') return isEmbedding
+
+    const haystack = `${model.id} ${model.name ?? ''}`.toLowerCase()
+    return !isEmbedding && !haystack.includes('image') && !haystack.includes('dall')
+  })
+}
+
+function normalizeContextLength(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function parseEmbeddingModelsArray(payload: unknown): ModelCatalogModel[] {
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    throw new ProviderModelListUnavailableError('embedding models response is missing a data array')
+  }
+
+  const models: ModelCatalogModel[] = []
+  for (const entry of payload.data) {
+    if (!isRecord(entry) || typeof entry.id !== 'string') continue
+    const id = entry.id.trim()
+    if (!id) continue
+
+    models.push({
+      id,
+      name: typeof entry.name === 'string' ? entry.name : null,
+      releaseDate: null,
+      contextLength: normalizeContextLength(entry.context_length),
+      description: typeof entry.description === 'string' ? entry.description : null,
+    })
+  }
+
+  return models.sort((left, right) => left.id.localeCompare(right.id))
 }
 
 function buildModelsEndpoint(baseURL: string): string {
@@ -404,11 +494,16 @@ function buildModelsEndpoint(baseURL: string): string {
   return new URL('models', normalized).toString()
 }
 
+interface OpenRouterFetchResult {
+  models: ModelCatalogModel[]
+  embeddingFallbackWarning: string | null
+}
+
 async function fetchModelsFromOpenRouter(
   baseURL: string,
-  apiKey: string
-): Promise<ModelCatalogModel[]> {
-  const endpoints = buildOpenRouterModelsEndpoints(baseURL)
+  apiKey: string,
+  usage: ModelCatalogUsage
+): Promise<OpenRouterFetchResult> {
   const headers: Record<string, string> = {
     accept: 'application/json',
   }
@@ -416,6 +511,25 @@ async function fetchModelsFromOpenRouter(
     headers.authorization = `Bearer ${apiKey}`
   }
 
+  if (usage === 'embedding') {
+    const embeddingsEndpoint = buildEmbeddingsModelsEndpoint(baseURL)
+    try {
+      const response = await fetch(embeddingsEndpoint, {
+        headers,
+        signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
+      })
+
+      if (response.ok) {
+        const payload = (await response.json()) as unknown
+        const models = parseEmbeddingModelsArray(payload)
+        return { models, embeddingFallbackWarning: null }
+      }
+    } catch {
+      // Fall through to generic /models endpoint
+    }
+  }
+
+  const endpoints = buildOpenRouterModelsEndpoints(baseURL)
   const failures: string[] = []
   let unavailableOnly = true
 
@@ -442,7 +556,12 @@ async function fetchModelsFromOpenRouter(
     }
 
     const payload = (await response.json()) as unknown
-    return parseOpenRouterModelArray(payload)
+    const models = parseOpenRouterModelArray(payload)
+    const embeddingFallbackWarning =
+      usage === 'embedding'
+        ? 'Live embedding catalog unavailable. Falling back to generic model list.'
+        : null
+    return { models, embeddingFallbackWarning }
   }
 
   const reason = failures.length > 0 ? `: ${failures.join('; ')}` : ''
@@ -455,12 +574,18 @@ async function fetchModelsFromOpenRouter(
   throw new Error(`openrouter catalog request failed${reason}`)
 }
 
+interface ProviderFetchResult {
+  models: ModelCatalogModel[]
+  embeddingFallbackWarning: string | null
+}
+
 async function fetchModelsFromProvider(
   source: Pick<ModelCatalogProviderSummary, 'type' | 'apiBaseURL'>,
-  apiKey: string
-): Promise<ModelCatalogModel[]> {
+  apiKey: string,
+  usage: ModelCatalogUsage
+): Promise<ProviderFetchResult> {
   if (source.type === 'openrouter') {
-    return fetchModelsFromOpenRouter(source.apiBaseURL, apiKey)
+    return fetchModelsFromOpenRouter(source.apiBaseURL, apiKey, usage)
   }
 
   const endpoint = buildModelsEndpoint(source.apiBaseURL)
@@ -490,7 +615,7 @@ async function fetchModelsFromProvider(
   }
 
   const payload = (await response.json()) as unknown
-  return parseProviderModelArray(payload)
+  return { models: parseProviderModelArray(payload), embeddingFallbackWarning: null }
 }
 
 function fallbackModelsDevProvider(
@@ -516,13 +641,18 @@ export async function getSourceModelCatalog(
     baseURL: string
   },
   apiKey: string,
+  usage: ModelCatalogUsage,
   options: { forceRefresh?: boolean } = {}
 ): Promise<SourceModelCatalogResult> {
   const modelsDev = await tryGetModelsDevCatalogData(options.forceRefresh === true)
   const baseURL = normalizeBaseURL(source.baseURL) || AI_PROVIDER_DEFAULT_BASE_URLS[source.type]
-  const modelsDevProvider =
+  const modelsDevProviderRaw =
     modelsDev.data?.byId[source.providerId] ??
     fallbackModelsDevProvider(source.providerId, source.type, baseURL)
+  const modelsDevProvider = {
+    ...modelsDevProviderRaw,
+    models: filterModelsForUsage(modelsDevProviderRaw.models, usage),
+  }
 
   const shouldQueryProvider = Boolean(apiKey) || source.type === 'openrouter'
   if (!shouldQueryProvider) {
@@ -533,24 +663,43 @@ export async function getSourceModelCatalog(
     }
   }
 
+  const cacheKey = `${source.providerId}|${source.type}|${baseURL}|${usage}|${fingerprintApiKey(apiKey)}`
+  const cached = providerCache.get(cacheKey)
+
+  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return {
+      provider: cached.provider,
+      source: 'provider',
+      warning: null,
+    }
+  }
+
   try {
-    const providerModels = await fetchModelsFromProvider(
+    const fetchResult = await fetchModelsFromProvider(
       {
         type: source.type,
         apiBaseURL: baseURL,
       },
-      apiKey
+      apiKey,
+      usage
     )
 
+    const result: ModelCatalogProvider = {
+      ...modelsDevProvider,
+      type: source.type,
+      apiBaseURL: baseURL,
+      models: filterModelsForUsage(fetchResult.models, usage),
+    }
+
+    providerCache.set(cacheKey, {
+      expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS,
+      provider: result,
+    })
+
     return {
-      provider: {
-        ...modelsDevProvider,
-        type: source.type,
-        apiBaseURL: baseURL,
-        models: providerModels,
-      },
+      provider: result,
       source: 'provider',
-      warning: null,
+      warning: fetchResult.embeddingFallbackWarning,
     }
   } catch (error) {
     if (error instanceof ProviderModelListUnavailableError) {

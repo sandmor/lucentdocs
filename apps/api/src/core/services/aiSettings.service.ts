@@ -3,6 +3,7 @@ import type { AiModelSourceType } from '@lucentdocs/shared'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 import type { AiApiKeyEntity, AiProviderConfigEntity } from '../../core/ports/aiSettings.port.js'
+import type { AiProviderUsage } from '../ai/provider-usage.js'
 import {
   isSameBaseURL,
   normalizeModelSourceType,
@@ -11,9 +12,21 @@ import {
 } from '../ai/provider-types.js'
 
 const DEFAULT_OPENAI_MODEL = 'gpt-5'
+const DEFAULT_OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small'
+const DEFAULT_OPENROUTER_EMBEDDING_MODEL = 'openai/text-embedding-3-small'
+
+interface BootstrapProviderDefaults {
+  providerId: string
+  type: AiModelSourceType
+  baseURL: string
+  model: string
+  apiKey: string | undefined
+  apiKeyName: string | undefined
+}
 
 export interface AiProviderConfigRecord {
   id: string
+  usage: AiProviderUsage
   providerId: string
   type: AiModelSourceType
   baseURL: string
@@ -32,8 +45,10 @@ export interface AiApiKeyRecord {
 }
 
 export interface AiSettingsSnapshot {
-  providers: AiProviderConfigRecord[]
-  activeProviderId: string | null
+  generationProviders: AiProviderConfigRecord[]
+  activeGenerationProviderId: string | null
+  embeddingProviders: AiProviderConfigRecord[]
+  activeEmbeddingProviderId: string | null
   apiKeys: AiApiKeyRecord[]
 }
 
@@ -50,6 +65,7 @@ export interface AiSettingsService {
   initializeDefaults(options?: { env?: NodeJS.ProcessEnv }): Promise<void>
   getSnapshot(): Promise<AiSettingsSnapshot>
   updateSettings(input: {
+    usage: AiProviderUsage
     providers: Array<{
       id?: string
       providerId: string
@@ -73,7 +89,7 @@ export interface AiSettingsService {
     isDefault?: boolean
   }): Promise<AiSettingsSnapshot>
   deleteApiKey(id: string): Promise<AiSettingsSnapshot>
-  resolveRuntimeSelection(): Promise<RuntimeProviderSelection>
+  resolveRuntimeSelection(usage: AiProviderUsage): Promise<RuntimeProviderSelection>
   resolveApiKeyForBaseURL(baseURL: string): Promise<string | null>
   resolveApiKeyById(id: string): Promise<string | null>
 }
@@ -83,12 +99,87 @@ function normalizeModel(model: string): string {
   return trimmed || DEFAULT_OPENAI_MODEL
 }
 
+function normalizeModelForUsage(
+  usage: AiProviderUsage,
+  type: AiModelSourceType,
+  model: string
+): string {
+  const trimmed = model.trim()
+  return trimmed || defaultModelForUsage(usage, type)
+}
+
 function normalizeProviderId(type: AiModelSourceType, providerId: string): string {
   const trimmed = providerId.trim()
   if (trimmed) return trimmed
   if (type === 'anthropic') return 'anthropic'
   if (type === 'openrouter') return 'openrouter'
   return 'openai'
+}
+
+function defaultModelForUsage(usage: AiProviderUsage, type: AiModelSourceType): string {
+  if (usage === 'embedding') {
+    return type === 'openrouter'
+      ? DEFAULT_OPENROUTER_EMBEDDING_MODEL
+      : DEFAULT_OPENAI_EMBEDDING_MODEL
+  }
+  if (type === 'anthropic') return 'claude-sonnet-4-5'
+  return DEFAULT_OPENAI_MODEL
+}
+
+function resolveBootstrapProviderDefaults(env: NodeJS.ProcessEnv): BootstrapProviderDefaults {
+  const envBaseURL = readTrimmedEnvValue(env, 'AI_BASE_URL') ?? ''
+  const envModel = readTrimmedEnvValue(env, 'AI_MODEL') ?? ''
+  const envProviderType =
+    readTrimmedEnvValue(env, 'AI_PROVIDER_TYPE') ?? readTrimmedEnvValue(env, 'AI_PROVIDER')
+  const type = envProviderType
+    ? normalizeModelSourceType(envProviderType)
+    : inferBootstrapProviderType(envBaseURL, envModel)
+  const providerId = normalizeProviderId(type, readTrimmedEnvValue(env, 'AI_PROVIDER_ID') ?? '')
+
+  return {
+    providerId,
+    type,
+    baseURL: resolveProviderBaseURLOrThrow(type, envBaseURL),
+    model: normalizeModel(envModel || defaultModelForUsage('generation', type)),
+    apiKey: readTrimmedEnvValue(env, 'AI_API_KEY'),
+    apiKeyName: readTrimmedEnvValue(env, 'AI_API_KEY_NAME'),
+  }
+}
+
+function resolveEmbeddingBootstrapSource(source: {
+  providerId: string
+  type: AiModelSourceType
+  baseURL: string
+}): {
+  providerId: string
+  type: AiModelSourceType
+  baseURL: string
+} {
+  if (source.type !== 'anthropic') {
+    return source
+  }
+
+  return {
+    providerId: 'openrouter',
+    type: 'openrouter',
+    baseURL: resolveProviderBaseURLOrThrow('openrouter', ''),
+  }
+}
+
+function selectApiKeyIdForBaseURL(
+  apiKeys: AiApiKeyEntity[],
+  baseURL: string,
+  preferredApiKeyId: string | null = null
+): string | null {
+  const matchingKeys = apiKeys.filter((key) => isSameBaseURL(key.baseURL, baseURL))
+  if (matchingKeys.length === 0) return null
+
+  if (preferredApiKeyId) {
+    const preferred = matchingKeys.find((key) => key.id === preferredApiKeyId)
+    if (preferred) return preferred.id
+  }
+
+  return matchingKeys.find((key) => key.isDefault)?.id ?? matchingKeys[0]?.id ?? null
 }
 
 function requireProviderId(providerId: string): string {
@@ -180,8 +271,8 @@ export function createAiSettingsService(
   repos: RepositorySet,
   transaction: TransactionPort
 ): AiSettingsService {
-  async function getProviders(): Promise<AiProviderConfigEntity[]> {
-    const providers = await repos.aiSettings.listProviderConfigs()
+  async function getProviders(usage: AiProviderUsage): Promise<AiProviderConfigEntity[]> {
+    const providers = await repos.aiSettings.listProviderConfigs(usage)
     return [...providers].sort(sortProviders)
   }
 
@@ -200,89 +291,148 @@ export function createAiSettingsService(
     return providers[0]?.id ?? null
   }
 
+  async function readRuntimeSelections(): Promise<{
+    activeGenerationProviderId: string | null
+    activeEmbeddingProviderId: string | null
+  }> {
+    const runtime = await repos.aiSettings.readRuntimeSettings()
+    return {
+      activeGenerationProviderId: runtime?.activeGenerationProviderId ?? null,
+      activeEmbeddingProviderId: runtime?.activeEmbeddingProviderId ?? null,
+    }
+  }
+
   return {
     async initializeDefaults(options?: { env?: NodeJS.ProcessEnv }): Promise<void> {
       const env = options?.env ?? process.env
 
       await transaction.run(async () => {
-        const providers = await repos.aiSettings.listProviderConfigs()
-
-        if (providers.length > 0) {
-          const runtime = await repos.aiSettings.readRuntimeSettings()
-          const runtimeIsValid = runtime?.activeProviderId
-            ? providers.some((provider) => provider.id === runtime.activeProviderId)
-            : false
-
-          if (!runtimeIsValid) {
-            await repos.aiSettings.upsertRuntimeSettings(providers[0]?.id ?? null, Date.now())
-          }
-          return
-        }
-
+        const bootstrapDefaults = resolveBootstrapProviderDefaults(env)
+        let generationProviders = await repos.aiSettings.listProviderConfigs('generation')
+        let embeddingProviders = await repos.aiSettings.listProviderConfigs('embedding')
+        const apiKeys = await repos.aiSettings.listApiKeys()
+        const runtime = await readRuntimeSelections()
         const now = Date.now()
-        const envBaseURL = readTrimmedEnvValue(env, 'AI_BASE_URL') ?? ''
-        const envModel = readTrimmedEnvValue(env, 'AI_MODEL') ?? ''
-        const envProviderType =
-          readTrimmedEnvValue(env, 'AI_PROVIDER_TYPE') ?? readTrimmedEnvValue(env, 'AI_PROVIDER')
-        const type = envProviderType
-          ? normalizeModelSourceType(envProviderType)
-          : inferBootstrapProviderType(envBaseURL, envModel)
-        const providerId = normalizeProviderId(
-          type,
-          readTrimmedEnvValue(env, 'AI_PROVIDER_ID') ?? ''
-        )
-        const baseURL = resolveProviderBaseURLOrThrow(type, envBaseURL)
-        const model = normalizeModel(envModel)
-        const apiKey = readTrimmedEnvValue(env, 'AI_API_KEY')
-        const apiKeyName = readTrimmedEnvValue(env, 'AI_API_KEY_NAME')
 
-        let apiKeyId: string | null = null
-        if (apiKey) {
-          apiKeyId = nanoid()
-          await repos.aiSettings.insertApiKey({
-            id: apiKeyId,
-            baseURL,
-            name: apiKeyName ?? 'Bootstrap key',
-            apiKey,
+        let bootstrapApiKeyId = selectApiKeyIdForBaseURL(apiKeys, bootstrapDefaults.baseURL)
+        if (bootstrapDefaults.apiKey && !bootstrapApiKeyId) {
+          bootstrapApiKeyId = nanoid()
+          const bootstrapKey: AiApiKeyEntity = {
+            id: bootstrapApiKeyId,
+            baseURL: bootstrapDefaults.baseURL,
+            name: bootstrapDefaults.apiKeyName ?? 'Bootstrap key',
+            apiKey: bootstrapDefaults.apiKey,
             isDefault: true,
             createdAt: now,
             updatedAt: now,
+          }
+
+          await repos.aiSettings.clearDefaultApiKeys(bootstrapDefaults.baseURL, now)
+          await repos.aiSettings.insertApiKey({
+            ...bootstrapKey,
           })
+          apiKeys.push(bootstrapKey)
         }
 
-        const providerConfigId = nanoid()
-        await repos.aiSettings.upsertProviderConfig({
-          id: providerConfigId,
-          providerId,
-          type,
-          baseURL,
-          model,
-          apiKeyId,
-          sortOrder: 0,
-          createdAt: now,
+        if (generationProviders.length === 0) {
+          const providerConfigId = nanoid()
+          const generationProvider: AiProviderConfigEntity = {
+            id: providerConfigId,
+            usage: 'generation',
+            providerId: bootstrapDefaults.providerId,
+            type: bootstrapDefaults.type,
+            baseURL: bootstrapDefaults.baseURL,
+            model: bootstrapDefaults.model,
+            apiKeyId: bootstrapApiKeyId,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          }
+
+          await repos.aiSettings.upsertProviderConfig(generationProvider)
+          generationProviders = [generationProvider]
+        }
+
+        if (embeddingProviders.length === 0) {
+          const embeddingSource = resolveEmbeddingBootstrapSource(
+            generationProviders[0] ?? bootstrapDefaults
+          )
+          const embeddingProviderConfigId = nanoid()
+          const embeddingProvider: AiProviderConfigEntity = {
+            id: embeddingProviderConfigId,
+            usage: 'embedding',
+            providerId: embeddingSource.providerId,
+            type: embeddingSource.type,
+            baseURL: embeddingSource.baseURL,
+            model: defaultModelForUsage('embedding', embeddingSource.type),
+            apiKeyId: selectApiKeyIdForBaseURL(
+              apiKeys,
+              embeddingSource.baseURL,
+              generationProviders[0]?.apiKeyId ?? bootstrapApiKeyId
+            ),
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          }
+
+          await repos.aiSettings.upsertProviderConfig(embeddingProvider)
+          embeddingProviders = [embeddingProvider]
+        }
+
+        await repos.aiSettings.upsertRuntimeSettings({
+          activeGenerationProviderId: selectActiveProviderId(
+            generationProviders,
+            runtime.activeGenerationProviderId
+          ),
+          activeEmbeddingProviderId: selectActiveProviderId(
+            embeddingProviders,
+            runtime.activeEmbeddingProviderId
+          ),
           updatedAt: now,
         })
-        await repos.aiSettings.upsertRuntimeSettings(providerConfigId, now)
       })
     },
 
     async getSnapshot(): Promise<AiSettingsSnapshot> {
-      const providers = await getProviders()
-      const runtime = await repos.aiSettings.readRuntimeSettings()
-      const activeProviderId = selectActiveProviderId(providers, runtime?.activeProviderId ?? null)
+      const generationProviders = await getProviders('generation')
+      const embeddingProviders = await getProviders('embedding')
+      const runtime = await readRuntimeSelections()
       const apiKeys = await getApiKeys()
+      const resolveSnapshotApiKeyId = (provider: AiProviderConfigEntity): string | null => {
+        if (!provider.apiKeyId) return null
+        const key = apiKeys.find((entry) => entry.id === provider.apiKeyId)
+        return key && isSameBaseURL(key.baseURL, provider.baseURL) ? key.id : null
+      }
 
       return {
-        providers: providers.map((provider) => ({
+        generationProviders: generationProviders.map((provider) => ({
           id: provider.id,
+          usage: provider.usage,
           providerId: normalizeProviderId(provider.type, provider.providerId),
           type: normalizeModelSourceType(provider.type),
           baseURL: resolveProviderBaseURLOrThrow(provider.type, provider.baseURL),
-          model: normalizeModel(provider.model),
-          apiKeyId: provider.apiKeyId,
+          model: normalizeModelForUsage(provider.usage, provider.type, provider.model),
+          apiKeyId: resolveSnapshotApiKeyId(provider),
           sortOrder: provider.sortOrder,
         })),
-        activeProviderId,
+        activeGenerationProviderId: selectActiveProviderId(
+          generationProviders,
+          runtime.activeGenerationProviderId
+        ),
+        embeddingProviders: embeddingProviders.map((provider) => ({
+          id: provider.id,
+          usage: provider.usage,
+          providerId: normalizeProviderId(provider.type, provider.providerId),
+          type: normalizeModelSourceType(provider.type),
+          baseURL: resolveProviderBaseURLOrThrow(provider.type, provider.baseURL),
+          model: normalizeModelForUsage(provider.usage, provider.type, provider.model),
+          apiKeyId: resolveSnapshotApiKeyId(provider),
+          sortOrder: provider.sortOrder,
+        })),
+        activeEmbeddingProviderId: selectActiveProviderId(
+          embeddingProviders,
+          runtime.activeEmbeddingProviderId
+        ),
         apiKeys: apiKeys.map((key) => ({
           id: key.id,
           baseURL: key.baseURL,
@@ -299,7 +449,7 @@ export function createAiSettingsService(
         throw new Error('At least one provider configuration is required.')
       }
 
-      const existingProviders = await repos.aiSettings.listProviderConfigs()
+      const existingProviders = await repos.aiSettings.listProviderConfigs(input.usage)
       const existingById = new Map(existingProviders.map((provider) => [provider.id, provider]))
       const seenIds = new Set<string>()
       const now = Date.now()
@@ -316,6 +466,7 @@ export function createAiSettingsService(
 
         return {
           id,
+          usage: input.usage,
           providerId: requireProviderId(provider.providerId),
           type,
           baseURL: resolveProviderBaseURLOrThrow(type, provider.baseURL),
@@ -333,27 +484,39 @@ export function createAiSettingsService(
 
           const key = await repos.aiSettings.findApiKeyById(row.apiKeyId)
           if (!key) {
-            throw new Error(`API key ${row.apiKeyId} was not found.`)
+            throw new Error('Selected API key was not found.')
           }
 
           if (!isSameBaseURL(key.baseURL, row.baseURL)) {
-            throw new Error(
-              `API key ${row.apiKeyId} does not belong to provider base URL ${row.baseURL}.`
-            )
+            throw new Error('Selected API key does not match the provider base URL.')
           }
         }
 
-        await repos.aiSettings.deleteProviderConfigsNotIn(nextRows.map((row) => row.id))
+        await repos.aiSettings.deleteProviderConfigsNotIn(
+          input.usage,
+          nextRows.map((row) => row.id)
+        )
         for (const row of nextRows) {
           await repos.aiSettings.upsertProviderConfig(row)
         }
 
+        const currentRuntime = await readRuntimeSelections()
         const requestedActive = input.activeProviderId
-        const activeProviderId = nextRows.some((row) => row.id === requestedActive)
+        const nextActiveProviderId = nextRows.some((row) => row.id === requestedActive)
           ? requestedActive
           : (nextRows[0]?.id ?? null)
 
-        await repos.aiSettings.upsertRuntimeSettings(activeProviderId, now)
+        await repos.aiSettings.upsertRuntimeSettings({
+          activeGenerationProviderId:
+            input.usage === 'generation'
+              ? nextActiveProviderId
+              : currentRuntime.activeGenerationProviderId,
+          activeEmbeddingProviderId:
+            input.usage === 'embedding'
+              ? nextActiveProviderId
+              : currentRuntime.activeEmbeddingProviderId,
+          updatedAt: now,
+        })
       })
 
       return this.getSnapshot()
@@ -402,7 +565,7 @@ export function createAiSettingsService(
     async updateApiKey(input): Promise<AiSettingsSnapshot> {
       const current = await repos.aiSettings.findApiKeyById(input.id)
       if (!current) {
-        throw new Error(`API key ${input.id} was not found.`)
+        throw new Error('Selected API key was not found.')
       }
 
       const now = Date.now()
@@ -436,7 +599,7 @@ export function createAiSettingsService(
     async deleteApiKey(id: string): Promise<AiSettingsSnapshot> {
       const key = await repos.aiSettings.findApiKeyById(id)
       if (!key) {
-        throw new Error(`API key ${id} was not found.`)
+        throw new Error('Selected API key was not found.')
       }
 
       try {
@@ -462,11 +625,15 @@ export function createAiSettingsService(
       return this.getSnapshot()
     },
 
-    async resolveRuntimeSelection(): Promise<RuntimeProviderSelection> {
+    async resolveRuntimeSelection(usage: AiProviderUsage): Promise<RuntimeProviderSelection> {
       const snapshot = await this.getSnapshot()
-      const active =
-        snapshot.providers.find((provider) => provider.id === snapshot.activeProviderId) ??
-        snapshot.providers[0]
+      const providers =
+        usage === 'embedding' ? snapshot.embeddingProviders : snapshot.generationProviders
+      const activeProviderId =
+        usage === 'embedding'
+          ? snapshot.activeEmbeddingProviderId
+          : snapshot.activeGenerationProviderId
+      const active = providers.find((provider) => provider.id === activeProviderId) ?? providers[0]
 
       if (!active) {
         throw new Error('No active provider is configured.')
