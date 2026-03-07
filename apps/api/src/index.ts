@@ -309,7 +309,11 @@ async function startServer() {
     })
   })
 
-  const yjsWss = setupYjsWebSocket(httpServer, container.yjsRuntime)
+  const yjsWss = setupYjsWebSocket(httpServer, container.yjsRuntime, {
+    authPort: container.authPort,
+    projects: container.repositories.projects,
+    projectDocuments: container.repositories.projectDocuments,
+  })
   const trpcWs = setupTrpcWebSocket(httpServer, ({ req }) => createWsTrpcContext(req))
   container.yjsRuntime.startSnapshotTimer()
 

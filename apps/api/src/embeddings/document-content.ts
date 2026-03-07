@@ -12,11 +12,10 @@ function serializeDocumentBody(content: string): string {
   const parsed = parseContent(content)
   const markdownResult = proseMirrorDocToMarkdown(parsed.doc)
   if (markdownResult.ok) {
-    const trimmed = markdownResult.value.trim()
-    if (trimmed) return trimmed
+    return markdownResult.value.trim()
   }
 
-  return JSON.stringify(parsed.doc)
+  return ''
 }
 
 export async function readDocumentContentSnapshot(

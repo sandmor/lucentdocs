@@ -14,6 +14,27 @@ export class ProjectDocumentsRepository implements ProjectDocumentsRepositoryPor
     )
   }
 
+  async hasProjectDocument(projectId: string, documentId: string): Promise<boolean> {
+    const row = this.connection.get<{ found: number }>(
+      `SELECT 1 AS found
+         FROM project_documents
+        WHERE projectId = ? AND documentId = ?
+        LIMIT 1`,
+      [projectId, documentId]
+    )
+    return row?.found === 1
+  }
+
+  async listDocumentIds(): Promise<string[]> {
+    const rows = this.connection.all<{ documentId: string }>(
+      `SELECT DISTINCT documentId
+         FROM project_documents
+        ORDER BY documentId ASC`,
+      []
+    )
+    return rows.map((row) => row.documentId)
+  }
+
   async findSoleDocumentIdsByProjectId(projectId: string): Promise<string[]> {
     const rows = this.connection.all<{ documentId: string }>(
       `SELECT pd.documentId
@@ -30,6 +51,17 @@ export class ProjectDocumentsRepository implements ProjectDocumentsRepositoryPor
       [projectId, projectId]
     )
     return rows.map((row) => row.documentId)
+  }
+
+  async findProjectIdsByDocumentId(documentId: string): Promise<string[]> {
+    const rows = this.connection.all<{ projectId: string }>(
+      `SELECT DISTINCT projectId
+         FROM project_documents
+        WHERE documentId = ?
+        ORDER BY addedAt DESC`,
+      [documentId]
+    )
+    return rows.map((row) => row.projectId)
   }
 
   async findSoleProjectIdByDocumentId(documentId: string): Promise<string | undefined> {

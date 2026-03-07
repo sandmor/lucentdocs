@@ -12,6 +12,7 @@ import {
   directoryPathFromSentinel,
   isDirectorySentinelPath,
   isPathInsideDirectory,
+  type IndexingStrategy,
   normalizeDocumentPath,
   pathSegments,
 } from '@lucentdocs/shared'
@@ -55,6 +56,7 @@ export function useDocumentBrowser({
   const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null)
   const [moveDestination, setMoveDestination] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [settingsDocumentId, setSettingsDocumentId] = useState<string | null>(null)
 
   const prevSignatureRef = useRef<string | null>(null)
 
@@ -239,6 +241,32 @@ export function useDocumentBrowser({
     },
     onError: (error) => {
       toast.error('Failed to import document', { description: error.message })
+    },
+  })
+
+  const documentSettingsQuery = trpc.indexing.getDocument.useQuery(
+    {
+      projectId,
+      id: settingsDocumentId ?? '',
+    },
+    {
+      enabled: settingsDocumentId !== null,
+    }
+  )
+
+  const updateDocumentSettingsMutation = trpc.indexing.updateDocument.useMutation({
+    onSuccess: async (_result, variables) => {
+      await Promise.all([
+        utils.indexing.getDocument.invalidate({ projectId, id: variables.id }),
+        utils.indexing.getProject.invalidate({ projectId }),
+      ])
+      toast.success('Document indexing strategy updated')
+      setSettingsDocumentId(null)
+    },
+    onError: (error) => {
+      toast.error('Failed to update document indexing strategy', {
+        description: error.message,
+      })
     },
   })
 
@@ -515,6 +543,33 @@ export function useDocumentBrowser({
     [findDocumentById]
   )
 
+  const handleSettingsDocument = useCallback(
+    (documentId: string) => {
+      const document = findDocumentById(documentId)
+      if (!document) return
+      setSettingsDocumentId(document.id)
+    },
+    [findDocumentById]
+  )
+
+  const settingsDocumentTitle = useMemo(() => {
+    if (!settingsDocumentId) return ''
+    return findDocumentById(settingsDocumentId)?.title ?? ''
+  }, [findDocumentById, settingsDocumentId])
+
+  const handleSaveDocumentSettings = useCallback(
+    (strategy: IndexingStrategy | null) => {
+      if (!settingsDocumentId) return
+
+      updateDocumentSettingsMutation.mutate({
+        projectId,
+        id: settingsDocumentId,
+        strategy,
+      })
+    },
+    [projectId, settingsDocumentId, updateDocumentSettingsMutation]
+  )
+
   const handleExportDocument = useCallback(
     async (documentId: string) => {
       try {
@@ -599,6 +654,7 @@ export function useDocumentBrowser({
             item={row.original}
             onRenameDocument={handleRenameDocument}
             onMoveDocument={handleMoveDocument}
+            onSettingsDocument={handleSettingsDocument}
             onDeleteDocument={handleDeleteDocument}
             onExportDocument={handleExportDocument}
             onRenameDirectory={handleRenameDirectory}
@@ -615,6 +671,7 @@ export function useDocumentBrowser({
       handleExportDocument,
       handleMoveDirectory,
       handleMoveDocument,
+      handleSettingsDocument,
       handleRenameDirectory,
       handleRenameDocument,
     ]
@@ -721,6 +778,13 @@ export function useDocumentBrowser({
     goToCrumb,
     isBusy,
     handleImportDocument,
+    settingsDocumentId,
+    settingsDocumentTitle,
+    setSettingsDocumentId,
+    documentSettings: documentSettingsQuery.data,
+    isLoadingDocumentSettings: documentSettingsQuery.isLoading,
+    saveDocumentSettings: handleSaveDocumentSettings,
+    isSavingDocumentSettings: updateDocumentSettingsMutation.isPending,
     isImporting: importMutation.isPending,
     isCreatingDocument: createMutation.isPending,
     isCreatingDirectory: createDirectoryMutation.isPending,

@@ -6,6 +6,15 @@ export class LocalAuthAdapter implements AuthPort {
     return false
   }
 
+  async getUserById(userId: string): Promise<typeof LOCAL_DEFAULT_USER | null> {
+    return userId.trim() === LOCAL_DEFAULT_USER.id ? LOCAL_DEFAULT_USER : null
+  }
+
+  async getUserByEmail(email: string): Promise<null> {
+    void email
+    return null
+  }
+
   async validateSession(token: string): Promise<typeof LOCAL_DEFAULT_USER> {
     void token
     return LOCAL_DEFAULT_USER

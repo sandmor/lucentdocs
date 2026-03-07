@@ -9,6 +9,14 @@ export class SqliteAuthAdapter implements AuthPort {
     return true
   }
 
+  async getUserById(userId: string): Promise<User | null> {
+    return this.authService.getUserById(userId)
+  }
+
+  async getUserByEmail(email: string): Promise<User | null> {
+    return this.authService.getUserByEmail(email)
+  }
+
   async validateSession(token: string): Promise<User | null> {
     return this.authService.getUserBySessionToken(token)
   }

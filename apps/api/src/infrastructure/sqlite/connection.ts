@@ -9,10 +9,13 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    ownerUserId TEXT NOT NULL,
     metadata TEXT,
     createdAt INTEGER NOT NULL,
     updatedAt INTEGER NOT NULL
   );
+
+  CREATE INDEX IF NOT EXISTS idx_projects_owner_user_id ON projects(ownerUserId);
 
   CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
@@ -132,6 +135,15 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_document_embedding_jobs_schedule
     ON document_embedding_jobs(debounceUntil ASC, firstQueuedAt ASC);
 
+  CREATE TABLE IF NOT EXISTS indexing_strategy_settings (
+    scopeType TEXT NOT NULL CHECK (scopeType IN ('global', 'user', 'project', 'document')),
+    scopeId TEXT NOT NULL,
+    strategyType TEXT NOT NULL CHECK (strategyType IN ('whole_document', 'sliding_window')),
+    strategyProperties TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    PRIMARY KEY (scopeType, scopeId)
+  );
+
   CREATE TABLE IF NOT EXISTS document_embeddings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     documentId TEXT NOT NULL,
@@ -140,44 +152,26 @@ const SCHEMA = `
     type TEXT NOT NULL,
     baseUrl TEXT NOT NULL,
     model TEXT NOT NULL,
+    strategyType TEXT NOT NULL CHECK (strategyType IN ('whole_document', 'sliding_window')),
+    strategyProperties TEXT NOT NULL,
+    chunkOrdinal INTEGER NOT NULL CHECK (chunkOrdinal >= 0),
+    chunkStart INTEGER NOT NULL CHECK (chunkStart >= 0),
+    chunkEnd INTEGER NOT NULL CHECK (chunkEnd >= chunkStart),
+    chunkText TEXT NOT NULL,
     dimensions INTEGER NOT NULL CHECK (dimensions > 0),
+    documentTimestamp INTEGER NOT NULL,
     contentHash TEXT NOT NULL,
     createdAt INTEGER NOT NULL,
     updatedAt INTEGER NOT NULL,
-    UNIQUE(documentId, baseUrl, model)
+    FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE,
+    UNIQUE(documentId, baseUrl, model, chunkOrdinal)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_document_embeddings_model
-    ON document_embeddings(baseUrl ASC, model ASC, documentId ASC);
+  CREATE INDEX IF NOT EXISTS idx_document_embeddings_model_document_ts
+    ON document_embeddings(baseUrl ASC, model ASC, documentId ASC, documentTimestamp ASC);
 
   CREATE TABLE IF NOT EXISTS app_config_values (
-    key TEXT PRIMARY KEY CHECK (
-      key IN (
-        'authEnabled',
-        'nodeEnv',
-        'host',
-        'port',
-        'aiDefaultTemperature',
-        'aiSelectionEditTemperature',
-        'aiDefaultMaxOutputTokens',
-        'embeddingDebounceMs',
-        'embeddingBatchMaxWaitMs',
-        'yjsPersistenceFlushMs',
-        'yjsVersionIntervalMs',
-        'maxContextChars',
-        'maxPromptChars',
-        'maxToolEntries',
-        'maxToolReadChars',
-        'maxAiToolSteps',
-        'maxChatMessageChars',
-        'maxPromptNameChars',
-        'maxPromptDescChars',
-        'maxPromptSystemChars',
-        'maxPromptUserChars',
-        'maxDocImportChars',
-        'maxDocExportChars'
-      )
-    ),
+    key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updatedAt INTEGER NOT NULL CHECK (updatedAt > 0)
   );

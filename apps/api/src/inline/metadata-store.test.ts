@@ -31,7 +31,10 @@ describe('InlineSessionMetadataStore.pruneOrphans', () => {
       },
       projectDocuments: {
         insert: async () => {},
+        hasProjectDocument: async () => true,
+        listDocumentIds: async () => ['d1'],
         findSoleDocumentIdsByProjectId: async () => ['d1'],
+        findProjectIdsByDocumentId: async () => ['p1'],
         findSoleProjectIdByDocumentId: async () => 'p1',
       },
       yjsDocuments: {
@@ -83,7 +86,10 @@ describe('InlineSessionMetadataStore.pruneOrphans', () => {
       },
       projectDocuments: {
         insert: async () => {},
+        hasProjectDocument: async () => true,
+        listDocumentIds: async () => ['d1'],
         findSoleDocumentIdsByProjectId: async () => ['d1'],
+        findProjectIdsByDocumentId: async () => ['p1'],
         findSoleProjectIdByDocumentId: async () => 'p1',
       },
       yjsDocuments: {

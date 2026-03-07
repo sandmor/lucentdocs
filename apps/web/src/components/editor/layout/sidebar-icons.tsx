@@ -1,8 +1,8 @@
-import { FolderOpen, MessageCircle } from 'lucide-react'
+import { FolderOpen, MessageCircle, Settings2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
-export type SidebarPanel = 'explorer' | 'chat'
+export type SidebarPanel = 'explorer' | 'chat' | 'project-settings'
 
 interface SidebarIconBarProps {
   activePanel: SidebarPanel
@@ -18,6 +18,7 @@ const panels: {
 }[] = [
   { id: 'explorer', label: 'Explorer', icon: FolderOpen },
   { id: 'chat', label: 'AI Chat', icon: MessageCircle },
+  { id: 'project-settings', label: 'Project Settings', icon: Settings2 },
 ]
 
 export function SidebarIconBar({

@@ -1,4 +1,4 @@
-import type { AiModelSourceType } from '@lucentdocs/shared'
+import type { AiModelSourceType, IndexingStrategy } from '@lucentdocs/shared'
 
 export interface DocumentEmbeddingJobEntity {
   documentId: string
@@ -15,23 +15,44 @@ export interface DocumentEmbeddingEntity {
   type: AiModelSourceType
   baseURL: string
   model: string
+  strategy: IndexingStrategy
+  chunkOrdinal: number
+  chunkStart: number
+  chunkEnd: number
+  chunkText: string
   dimensions: number
+  documentTimestamp: number
   contentHash: string
   createdAt: number
   updatedAt: number
 }
 
-export interface UpsertDocumentEmbeddingInput {
+export interface ReplaceDocumentEmbeddingChunkInput {
+  ordinal: number
+  start: number
+  end: number
+  text: string
+  embedding: number[]
+}
+
+export interface ReplaceDocumentEmbeddingsInput {
   documentId: string
   providerConfigId: string | null
   providerId: string
   type: AiModelSourceType
   baseURL: string
   model: string
+  strategy: IndexingStrategy
+  documentTimestamp: number
   contentHash: string
-  embedding: number[]
+  chunks: ReplaceDocumentEmbeddingChunkInput[]
   createdAt: number
   updatedAt: number
+}
+
+export interface ReplaceDocumentEmbeddingsResult {
+  status: 'applied' | 'stale'
+  embeddings: DocumentEmbeddingEntity[]
 }
 
 export interface DocumentEmbeddingQueueStats {
@@ -46,11 +67,11 @@ export interface DocumentEmbeddingsRepositoryPort {
   getQueuedDocument(documentId: string): Promise<DocumentEmbeddingJobEntity | undefined>
   clearQueuedDocuments(documentIds: string[]): Promise<void>
   getQueueStats(): Promise<DocumentEmbeddingQueueStats>
-  findEmbedding(
+  findEmbeddings(
     documentId: string,
     baseURL: string,
     model: string
-  ): Promise<DocumentEmbeddingEntity | undefined>
-  upsertEmbedding(input: UpsertDocumentEmbeddingInput): Promise<DocumentEmbeddingEntity>
+  ): Promise<DocumentEmbeddingEntity[]>
+  replaceEmbeddings(input: ReplaceDocumentEmbeddingsInput): Promise<ReplaceDocumentEmbeddingsResult>
   deleteEmbeddingsByDocumentId(documentId: string): Promise<void>
 }

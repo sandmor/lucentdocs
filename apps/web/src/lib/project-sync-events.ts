@@ -9,14 +9,20 @@ const eventBaseSchema = z.object({
 })
 
 const projectCreatedEventSchema = eventBaseSchema.extend({
+  audienceUserIds: z.array(idSchema),
+  ownerUserId: idSchema,
   type: z.literal('project.created'),
 })
 
 const projectUpdatedEventSchema = eventBaseSchema.extend({
+  audienceUserIds: z.array(idSchema),
+  ownerUserId: idSchema,
   type: z.literal('project.updated'),
 })
 
 const projectDeletedEventSchema = eventBaseSchema.extend({
+  audienceUserIds: z.array(idSchema),
+  ownerUserId: idSchema,
   type: z.literal('project.deleted'),
 })
 

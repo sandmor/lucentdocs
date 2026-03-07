@@ -43,6 +43,7 @@ import {
   Users,
   LogOut,
   ChevronDown,
+  User,
 } from 'lucide-react'
 import { parseProjectsListSyncEvent } from '@/lib/project-sync-events'
 
@@ -160,6 +161,15 @@ export function HomePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="sm:size-auto sm:px-3 sm:py-2"
+              onClick={() => navigate('/settings')}
+            >
+              <User data-icon="inline-start" />
+              <span className="hidden sm:inline">My settings</span>
+            </Button>
             <Button
               variant="outline"
               size="sm"

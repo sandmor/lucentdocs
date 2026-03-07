@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
 
 import type {
   AiDraftState,
@@ -63,10 +64,12 @@ export function AdminConfigPage() {
   const [embeddingDraft, setEmbeddingDraft] = useState<AiDraftState | null>(null)
 
   const configQuery = trpc.config.get.useQuery()
+  const globalIndexingQuery = trpc.indexing.getGlobal.useQuery()
   const modelCatalogQuery = trpc.config.modelCatalog.useQuery()
   const aiSettingsQuery = trpc.config.aiSettings.useQuery()
 
   const updateMutation = trpc.config.update.useMutation()
+  const updateGlobalIndexingMutation = trpc.indexing.updateGlobal.useMutation()
   const updateProvidersMutation = trpc.config.updateProviders.useMutation()
   const createAiKeyMutation = trpc.config.createAiApiKey.useMutation()
   const updateAiKeyMutation = trpc.config.updateAiApiKey.useMutation()
@@ -783,6 +786,51 @@ export function AdminConfigPage() {
               updateProvidersMutation.isPending &&
               updateProvidersMutation.variables?.usage === 'embedding',
           })}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Global indexing strategy</CardTitle>
+              <CardDescription>
+                Sets the inherited default for user, project, and document indexing.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {globalIndexingQuery.data ? (
+                <IndexingStrategyForm
+                  allowInherit={false}
+                  directStrategy={globalIndexingQuery.data.strategy}
+                  resolvedStrategy={globalIndexingQuery.data.strategy}
+                  resolvedScopeType="global"
+                  isSaving={updateGlobalIndexingMutation.isPending}
+                  saveLabel="Save global strategy"
+                  onSave={(strategy) => {
+                    if (!strategy) return
+                    updateGlobalIndexingMutation.mutate(
+                      { strategy },
+                      {
+                        onSuccess: async () => {
+                          await Promise.all([
+                            utils.indexing.getGlobal.invalidate(),
+                            utils.indexing.getUser.invalidate(),
+                            utils.indexing.getProject.invalidate(),
+                            utils.indexing.getDocument.invalidate(),
+                          ])
+                          toast.success('Global indexing strategy updated')
+                        },
+                        onError: (error) => {
+                          toast.error('Failed to update global indexing strategy', {
+                            description: error.message,
+                          })
+                        },
+                      }
+                    )
+                  }}
+                />
+              ) : (
+                <div className="text-muted-foreground text-sm">Loading indexing settings…</div>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

@@ -6,6 +6,7 @@ import { toJsonField, fromJsonField, toOptionalJsonField } from './utils.js'
 interface ProjectRow {
   id: string
   title: string
+  ownerUserId: string
   metadata: string | null
   createdAt: number
   updatedAt: number
@@ -15,6 +16,7 @@ function toRow(project: Project): ProjectRow {
   return {
     id: project.id,
     title: project.title,
+    ownerUserId: project.ownerUserId,
     metadata: toJsonField(project.metadata),
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
@@ -25,6 +27,7 @@ function fromRow(row: ProjectRow): Project {
   return {
     id: row.id,
     title: row.title,
+    ownerUserId: row.ownerUserId,
     metadata: fromJsonField(row.metadata),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -42,6 +45,14 @@ export class ProjectsRepository implements ProjectsRepositoryPort {
     return rows.map(fromRow)
   }
 
+  async findByOwnerUserId(ownerUserId: string): Promise<Project[]> {
+    const rows = this.connection.all<ProjectRow>(
+      'SELECT * FROM projects WHERE ownerUserId = ? ORDER BY updatedAt DESC',
+      [ownerUserId]
+    )
+    return rows.map(fromRow)
+  }
+
   async findById(id: string): Promise<Project | undefined> {
     const row = this.connection.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', [id])
     return row ? fromRow(row) : undefined
@@ -50,23 +61,36 @@ export class ProjectsRepository implements ProjectsRepositoryPort {
   async insert(project: Project): Promise<void> {
     const row = toRow(project)
     this.connection.run(
-      'INSERT INTO projects (id, title, metadata, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
-      [row.id, row.title, row.metadata, row.createdAt, row.updatedAt]
+      `INSERT INTO projects
+        (id, title, ownerUserId, metadata, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [row.id, row.title, row.ownerUserId, row.metadata, row.createdAt, row.updatedAt]
     )
   }
 
   async update(id: string, data: UpdateProjectData): Promise<void> {
     const metadataStr = toOptionalJsonField(data.metadata)
     const hasTitle = data.title !== undefined ? 1 : 0
+    const hasOwnerUserId = data.ownerUserId !== undefined ? 1 : 0
     const hasMetadata = data.metadata !== undefined ? 1 : 0
 
     this.connection.run(
       `UPDATE projects
        SET title = CASE WHEN ? = 1 THEN ? ELSE title END,
+           ownerUserId = CASE WHEN ? = 1 THEN ? ELSE ownerUserId END,
            metadata = CASE WHEN ? = 1 THEN ? ELSE metadata END,
            updatedAt = ?
        WHERE id = ?`,
-      [hasTitle, data.title ?? null, hasMetadata, metadataStr ?? null, data.updatedAt, id]
+      [
+        hasTitle,
+        data.title ?? null,
+        hasOwnerUserId,
+        data.ownerUserId ?? '',
+        hasMetadata,
+        metadataStr ?? null,
+        data.updatedAt,
+        id,
+      ]
     )
   }
 

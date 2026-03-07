@@ -53,6 +53,8 @@ export interface AuthService {
   }): Promise<AuthUserSummary>
   createSession(userId: string): Promise<{ token: string; expiresAt: number }>
   logoutSession(token: string): Promise<void>
+  getUserById(userId: string): Promise<User | null>
+  getUserByEmail(email: string): Promise<User | null>
   getUserBySessionToken(token: string): Promise<User | null>
 }
 
@@ -322,6 +324,22 @@ export function createAuthService(repos: RepositorySet, transaction: Transaction
       const trimmed = token.trim()
       if (!trimmed) return
       await repos.authData.deleteSessionByToken(trimmed)
+    },
+
+    async getUserById(userId: string): Promise<User | null> {
+      const trimmedUserId = userId.trim()
+      if (!trimmedUserId) return null
+
+      const user = await repos.authData.findUserById(trimmedUserId)
+      return user ? toRuntimeUser(user) : null
+    },
+
+    async getUserByEmail(email: string): Promise<User | null> {
+      const normalizedEmail = trimEmail(email)
+      if (!normalizedEmail) return null
+
+      const user = await repos.authData.findUserByEmail(normalizedEmail)
+      return user ? toRuntimeUser(user) : null
     },
 
     async getUserBySessionToken(token: string): Promise<User | null> {

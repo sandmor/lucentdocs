@@ -7,6 +7,7 @@ import { protectedProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'
 import type { ChatObserveEvent } from '../../chat/runtime.js'
 import { configManager } from '../../config/runtime.js'
+import { assertProjectAccess, subscribeToProjectAccessRevocation } from '../access.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 
@@ -70,6 +71,7 @@ export const chatRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       return {
         threads: await ctx.services.chats.listForDocument(input.projectId, input.documentId),
@@ -85,6 +87,7 @@ export const chatRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       const thread = await ctx.services.chats.getById(
         input.projectId,
@@ -120,10 +123,26 @@ export const chatRouter = router({
       return observable<ChatObserveEvent>((emit) => {
         let closed = false
         let unsubscribe: (() => void) | null = null
+        let unsubscribeAccess: (() => void) | null = null
 
-        void ctx.chatRuntime
-          .subscribe(input, (state) => {
-            emit.next(state)
+        void assertProjectAccess(ctx, input.projectId)
+          .then(() => assertProjectDocument(input.projectId, input.documentId, ctx.services))
+          .then(() => {
+            unsubscribeAccess = subscribeToProjectAccessRevocation(
+              ctx,
+              input.projectId,
+              (error) => {
+                if (closed) return
+                closed = true
+                unsubscribe?.()
+                unsubscribeAccess?.()
+                emit.error(error)
+              }
+            )
+
+            return ctx.chatRuntime.subscribe(input, (state) => {
+              emit.next(state)
+            })
           })
           .then((nextUnsubscribe) => {
             if (closed) {
@@ -133,12 +152,13 @@ export const chatRouter = router({
             unsubscribe = nextUnsubscribe
           })
           .catch((error) => {
-            emit.error(mapRuntimeError(error))
+            emit.error(error instanceof TRPCError ? error : mapRuntimeError(error))
           })
 
         const onAbort = () => {
           closed = true
           unsubscribe?.()
+          unsubscribeAccess?.()
         }
 
         signal?.addEventListener('abort', onAbort)
@@ -147,6 +167,7 @@ export const chatRouter = router({
           closed = true
           signal?.removeEventListener('abort', onAbort)
           unsubscribe?.()
+          unsubscribeAccess?.()
         }
       })
     }),
@@ -160,6 +181,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       const created = await ctx.services.chats.create(
         input.projectId,
@@ -199,6 +221,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       const message = input.message.trim()
       const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
@@ -227,6 +250,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       return { canceled: ctx.chatRuntime.cancelGeneration(input, input.generationId) }
     }),
@@ -240,6 +264,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       const deleted = await ctx.services.chats.delete(
         input.projectId,

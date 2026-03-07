@@ -85,13 +85,15 @@ describe('EmbeddingIndexService', () => {
     )
 
     expect(result.processed).toBe(1)
-    const stored = await adapter.repositories.documentEmbeddings.findEmbedding(
+    const stored = await adapter.repositories.documentEmbeddings.findEmbeddings(
       doc.id,
       OPENROUTER_BASE_URL,
       'openai/text-embedding-3-small'
     )
-    expect(stored).toBeDefined()
-    expect(stored?.dimensions).toBe(3)
+    expect(stored).toHaveLength(1)
+    expect(stored[0]?.dimensions).toBe(3)
+    expect(stored[0]?.strategy.type).toBe('sliding_window')
+    expect(stored[0]?.documentTimestamp).toBe(1000)
 
     adapter.connection.close()
   })
@@ -210,12 +212,12 @@ describe('EmbeddingIndexService', () => {
     const firstFlush = await firstFlushPromise
     expect(firstFlush.processed).toBe(0)
 
-    const storedAfterFirst = await adapter.repositories.documentEmbeddings.findEmbedding(
+    const storedAfterFirst = await adapter.repositories.documentEmbeddings.findEmbeddings(
       doc.id,
       OPENROUTER_BASE_URL,
       'openai/text-embedding-3-small'
     )
-    expect(storedAfterFirst).toBeUndefined()
+    expect(storedAfterFirst).toHaveLength(0)
 
     const statsAfterFirst = await adapter.repositories.documentEmbeddings.getQueueStats()
     expect(statsAfterFirst.totalJobs).toBe(1)
@@ -236,15 +238,234 @@ describe('EmbeddingIndexService', () => {
     )
     expect(secondFlush.processed).toBe(1)
 
-    const storedAfterSecond = await adapter.repositories.documentEmbeddings.findEmbedding(
+    const storedAfterSecond = await adapter.repositories.documentEmbeddings.findEmbeddings(
       doc.id,
       OPENROUTER_BASE_URL,
       'openai/text-embedding-3-small'
     )
-    expect(storedAfterSecond).toBeDefined()
+    expect(storedAfterSecond).toHaveLength(1)
 
     const statsAfterSecond = await adapter.repositories.documentEmbeddings.getQueueStats()
     expect(statsAfterSecond.totalJobs).toBe(0)
+
+    adapter.connection.close()
+  })
+
+  test('stores multiple embedding chunks when a document uses sliding window indexing', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = readFetchUrl(input)
+      if (url === `${OPENROUTER_BASE_URL}/embeddings`) {
+        return jsonResponse({
+          data: [
+            { embedding: [0.1, 0.2, 0.3] },
+            { embedding: [0.4, 0.5, 0.6] },
+            { embedding: [0.7, 0.8, 0.9] },
+            { embedding: [1.0, 1.1, 1.2] },
+          ],
+        })
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    }) as typeof fetch
+
+    const dbPath = uniqueDbPath('embedding-index-service-sliding-window')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
+
+    await adapter.services.aiSettings.initializeDefaults({
+      env: {
+        AI_BASE_URL: OPENROUTER_BASE_URL,
+        AI_MODEL: 'gpt-5',
+        AI_API_KEY: 'test-key',
+      },
+    })
+    configureEmbeddingProvider(adapter.services.aiSettings)
+
+    const doc = await adapter.services.documents.create(
+      'windowed.md',
+      JSON.stringify({
+        doc: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'abcdefghijklmnopqrstuvwxyz' }],
+            },
+          ],
+        },
+        aiDraft: null,
+      })
+    )
+
+    await adapter.services.indexingSettings.updateDocumentStrategy(doc.id, {
+      type: 'sliding_window',
+      properties: {
+        level: 'character',
+        windowSize: 16,
+        stride: 10,
+      },
+    })
+
+    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
+
+    const result = await adapter.services.embeddingIndex.flushDueQueue(
+      { debounceMs: 0, batchMaxWaitMs: 5000 },
+      1000
+    )
+
+    expect(result.processed).toBe(1)
+
+    const stored = await adapter.repositories.documentEmbeddings.findEmbeddings(
+      doc.id,
+      OPENROUTER_BASE_URL,
+      'openai/text-embedding-3-small'
+    )
+
+    expect(stored.length).toBeGreaterThan(1)
+    expect(stored.map((entry) => entry.chunkOrdinal)).toEqual([0, 1, 2, 3])
+    expect(stored.every((entry) => entry.strategy.type === 'sliding_window')).toBe(true)
+
+    adapter.connection.close()
+  })
+
+  test('handles empty documents by deleting existing embeddings and clearing queue', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-empty-doc')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
+
+    await adapter.services.aiSettings.initializeDefaults({
+      env: {
+        AI_BASE_URL: OPENROUTER_BASE_URL,
+        AI_MODEL: 'gpt-5',
+        AI_API_KEY: 'test-key',
+      },
+    })
+    configureEmbeddingProvider(adapter.services.aiSettings)
+
+    const doc = await adapter.services.documents.create(
+      '',
+      JSON.stringify({
+        doc: {
+          type: 'doc',
+          content: [{ type: 'paragraph' }],
+        },
+        aiDraft: null,
+      })
+    )
+
+    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: doc.id,
+      providerConfigId: null,
+      providerId: 'test-provider',
+      type: 'openai',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'openai/text-embedding-3-small',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 999,
+      contentHash: 'old-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 10,
+          text: 'old content',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+
+    const existingBefore = await adapter.repositories.documentEmbeddings.findEmbeddings(
+      doc.id,
+      OPENROUTER_BASE_URL,
+      'openai/text-embedding-3-small'
+    )
+    expect(existingBefore).toHaveLength(1)
+
+    await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
+
+    const result = await adapter.services.embeddingIndex.flushDueQueue(
+      { debounceMs: 0, batchMaxWaitMs: 5000 },
+      1000
+    )
+
+    expect(result.processed).toBe(0)
+    expect(result.skipped).toBe(0)
+
+    const existingAfter = await adapter.repositories.documentEmbeddings.findEmbeddings(
+      doc.id,
+      OPENROUTER_BASE_URL,
+      'openai/text-embedding-3-small'
+    )
+    expect(existingAfter).toHaveLength(0)
+
+    const queueStats = await adapter.repositories.documentEmbeddings.getQueueStats()
+    expect(queueStats.totalJobs).toBe(0)
+
+    adapter.connection.close()
+  })
+
+  test('ignores stale repository replacements when a newer document timestamp already exists', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-stale-repository-write')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
+
+    const doc = await adapter.services.documents.create('race.md')
+
+    const newer = await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: doc.id,
+      providerConfigId: null,
+      providerId: 'test-provider',
+      type: 'openai',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'test-model',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 200,
+      contentHash: 'newer-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 5,
+          text: 'newer',
+          embedding: [0.4, 0.5, 0.6],
+        },
+      ],
+      createdAt: 200,
+      updatedAt: 200,
+    })
+    expect(newer.status).toBe('applied')
+
+    const stale = await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: doc.id,
+      providerConfigId: null,
+      providerId: 'test-provider',
+      type: 'openai',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'test-model',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 100,
+      contentHash: 'stale-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 5,
+          text: 'stale',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: 100,
+      updatedAt: 100,
+    })
+
+    expect(stale.status).toBe('stale')
+    expect(stale.embeddings).toHaveLength(1)
+    expect(stale.embeddings[0]?.contentHash).toBe('newer-hash')
+    expect(stale.embeddings[0]?.documentTimestamp).toBe(200)
 
     adapter.connection.close()
   })

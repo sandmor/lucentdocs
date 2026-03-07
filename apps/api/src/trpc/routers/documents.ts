@@ -15,6 +15,7 @@ import {
 import { configManager } from '../../config/runtime.js'
 import { projectSyncBus } from '../project-sync.js'
 import { YJS_RESTORE_CLOSE_CODE, YJS_RESTORE_CLOSE_REASON } from '../../yjs/runtime.js'
+import { assertProjectAccess } from '../access.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const pathSchema = z.string().trim().min(1).max(400)
@@ -29,19 +30,6 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ])
 )
 const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSchema)
-
-async function assertProjectExists(
-  projectId: string,
-  services: { projects: { has: (id: string) => Promise<boolean> } }
-): Promise<void> {
-  const exists = await services.projects.has(projectId)
-  if (!exists) {
-    throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: `Project ${projectId} not found`,
-    })
-  }
-}
 
 async function getProjectDefaultDocumentId(
   projectId: string,
@@ -82,10 +70,8 @@ export const documentsRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const docs = await ctx.services.documents.listForProject(input.projectId)
-      if (docs.length === 0) {
-        await assertProjectExists(input.projectId, ctx.services)
-      }
       return docs
     }),
 
@@ -96,6 +82,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const doc = await ctx.services.documents.openOrCreateDefaultForProject(input.projectId)
       if (!doc) {
         throw new TRPCError({
@@ -114,6 +101,7 @@ export const documentsRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const doc = await ctx.services.documents.getForProject(input.projectId, input.id)
       if (!doc) {
         throw new TRPCError({
@@ -132,6 +120,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const updated = await ctx.services.documents.setDefaultForProject(input.projectId, input.id)
       if (!updated) {
         throw new TRPCError({
@@ -160,17 +149,10 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const normalizedTitle = normalizeAndValidatePath(input.title, 'Document path')
       const doc = await ctx.services.documents.createForProject(input.projectId, normalizedTitle)
       if (!doc) {
-        const exists = await ctx.services.projects.has(input.projectId)
-        if (!exists) {
-          throw new TRPCError({
-            code: 'NOT_FOUND',
-            message: `Project ${input.projectId} not found`,
-          })
-        }
-
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: `Cannot create document at ${normalizedTitle} due to a path conflict`,
@@ -206,6 +188,7 @@ export const documentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { projectId, id, title, metadata } = input
+      await assertProjectAccess(ctx, projectId)
       const data: { title?: string; metadata?: JsonObject | null } = { metadata }
 
       if (title !== undefined) {
@@ -250,6 +233,7 @@ export const documentsRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const versions = await ctx.services.documents.getVersionHistoryForProject(
         input.projectId,
         input.id
@@ -274,6 +258,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const snapshot = await ctx.services.documents.createSnapshotForProject(
         input.projectId,
         input.id
@@ -296,6 +281,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const doc = await ctx.services.documents.restoreToSnapshotForProject(
         input.projectId,
         input.id,
@@ -328,6 +314,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const deleted = await ctx.services.documents.deleteForProject(input.projectId, input.id)
       if (!deleted) {
         throw new TRPCError({
@@ -364,6 +351,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const normalizedPath = normalizeAndValidatePath(input.path, 'Destination path')
       const moved = await ctx.services.documents.moveForProject(
         input.projectId,
@@ -406,20 +394,13 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const normalizedPath = normalizeAndValidatePath(input.path, 'Directory path')
       const created = await ctx.services.documents.createDirectoryForProject(
         input.projectId,
         normalizedPath
       )
       if (!created) {
-        const exists = await ctx.services.projects.has(input.projectId)
-        if (!exists) {
-          throw new TRPCError({
-            code: 'NOT_FOUND',
-            message: `Project ${input.projectId} not found`,
-          })
-        }
-
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: `Cannot create directory at ${normalizedPath} due to a path conflict`,
@@ -448,6 +429,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const sourcePath = normalizeAndValidatePath(input.sourcePath, 'Source directory path')
       const destinationPath = normalizeAndValidatePath(
         input.destinationPath,
@@ -502,6 +484,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const normalizedPath = normalizeAndValidatePath(input.path, 'Directory path')
       const deleted = await ctx.services.documents.deleteDirectoryForProject(
         input.projectId,
@@ -543,6 +526,7 @@ export const documentsRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const maxDocExportChars = configManager.getConfig().limits.docExportChars
       const doc = await ctx.services.documents.getForProject(input.projectId, input.id)
       if (!doc) {
@@ -592,6 +576,7 @@ export const documentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const maxDocImportChars = configManager.getConfig().limits.docImportChars
       if (input.markdown.length > maxDocImportChars) {
         throw new TRPCError({

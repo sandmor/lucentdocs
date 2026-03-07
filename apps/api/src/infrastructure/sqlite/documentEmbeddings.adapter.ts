@@ -3,10 +3,13 @@ import type {
   DocumentEmbeddingJobEntity,
   DocumentEmbeddingQueueStats,
   DocumentEmbeddingsRepositoryPort,
-  UpsertDocumentEmbeddingInput,
+  ReplaceDocumentEmbeddingsInput,
+  ReplaceDocumentEmbeddingsResult,
 } from '../../core/ports/documentEmbeddings.port.js'
+import { indexingStrategySchema } from '@lucentdocs/shared'
 import { normalizeModelSourceType, normalizeBaseURL } from '../../core/ai/provider-types.js'
 import type { SqliteConnection } from './connection.js'
+import { fromJsonField, toJsonField } from './utils.js'
 
 const MAX_EMBEDDING_DIMENSIONS = 8192
 
@@ -25,7 +28,14 @@ interface EmbeddingRow {
   type: string
   baseUrl: string
   model: string
+  strategyType: string
+  strategyProperties: string
+  chunkOrdinal: number
+  chunkStart: number
+  chunkEnd: number
+  chunkText: string
   dimensions: number
+  documentTimestamp: number
   contentHash: string
   createdAt: number
   updatedAt: number
@@ -64,6 +74,43 @@ function validateEmbeddingVector(embedding: number[]): void {
   }
 }
 
+function validateReplacementChunks(input: ReplaceDocumentEmbeddingsInput): void {
+  const ordinals = new Set<number>()
+  const expectedDimensions = input.chunks[0]?.embedding.length ?? null
+
+  for (const [index, chunk] of input.chunks.entries()) {
+    if (!Number.isInteger(chunk.ordinal) || chunk.ordinal < 0) {
+      throw new Error(`Embedding chunk ${index} has an invalid ordinal.`)
+    }
+
+    if (ordinals.has(chunk.ordinal)) {
+      throw new Error(`Embedding chunk ordinal ${chunk.ordinal} is duplicated.`)
+    }
+    ordinals.add(chunk.ordinal)
+
+    if (!Number.isInteger(chunk.start) || chunk.start < 0) {
+      throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid start offset.`)
+    }
+
+    if (!Number.isInteger(chunk.end) || chunk.end < chunk.start) {
+      throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid end offset.`)
+    }
+
+    validateEmbeddingVector(chunk.embedding)
+
+    if (expectedDimensions !== null && chunk.embedding.length !== expectedDimensions) {
+      throw new Error('Embedding provider returned inconsistent dimensions for one document.')
+    }
+  }
+
+  const sortedOrdinals = [...ordinals].sort((left, right) => left - right)
+  for (const [index, ordinal] of sortedOrdinals.entries()) {
+    if (ordinal !== index) {
+      throw new Error('Embedding chunk ordinals must be contiguous and zero-based.')
+    }
+  }
+}
+
 function toEmbeddingEntity(row: EmbeddingRow): DocumentEmbeddingEntity {
   return {
     id: row.id,
@@ -73,7 +120,16 @@ function toEmbeddingEntity(row: EmbeddingRow): DocumentEmbeddingEntity {
     type: normalizeModelSourceType(row.type),
     baseURL: row.baseUrl,
     model: row.model,
+    strategy: indexingStrategySchema.parse({
+      type: row.strategyType,
+      properties: fromJsonField(row.strategyProperties) ?? {},
+    }),
+    chunkOrdinal: row.chunkOrdinal,
+    chunkStart: row.chunkStart,
+    chunkEnd: row.chunkEnd,
+    chunkText: row.chunkText,
     dimensions: row.dimensions,
+    documentTimestamp: row.documentTimestamp,
     contentHash: row.contentHash,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -150,67 +206,104 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
     }
   }
 
-  async findEmbedding(
+  async findEmbeddings(
     documentId: string,
     baseURL: string,
     model: string
-  ): Promise<DocumentEmbeddingEntity | undefined> {
-    const row = this.connection.get<EmbeddingRow>(
-      `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model, dimensions, contentHash, createdAt, updatedAt
+  ): Promise<DocumentEmbeddingEntity[]> {
+    const rows = this.connection.all<EmbeddingRow>(
+      `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model,
+              strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd, chunkText,
+              dimensions, documentTimestamp, contentHash, createdAt, updatedAt
        FROM document_embeddings
        WHERE documentId = ? AND baseUrl = ? AND model = ?`,
       [documentId, normalizeBaseURL(baseURL), model.trim()]
     )
 
-    return row ? toEmbeddingEntity(row) : undefined
+    return rows.sort((left, right) => left.chunkOrdinal - right.chunkOrdinal).map(toEmbeddingEntity)
   }
 
-  async upsertEmbedding(input: UpsertDocumentEmbeddingInput): Promise<DocumentEmbeddingEntity> {
-    validateEmbeddingVector(input.embedding)
+  async replaceEmbeddings(
+    input: ReplaceDocumentEmbeddingsInput
+  ): Promise<ReplaceDocumentEmbeddingsResult> {
+    validateReplacementChunks(input)
+
     const normalizedBaseURL = normalizeBaseURL(input.baseURL)
     const model = input.model.trim()
-    const dimensions = input.embedding.length
-    const targetTable = vectorTableName(dimensions)
 
     return this.connection.transaction(() => {
-      const existing = this.connection.get<EmbeddingRow>(
-        `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model, dimensions, contentHash, createdAt, updatedAt
+      const latestStoredTimestamp = this.connection.get<{ documentTimestamp: number | null }>(
+        `SELECT MAX(documentTimestamp) AS documentTimestamp
+           FROM document_embeddings
+          WHERE documentId = ? AND baseUrl = ? AND model = ?`,
+        [input.documentId, normalizedBaseURL, model]
+      )
+
+      if (
+        latestStoredTimestamp?.documentTimestamp !== null &&
+        latestStoredTimestamp?.documentTimestamp !== undefined &&
+        latestStoredTimestamp.documentTimestamp > input.documentTimestamp
+      ) {
+        const staleRows = this.connection.all<EmbeddingRow>(
+          `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model,
+                  strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd, chunkText,
+                  dimensions, documentTimestamp, contentHash, createdAt, updatedAt
+             FROM document_embeddings
+            WHERE documentId = ? AND baseUrl = ? AND model = ?
+            ORDER BY chunkOrdinal ASC`,
+          [input.documentId, normalizedBaseURL, model]
+        )
+
+        return {
+          status: 'stale',
+          embeddings: staleRows.map(toEmbeddingEntity),
+        }
+      }
+
+      const existing = this.connection.all<Pick<EmbeddingRow, 'id' | 'dimensions'>>(
+        `SELECT id, dimensions
          FROM document_embeddings
          WHERE documentId = ? AND baseUrl = ? AND model = ?`,
         [input.documentId, normalizedBaseURL, model]
       )
 
-      if (existing && existing.dimensions !== dimensions) {
-        this.connection.run(`DELETE FROM ${vectorTableName(existing.dimensions)} WHERE rowid = ?`, [
-          existing.id,
+      for (const row of existing) {
+        this.connection.run(`DELETE FROM ${vectorTableName(row.dimensions)} WHERE rowid = ?`, [
+          row.id,
         ])
       }
+      this.connection.run(
+        `DELETE FROM document_embeddings
+         WHERE documentId = ? AND baseUrl = ? AND model = ?`,
+        [input.documentId, normalizedBaseURL, model]
+      )
 
-      if (existing) {
-        this.connection.run(
-          `UPDATE document_embeddings
-           SET providerConfigId = ?,
-               providerId = ?,
-               type = ?,
-               dimensions = ?,
-               contentHash = ?,
-               updatedAt = ?
-           WHERE id = ?`,
-          [
-            input.providerConfigId,
-            input.providerId,
-            input.type,
-            dimensions,
-            input.contentHash,
-            input.updatedAt,
-            existing.id,
-          ]
-        )
-      } else {
+      for (const chunk of input.chunks) {
+        const dimensions = chunk.embedding.length
+        const targetTable = vectorTableName(dimensions)
+
         this.connection.run(
           `INSERT INTO document_embeddings
-            (documentId, providerConfigId, providerId, type, baseUrl, model, dimensions, contentHash, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (
+              documentId,
+              providerConfigId,
+              providerId,
+              type,
+              baseUrl,
+              model,
+              strategyType,
+              strategyProperties,
+              chunkOrdinal,
+              chunkStart,
+              chunkEnd,
+              chunkText,
+              dimensions,
+              documentTimestamp,
+              contentHash,
+              createdAt,
+              updatedAt
+            )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             input.documentId,
             input.providerConfigId,
@@ -218,35 +311,55 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
             input.type,
             normalizedBaseURL,
             model,
+            input.strategy.type,
+            toJsonField(input.strategy.properties),
+            chunk.ordinal,
+            chunk.start,
+            chunk.end,
+            chunk.text,
             dimensions,
+            input.documentTimestamp,
             input.contentHash,
             input.createdAt,
             input.updatedAt,
           ]
         )
+
+        const row = this.connection.get<Pick<EmbeddingRow, 'id'>>(
+          `SELECT id
+             FROM document_embeddings
+            WHERE documentId = ? AND baseUrl = ? AND model = ? AND chunkOrdinal = ?`,
+          [input.documentId, normalizedBaseURL, model, chunk.ordinal]
+        )
+
+        if (!row) {
+          throw new Error('Failed to read stored document embedding chunk.')
+        }
+
+        this.connection.exec(
+          `CREATE VIRTUAL TABLE IF NOT EXISTS ${targetTable} USING vec0(embedding float[${dimensions}] distance_metric=cosine)`
+        )
+        this.connection.run(`DELETE FROM ${targetTable} WHERE rowid = ?`, [row.id])
+        this.connection.run(`INSERT INTO ${targetTable} (rowid, embedding) VALUES (?, ?)`, [
+          row.id,
+          new Float32Array(chunk.embedding),
+        ])
       }
 
-      const row = this.connection.get<EmbeddingRow>(
-        `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model, dimensions, contentHash, createdAt, updatedAt
-         FROM document_embeddings
-         WHERE documentId = ? AND baseUrl = ? AND model = ?`,
+      const rows = this.connection.all<EmbeddingRow>(
+        `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model,
+                strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd, chunkText,
+                dimensions, documentTimestamp, contentHash, createdAt, updatedAt
+           FROM document_embeddings
+          WHERE documentId = ? AND baseUrl = ? AND model = ?
+          ORDER BY chunkOrdinal ASC`,
         [input.documentId, normalizedBaseURL, model]
       )
 
-      if (!row) {
-        throw new Error('Failed to read stored document embedding.')
+      return {
+        status: 'applied',
+        embeddings: rows.map(toEmbeddingEntity),
       }
-
-      this.connection.exec(
-        `CREATE VIRTUAL TABLE IF NOT EXISTS ${targetTable} USING vec0(embedding float[${dimensions}] distance_metric=cosine)`
-      )
-      this.connection.run(`DELETE FROM ${targetTable} WHERE rowid = ?`, [row.id])
-      this.connection.run(`INSERT INTO ${targetTable} (rowid, embedding) VALUES (?, ?)`, [
-        row.id,
-        new Float32Array(input.embedding),
-      ])
-
-      return toEmbeddingEntity(row)
     })
   }
 

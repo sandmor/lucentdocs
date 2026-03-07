@@ -49,7 +49,9 @@ export interface DocumentsService {
   getWithContent(id: string): Promise<DocumentWithContent | null>
   getContent(id: string): Promise<string>
   getWithContentByIds(documentIds: string[]): Promise<Map<string, DocumentWithContent>>
+  listAllIds(): Promise<string[]>
   listForProject(projectId: string): Promise<Document[]>
+  hasProjectAssociation(projectId: string, documentId: string): Promise<boolean>
 
   create(title: string, content?: string, type?: string): Promise<DocumentWithContent>
   createForProject(
@@ -325,7 +327,16 @@ export function createDocumentsService(
       return result
     },
 
+    async listAllIds(): Promise<string[]> {
+      return repos.projectDocuments.listDocumentIds()
+    },
+
     listForProject: listDocumentsForProject,
+
+    async hasProjectAssociation(projectId: string, documentId: string): Promise<boolean> {
+      if (!isValidId(projectId) || !isValidId(documentId)) return false
+      return repos.projectDocuments.hasProjectDocument(projectId, documentId)
+    },
 
     create: createDocument,
 

@@ -12,6 +12,9 @@ function createCallerContext(): AppContext {
     services: adapter.services,
     authPort: {
       isEnabled: () => false,
+      getUserById: async (userId: string) =>
+        userId === LOCAL_DEFAULT_USER.id ? LOCAL_DEFAULT_USER : null,
+      getUserByEmail: async () => null,
       validateSession: async () => LOCAL_DEFAULT_USER,
       login: async () => ({ success: false, error: 'not implemented' }),
       logout: async () => ({ success: true }),

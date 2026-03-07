@@ -1,9 +1,11 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
+import { observable } from '@trpc/server/observable'
 import { isValidId } from '@lucentdocs/shared'
 import { protectedProcedure, router } from '../index.js'
-import { InlineRuntimeError } from '../../inline/runtime.js'
+import { InlineRuntimeError, type InlineObserveEvent } from '../../inline/runtime.js'
 import { configManager } from '../../config/runtime.js'
+import { assertProjectAccess, subscribeToProjectAccessRevocation } from '../access.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 
@@ -36,6 +38,7 @@ export const inlineRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       try {
         const sessions = await ctx.inlineRuntime.getSessions(
           {
@@ -60,6 +63,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       try {
         await ctx.inlineRuntime.pruneOrphanSessions({
           projectId: input.projectId,
@@ -88,6 +92,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const limits = configManager.getConfig().limits
       const totalContext = input.contextBefore.length + (input.contextAfter?.length ?? 0)
       if (totalContext > limits.contextChars) {
@@ -134,6 +139,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       const limits = configManager.getConfig().limits
       const totalContext = input.contextBefore.length + (input.contextAfter?.length ?? 0)
       if (totalContext > limits.contextChars) {
@@ -162,7 +168,8 @@ export const inlineRouter = router({
         generationId: idSchema.optional(),
       })
     )
-    .mutation(({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
       return {
         canceled: ctx.inlineRuntime.cancelGeneration(input, input.generationId),
       }
@@ -177,10 +184,54 @@ export const inlineRouter = router({
       })
     )
     .subscription(({ ctx, input, signal }) => {
-      try {
-        return ctx.inlineRuntime.observe(input, signal)
-      } catch (error) {
-        throw mapRuntimeError(error)
-      }
+      return observable<InlineObserveEvent>((emit) => {
+        let closed = false
+        let unsubscribe: (() => void) | null = null
+        let unsubscribeAccess: (() => void) | null = null
+
+        void assertProjectAccess(ctx, input.projectId)
+          .then(() => {
+            unsubscribeAccess = subscribeToProjectAccessRevocation(
+              ctx,
+              input.projectId,
+              (error) => {
+                if (closed) return
+                closed = true
+                unsubscribe?.()
+                unsubscribeAccess?.()
+                emit.error(error)
+              }
+            )
+
+            return ctx.inlineRuntime.subscribe(input, (event) => {
+              emit.next(event)
+            })
+          })
+          .then((nextUnsubscribe) => {
+            if (closed) {
+              nextUnsubscribe()
+              return
+            }
+            unsubscribe = nextUnsubscribe
+          })
+          .catch((error) => {
+            emit.error(error instanceof TRPCError ? error : mapRuntimeError(error))
+          })
+
+        const onAbort = () => {
+          closed = true
+          unsubscribe?.()
+          unsubscribeAccess?.()
+        }
+
+        signal?.addEventListener('abort', onAbort)
+
+        return () => {
+          closed = true
+          signal?.removeEventListener('abort', onAbort)
+          unsubscribe?.()
+          unsubscribeAccess?.()
+        }
+      })
     }),
 })

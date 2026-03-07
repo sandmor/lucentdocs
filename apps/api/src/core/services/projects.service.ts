@@ -4,9 +4,11 @@ import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 
 export interface ProjectsService {
-  create(title: string): Promise<Project>
+  create(title: string, options: { ownerUserId: string }): Promise<Project>
   list(): Promise<Project[]>
+  listOwnedByUser(ownerUserId: string): Promise<Project[]>
   getById(id: string): Promise<Project | null>
+  reassignOwner(id: string, ownerUserId: string): Promise<Project | null>
   update(
     id: string,
     data: { title?: string; metadata?: JsonObject | null }
@@ -20,13 +22,18 @@ export function createProjectsService(
   transaction: TransactionPort
 ): ProjectsService {
   return {
-    async create(title: string): Promise<Project> {
+    async create(title: string, options: { ownerUserId: string }): Promise<Project> {
       const now = Date.now()
       const projectId = nanoid()
+      const ownerUserId = options.ownerUserId.trim()
+      if (!ownerUserId) {
+        throw new Error('Project owner user ID is required.')
+      }
 
       const project: Project = {
         id: projectId,
         title,
+        ownerUserId,
         metadata: null,
         createdAt: now,
         updatedAt: now,
@@ -43,9 +50,38 @@ export function createProjectsService(
       return repos.projects.findAll()
     },
 
+    async listOwnedByUser(ownerUserId: string): Promise<Project[]> {
+      const normalizedOwnerUserId = ownerUserId.trim()
+      if (!normalizedOwnerUserId) return []
+      return repos.projects.findByOwnerUserId(normalizedOwnerUserId)
+    },
+
     async getById(id: string): Promise<Project | null> {
       if (!isValidId(id)) return null
       return (await repos.projects.findById(id)) ?? null
+    },
+
+    async reassignOwner(id: string, ownerUserId: string): Promise<Project | null> {
+      if (!isValidId(id)) return null
+
+      const normalizedOwnerUserId = ownerUserId.trim()
+      if (!normalizedOwnerUserId) return null
+
+      const project = await repos.projects.findById(id)
+      if (!project) return null
+      if (project.ownerUserId === normalizedOwnerUserId) return project
+
+      const updatedAt = Date.now()
+      await repos.projects.update(id, {
+        ownerUserId: normalizedOwnerUserId,
+        updatedAt,
+      })
+
+      return {
+        ...project,
+        ownerUserId: normalizedOwnerUserId,
+        updatedAt,
+      }
     },
 
     async update(

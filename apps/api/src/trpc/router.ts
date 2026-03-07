@@ -7,6 +7,7 @@ import { syncRouter } from './routers/sync.js'
 import { chatRouter } from './routers/chat.js'
 import { inlineRouter } from './routers/inline.js'
 import { authRouter } from './routers/auth.js'
+import { indexingRouter } from './routers/indexing.js'
 
 export const appRouter = router({
   projects: projectsRouter,
@@ -17,6 +18,7 @@ export const appRouter = router({
   chat: chatRouter,
   inline: inlineRouter,
   auth: authRouter,
+  indexing: indexingRouter,
 })
 
 export type AppRouter = typeof appRouter

@@ -15,6 +15,7 @@ import { VersionHistory, type VersionSnapshotInfo } from '@/components/version-h
 import { DocumentBrowser } from '@/components/documents/document-browser'
 import { ChatPanel } from '@/components/editor/chat/panel'
 import { SidebarIconBar, type SidebarPanel } from '@/components/editor/layout/sidebar-icons'
+import { ProjectSettings } from '@/components/editor/project-settings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -797,6 +798,7 @@ export function EditorPage() {
           documentId={currentDocumentId}
         />
       )}
+      {sidebarPanel === 'project-settings' && <ProjectSettings projectId={id} />}
     </>
   )
 

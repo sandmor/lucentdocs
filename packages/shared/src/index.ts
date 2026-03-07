@@ -47,6 +47,28 @@ export {
   LIMITS_CONFIG_KEYS,
   editableConfigSchema,
 } from './config.js'
+export type {
+  IndexingStrategyScopeType,
+  IndexingStrategyType,
+  SlidingWindowLevel,
+  CharacterSlidingWindowProperties,
+  SentenceSlidingWindowProperties,
+  ParagraphSlidingWindowProperties,
+  WholeDocumentIndexingStrategy,
+  SlidingWindowIndexingStrategy,
+  IndexingStrategy,
+  ResolvedIndexingStrategy,
+} from './indexing-strategy.js'
+export {
+  INDEXING_STRATEGY_SCOPE_TYPES,
+  INDEXING_STRATEGY_TYPES,
+  SLIDING_WINDOW_LEVELS,
+  DEFAULT_GLOBAL_INDEXING_STRATEGY,
+  indexingStrategySchema,
+  nullableIndexingStrategySchema,
+  indexingStrategyScopeTypeSchema,
+  describeIndexingStrategy,
+} from './indexing-strategy.js'
 export type { ParsedBaseURLResult } from './ai-provider.js'
 export {
   AI_PROVIDER_DEFAULT_BASE_URLS,

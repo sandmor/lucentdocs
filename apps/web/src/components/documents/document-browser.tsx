@@ -76,6 +76,15 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
           deleteDescription={browser.deleteDescription}
           onConfirmDelete={browser.handleConfirmDelete}
           isDeleting={browser.isDeleting}
+          documentSettingsOpen={browser.settingsDocumentId !== null}
+          onDocumentSettingsOpenChange={(open) => !open && browser.setSettingsDocumentId(null)}
+          documentSettingsTitle={browser.settingsDocumentTitle}
+          documentSettingsDirectStrategy={browser.documentSettings?.document?.strategy ?? null}
+          documentSettingsResolvedStrategy={browser.documentSettings?.resolved.strategy ?? null}
+          documentSettingsResolvedScopeType={browser.documentSettings?.resolved.scopeType ?? null}
+          onSaveDocumentSettings={browser.saveDocumentSettings}
+          isLoadingDocumentSettings={browser.isLoadingDocumentSettings}
+          isSavingDocumentSettings={browser.isSavingDocumentSettings}
         />
       </section>
     </DndContext>

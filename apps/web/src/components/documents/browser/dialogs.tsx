@@ -19,6 +19,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import type { IndexingStrategy, IndexingStrategyScopeType } from '@lucentdocs/shared'
+import { Loader2 } from 'lucide-react'
+import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
 import type { DeleteTarget, MoveTarget, RenameTarget } from './types'
 
 interface BrowserDialogsProps {
@@ -54,6 +57,15 @@ interface BrowserDialogsProps {
   deleteDescription: string
   onConfirmDelete: () => void
   isDeleting: boolean
+  documentSettingsOpen: boolean
+  onDocumentSettingsOpenChange: (open: boolean) => void
+  documentSettingsTitle: string
+  documentSettingsDirectStrategy: IndexingStrategy | null
+  documentSettingsResolvedStrategy: IndexingStrategy | null
+  documentSettingsResolvedScopeType: IndexingStrategyScopeType | null
+  onSaveDocumentSettings: (strategy: IndexingStrategy | null) => void
+  isLoadingDocumentSettings: boolean
+  isSavingDocumentSettings: boolean
 }
 
 export function BrowserDialogs({
@@ -89,6 +101,15 @@ export function BrowserDialogs({
   deleteDescription,
   onConfirmDelete,
   isDeleting,
+  documentSettingsOpen,
+  onDocumentSettingsOpenChange,
+  documentSettingsTitle,
+  documentSettingsDirectStrategy,
+  documentSettingsResolvedStrategy,
+  documentSettingsResolvedScopeType,
+  onSaveDocumentSettings,
+  isLoadingDocumentSettings,
+  isSavingDocumentSettings,
 }: BrowserDialogsProps) {
   return (
     <>
@@ -218,6 +239,37 @@ export function BrowserDialogs({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={documentSettingsOpen} onOpenChange={onDocumentSettingsOpenChange}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Document settings</DialogTitle>
+            <DialogDescription>
+              Configure how {documentSettingsTitle || 'this document'} is indexed.
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLoadingDocumentSettings ||
+          !documentSettingsResolvedStrategy ||
+          !documentSettingsResolvedScopeType ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
+              <Loader2 className="size-4 animate-spin" />
+              Loading settings…
+            </div>
+          ) : (
+            <IndexingStrategyForm
+              allowInherit
+              compact
+              directStrategy={documentSettingsDirectStrategy}
+              resolvedStrategy={documentSettingsResolvedStrategy}
+              resolvedScopeType={documentSettingsResolvedScopeType}
+              isSaving={isSavingDocumentSettings}
+              saveLabel="Save document override"
+              onSave={onSaveDocumentSettings}
+            />
+          )}
         </DialogContent>
       </Dialog>
 

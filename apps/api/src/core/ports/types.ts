@@ -7,6 +7,7 @@ import type { YjsDocumentsRepositoryPort } from './yjsDocuments.port.js'
 import type { AiSettingsRepositoryPort } from './aiSettings.port.js'
 import type { DocumentEmbeddingsRepositoryPort } from './documentEmbeddings.port.js'
 import type { AuthDataRepositoryPort } from './authData.port.js'
+import type { IndexingSettingsRepositoryPort } from './indexingSettings.port.js'
 
 export interface RepositorySet {
   projects: ProjectsRepositoryPort
@@ -16,6 +17,7 @@ export interface RepositorySet {
   versionSnapshots: VersionSnapshotsRepositoryPort
   yjsDocuments: YjsDocumentsRepositoryPort
   aiSettings: AiSettingsRepositoryPort
+  indexingSettings: IndexingSettingsRepositoryPort
   documentEmbeddings: DocumentEmbeddingsRepositoryPort
   authData: AuthDataRepositoryPort
 }

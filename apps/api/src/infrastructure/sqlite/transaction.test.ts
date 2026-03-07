@@ -24,8 +24,10 @@ test('keeps non-transaction reads isolated from in-flight transaction writes', a
 
     const tx = transaction.run(async () => {
       connection.run(
-        'INSERT INTO projects (id, title, metadata, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
-        [id, 'isolated', null, now, now]
+        `INSERT INTO projects
+          (id, title, ownerUserId, metadata, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, 'isolated', 'owner_tx', null, now, now]
       )
       await wait(40)
     })

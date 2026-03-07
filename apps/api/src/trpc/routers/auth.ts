@@ -128,6 +128,11 @@ export const authRouter = router({
     return ctx.services.auth.listUsers()
   }),
 
+  getUser: adminProcedure.input(userIdSchema).query(async ({ ctx, input }) => {
+    const users = await ctx.services.auth.listUsers()
+    return users.find((user) => user.id === input.userId) ?? null
+  }),
+
   deleteUser: adminProcedure.input(userIdSchema).mutation(async ({ ctx, input }) => {
     await ctx.services.auth.deleteUser(input.userId, ctx.user.id)
     return { success: true }

@@ -4,6 +4,7 @@ import { EditorPage } from '@/pages/editor'
 import { AdminConfigPage } from '@/pages/admin-config'
 import { AdminPromptsPage } from '@/pages/admin-prompts'
 import { AdminUsersPage } from '@/pages/admin-users'
+import { UserSettingsPage } from '@/pages/user-settings'
 
 import { LoginPage } from '@/pages/auth/login'
 import { SignupPage } from '@/pages/auth/signup'
@@ -16,6 +17,7 @@ export const routes = createRoutesFromElements(
 
     <Route element={<AuthGuard />}>
       <Route path="/" element={<HomePage />} />
+      <Route path="/settings" element={<UserSettingsPage />} />
       <Route path="/admin/config" element={<AdminConfigPage />} />
       <Route path="/admin/users" element={<AdminUsersPage />} />
       <Route path="/admin/prompts" element={<AdminPromptsPage />} />

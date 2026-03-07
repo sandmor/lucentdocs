@@ -4,6 +4,7 @@ import { protectedProcedure, router } from '../index.js'
 import { projectSyncBus } from '../project-sync.js'
 import type { ProjectSyncEvent } from '../project-sync.js'
 import { observable } from '@trpc/server/observable'
+import { assertProjectAccess, subscribeToProjectAccessRevocation } from '../access.js'
 
 type ProjectsListSyncEvent = Extract<
   ProjectSyncEvent,
@@ -19,14 +20,20 @@ const eventBaseSchema = z.object({
 })
 
 const projectCreatedEventSchema = eventBaseSchema.extend({
+  audienceUserIds: z.array(idSchema),
+  ownerUserId: idSchema,
   type: z.literal('project.created'),
 })
 
 const projectUpdatedEventSchema = eventBaseSchema.extend({
+  audienceUserIds: z.array(idSchema),
+  ownerUserId: idSchema,
   type: z.literal('project.updated'),
 })
 
 const projectDeletedEventSchema = eventBaseSchema.extend({
+  audienceUserIds: z.array(idSchema),
+  ownerUserId: idSchema,
   type: z.literal('project.deleted'),
 })
 
@@ -70,10 +77,14 @@ const projectsListSyncEventSchema = z.discriminatedUnion('type', [
 ])
 
 export const syncRouter = router({
-  onProjectsListEvent: protectedProcedure.subscription(({ signal }) => {
+  onProjectsListEvent: protectedProcedure.subscription(({ ctx, signal }) => {
     return observable<ProjectsListSyncEvent>((emit) => {
       const unsubscribe = projectSyncBus.subscribe((event) => {
         if (event.type === 'documents.changed' || event.type === 'chats.changed') {
+          return
+        }
+
+        if (ctx.user.role !== 'admin' && !event.audienceUserIds.includes(ctx.user.id)) {
           return
         }
 
@@ -99,25 +110,51 @@ export const syncRouter = router({
         projectId: idSchema,
       })
     )
-    .subscription(({ input, signal }) => {
+    .subscription(({ ctx, input, signal }) => {
       return observable<ProjectSyncEvent>((emit) => {
-        const unsubscribe = projectSyncBus.subscribe((event) => {
-          if (event.projectId !== input.projectId) {
-            return
-          }
+        let unsubscribe: (() => void) | null = null
+        let unsubscribeAccess: (() => void) | null = null
+        let closed = false
 
-          emit.next(projectSyncEventSchema.parse(event))
-        })
+        void assertProjectAccess(ctx, input.projectId)
+          .then(() => {
+            unsubscribeAccess = subscribeToProjectAccessRevocation(
+              ctx,
+              input.projectId,
+              (error) => {
+                if (closed) return
+                closed = true
+                unsubscribe?.()
+                unsubscribeAccess?.()
+                emit.error(error)
+              }
+            )
+
+            unsubscribe = projectSyncBus.subscribe((event) => {
+              if (event.projectId !== input.projectId) {
+                return
+              }
+
+              emit.next(projectSyncEventSchema.parse(event))
+            })
+          })
+          .catch((error) => {
+            emit.error(error)
+          })
 
         const onAbort = () => {
-          unsubscribe()
+          closed = true
+          unsubscribe?.()
+          unsubscribeAccess?.()
         }
 
         signal?.addEventListener('abort', onAbort)
 
         return () => {
+          closed = true
           signal?.removeEventListener('abort', onAbort)
-          unsubscribe()
+          unsubscribe?.()
+          unsubscribeAccess?.()
         }
       })
     }),
