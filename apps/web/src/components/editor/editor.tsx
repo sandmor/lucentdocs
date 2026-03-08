@@ -11,7 +11,6 @@ import { useAIWriterState } from './inline/hooks'
 import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
 import { emitAIStateChange } from './ai/writer-store'
-import { EditorToolbar } from './layout/toolbar'
 import { hasActiveDomSelection } from './selection/dom-selection'
 import { useInlineSessions } from './inline/use-sessions'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
@@ -26,6 +25,7 @@ interface EditorProps {
   onConnectionChange?: (status: ConnectionStatus) => void
   onEditorViewReady?: (view: EditorView | null) => void
   onEditorSelectionChange?: (selection: { from: number; to: number } | null) => void
+  onGeneratingChange?: (generating: boolean) => void
   className?: string
 }
 
@@ -36,6 +36,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     onConnectionChange,
     onEditorViewReady,
     onEditorSelectionChange,
+    onGeneratingChange,
     className,
   },
   ref
@@ -53,6 +54,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
   const [isEditorFocused, setIsEditorFocused] = useState(false)
   const [providerSessionKey, setProviderSessionKey] = useState(0)
+
+  useEffect(() => {
+    onGeneratingChange?.(isGenerating)
+  }, [isGenerating, onGeneratingChange])
+
   const aiState = useAIWriterState(editorView)
   const { inlineSessionsById, inlineSessionsRef, setInlineSessionsById } = useInlineSessions({
     projectId,
@@ -348,14 +354,6 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
   return (
     <div className="relative">
-      <EditorToolbar
-        isGenerating={isGenerating}
-        onContinueWriting={() => {
-          if (!viewRef.current) return
-          aiControllerRef.current?.startAIContinuation(viewRef.current, true)
-        }}
-      />
-
       <div ref={containerRef} className={className} />
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">

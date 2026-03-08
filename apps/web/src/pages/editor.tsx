@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { isDirectorySentinelPath, normalizeDocumentPath, pathSegments } from '@lucentdocs/shared'
 import { trpc } from '@/lib/trpc'
 import { Editor, type EditorHandle } from '@/components/editor'
+import { EditorToolbar } from '@/components/editor/layout/toolbar'
 import { VersionHistory, type VersionSnapshotInfo } from '@/components/version-history'
 import { DocumentBrowser } from '@/components/documents/document-browser'
 import { ChatPanel } from '@/components/editor/chat/panel'
@@ -18,7 +19,6 @@ import { SidebarIconBar, type SidebarPanel } from '@/components/editor/layout/si
 import { ProjectSettings } from '@/components/editor/project-settings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ArrowLeft, Loader2, Wifi, WifiOff, PanelLeftClose, PanelLeft, Menu, X } from 'lucide-react'
 import type { ConnectionStatus } from '@/lib/yjs-provider'
@@ -120,6 +120,7 @@ export function EditorPage() {
   const initialDesktopSidebarState = useMemo(() => resolveDesktopSidebarState(id), [id])
 
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
+  const [isGenerating, setIsGenerating] = useState(false)
   const [titleInput, setTitleInput] = useState('')
   const [editorSessionKey, setEditorSessionKey] = useState(0)
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>('explorer')
@@ -839,6 +840,15 @@ export function EditorPage() {
 
       {hasDocuments && documentQuery.data && !documentQuery.isLoading && currentDocumentId && (
         <div className="mx-auto max-w-3xl px-4 sm:px-8 py-6 sm:py-10">
+          <EditorToolbar
+            isGenerating={isGenerating}
+            onContinueWriting={() => editorRef.current?.startAIContinuation(true)}
+            titleInput={titleInput}
+            onTitleChange={setTitleInput}
+            onTitleBlur={handleTitleBlur}
+            onTitleKeyDown={handleTitleKeyDown}
+            titleDisabled={!currentDocumentId || documentQuery.isLoading || !!documentQuery.error}
+          />
           <Editor
             key={`${currentDocumentId}-${editorSessionKey}`}
             ref={editorRef}
@@ -846,6 +856,7 @@ export function EditorPage() {
             documentId={currentDocumentId}
             onConnectionChange={handleConnectionChange}
             onEditorSelectionChange={setEditorSelectionForChat}
+            onGeneratingChange={setIsGenerating}
             className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
           />
         </div>
@@ -886,24 +897,15 @@ export function EditorPage() {
             )}
           </Button>
 
-          <div className="min-w-0 flex-1 sm:flex-initial sm:max-w-sm">
-            <Input
-              value={titleInput}
-              onChange={(e) => setTitleInput(e.target.value)}
-              onBlur={handleTitleBlur}
-              onKeyDown={handleTitleKeyDown}
-              autoComplete="off"
-              disabled={!currentDocumentId || documentQuery.isLoading || !!documentQuery.error}
-              className="w-full max-w-45 sm:max-w-xs border-none bg-transparent text-sm sm:text-base font-semibold shadow-none focus-visible:ring-0"
-            />
-          </div>
-
           <span className="text-muted-foreground hidden text-sm lg:inline truncate max-w-50">
             {project.title}
           </span>
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-            <Badge variant={connectionStatus === 'disconnected' ? 'destructive' : 'secondary'}>
+            <Badge
+              variant={connectionStatus === 'disconnected' ? 'destructive' : 'secondary'}
+              className="h-6 w-6 p-0 sm:w-auto sm:px-2"
+            >
               {connectionStatus === 'connected' && (
                 <>
                   <Wifi className="size-3" />
