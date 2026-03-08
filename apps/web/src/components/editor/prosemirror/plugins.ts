@@ -1,4 +1,4 @@
-import { Plugin } from 'prosemirror-state'
+import { type EditorState, Plugin } from 'prosemirror-state'
 import { keymap } from 'prosemirror-keymap'
 import { baseKeymap } from 'prosemirror-commands'
 import { history, undo, redo } from 'prosemirror-history'
@@ -10,8 +10,14 @@ import { ySyncPlugin, yUndoPlugin, undo as yUndo, redo as yRedo } from 'y-prosem
 import type { Node as PMNode } from 'prosemirror-model'
 import { schema } from '@lucentdocs/shared'
 import { createAIWriterPlugin, type AIWriterActionHandlers } from '../ai/writer-plugin'
+import { installYjsSelectionPatch } from './yjs-selection-patch'
 
 export type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>
+
+interface CollaborationOptions {
+  yjsFragment: Y.XmlFragment
+  yjsMapping: ProsemirrorMapping
+}
 
 function buildInputRules() {
   const rules = []
@@ -37,12 +43,15 @@ function buildInputRules() {
 
 interface BuildPluginsOptions {
   aiHandlers?: AIWriterActionHandlers
-  yjsFragment?: Y.XmlFragment
-  yjsMapping?: ProsemirrorMapping
+  collaboration?: CollaborationOptions
+}
+
+function buildCollaborationPlugins(options: CollaborationOptions): Plugin[] {
+  return [ySyncPlugin(options.yjsFragment, { mapping: options.yjsMapping })]
 }
 
 export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
-  const { aiHandlers, yjsFragment, yjsMapping } = options
+  const { aiHandlers, collaboration } = options
 
   const effectiveHandlers: AIWriterActionHandlers = aiHandlers ?? {
     onAccept() {},
@@ -52,14 +61,14 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
 
   const plugins: Plugin[] = []
 
-  if (yjsFragment && yjsMapping) {
-    plugins.push(ySyncPlugin(yjsFragment, { mapping: yjsMapping }))
+  if (collaboration) {
+    plugins.push(...buildCollaborationPlugins(collaboration))
   }
 
   plugins.push(createAIWriterPlugin(effectiveHandlers))
   plugins.push(buildInputRules())
 
-  if (yjsFragment) {
+  if (collaboration) {
     plugins.push(yUndoPlugin())
     plugins.push(
       keymap({
@@ -84,4 +93,13 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   plugins.push(gapCursor())
 
   return plugins
+}
+
+/**
+ * Finalizes collaboration-specific runtime behavior after EditorState creation.
+ * Static plugin construction belongs in buildPlugins(); imperative third-party
+ * binding patches belong here so the editor component only performs wiring.
+ */
+export function finalizeCollaborationState(state: EditorState): void {
+  installYjsSelectionPatch(state)
 }

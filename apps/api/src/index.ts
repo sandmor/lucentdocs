@@ -31,7 +31,9 @@ const container = await createContainer(appConfig.paths.dbFile, {
 })
 
 container.yjsRuntime.initialize()
-container.embeddingRuntime.start()
+if (!isTestRuntime) {
+  container.embeddingRuntime.start()
+}
 
 function createTrpcContext({ req, user }: { req?: Request; user: User | null }): AppContext {
   return {
@@ -226,10 +228,12 @@ function registerProcessHandlers(
         console.error('Failed to flush Yjs documents on shutdown:', error)
       })
       .then(async () => {
-        container.embeddingRuntime.stop()
-        await container.embeddingRuntime.flushNow().catch((error) => {
-          console.error('Failed to flush embedding queue on shutdown:', error)
-        })
+        if (!isTestRuntime) {
+          container.embeddingRuntime.stop()
+          await container.embeddingRuntime.flushNow().catch((error) => {
+            console.error('Failed to flush embedding queue on shutdown:', error)
+          })
+        }
 
         options.trpcWs.handler.broadcastReconnectNotification()
         for (const client of options.trpcWs.wss.clients) {

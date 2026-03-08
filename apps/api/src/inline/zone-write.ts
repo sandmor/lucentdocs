@@ -1,4 +1,4 @@
-import { type Node as ProseMirrorNode } from 'prosemirror-model'
+import { Fragment, type Node as ProseMirrorNode } from 'prosemirror-model'
 import { Transform } from 'prosemirror-transform'
 import {
   type InlineZoneWriteAction,
@@ -100,6 +100,21 @@ function resolveSessionZone(doc: ProseMirrorNode, sessionId: string): SessionZon
   const zones = collectSessionZones(doc, sessionId)
   if (zones.length === 0) return null
   return zones.find((zone) => zone.streaming) ?? zones[0] ?? null
+}
+
+function findLastInlineTextblock(
+  doc: ProseMirrorNode
+): { node: ProseMirrorNode; pos: number } | null {
+  let match: { node: ProseMirrorNode; pos: number } | null = null
+
+  doc.descendants((node, pos) => {
+    if (node.isTextblock && node.inlineContent) {
+      match = { node, pos }
+    }
+    return true
+  })
+
+  return match
 }
 
 export function getInlineZoneTextFromDoc(
@@ -219,6 +234,77 @@ export function setInlineZoneStreamingInDoc(
     const node = tr.doc.nodeAt(segmentFrom)
     if (!node || node.type !== zoneType) continue
     tr.setNodeMarkup(segmentFrom, zoneType, attrs)
+  }
+
+  return {
+    changed: !tr.doc.eq(doc),
+    nextDoc: tr.doc,
+    zoneFound: true,
+  }
+}
+
+export function ensureInlineContinuationZoneAtDocumentEnd(
+  doc: ProseMirrorNode,
+  sessionId: string,
+  expectedContextBefore: string
+): { changed: boolean; nextDoc: ProseMirrorNode; zoneFound: boolean } {
+  // Only recreate terminal continuation zones when the document still ends at
+  // the same textual anchor the generation started from.
+  const existingZone = resolveSessionZone(doc, sessionId)
+  if (existingZone) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: true,
+    }
+  }
+
+  const documentText = doc.textBetween(0, doc.content.size, '\n\n', '\n')
+  if (!documentText.endsWith(expectedContextBefore)) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const zoneType = doc.type.schema.nodes.ai_zone
+  const paragraphType = doc.type.schema.nodes.paragraph
+  if (!zoneType) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const zoneNode = zoneType.create({
+    id: `zone_${sessionId}`,
+    streaming: true,
+    sessionId,
+    originalSlice: null,
+  })
+
+  const tr = new Transform(doc)
+  const lastInlineTextblock = findLastInlineTextblock(tr.doc)
+
+  if (lastInlineTextblock) {
+    const replacement = lastInlineTextblock.node.copy(
+      lastInlineTextblock.node.content.append(Fragment.from(zoneNode))
+    )
+    tr.replaceWith(
+      lastInlineTextblock.pos,
+      lastInlineTextblock.pos + lastInlineTextblock.node.nodeSize,
+      replacement
+    )
+  } else if (paragraphType) {
+    tr.insert(tr.doc.content.size, paragraphType.create(null, [zoneNode]))
+  } else {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
   }
 
   return {

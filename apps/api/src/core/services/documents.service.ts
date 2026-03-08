@@ -780,6 +780,18 @@ export function createDocumentsService(
       return this.createSnapshot(documentId)
     },
 
+    /**
+     * Restores a document to a previous snapshot version.
+     *
+     * This writes the snapshot content directly to the Yjs documents store (SQLite),
+     * bypassing the in-memory Y.Doc. After this returns, the caller must call
+     * `yjsRuntime.evictLiveDocument()` to close WebSocket connections and force
+     * clients to reload with the restored content.
+     *
+     * The eviction step is critical - without it, the in-memory Y.Doc would still
+     * contain the old content and could overwrite the restored state on the next
+     * persistence flush.
+     */
     async restoreToSnapshot(
       documentId: string,
       snapshotId: string

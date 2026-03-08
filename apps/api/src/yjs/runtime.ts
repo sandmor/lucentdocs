@@ -34,9 +34,55 @@ interface ProsemirrorTransformResult<T> {
   result: T
 }
 
+export interface YjsDocumentVersion {
+  epoch: number
+  instance: number
+}
+
 export const YJS_RESTORE_CLOSE_CODE = 4401
 export const YJS_RESTORE_CLOSE_REASON = 'document-restored'
 
+/**
+ * Manages the lifecycle of Yjs documents in memory and their persistence to storage.
+ *
+ * ## Architecture Overview
+ *
+ * This class integrates with @y/websocket-server which handles WebSocket connections
+ * and maintains the in-memory `docs` map (document name -> Y.Doc). The websocket server
+ * has its own persistence hooks that we configure via `setPersistence()`:
+ *
+ * - `bindState(documentName, doc)`: Called when a Y.Doc is first created in memory.
+ *   We use this to load the document state from SQLite storage.
+ *
+ * - `writeState(documentName, doc)`: Called by y-websocket-server when the last
+ *   WebSocket connection to a document closes. It persists the final state and
+ *   destroys the Y.Doc. This is the normal cleanup path for idle documents.
+ *
+ * ## Document Lifecycle
+ *
+ * 1. A WebSocket client connects → y-websocket-server creates/retrieves Y.Doc
+ * 2. `bindState` fires → we load persisted state from SQLite
+ * 3. Clients edit → Y.Doc `update` events fire → we track dirty state
+ * 4. Periodic flush loop → persists dirty documents to SQLite
+ * 5. Last client disconnects → `writeState` fires → final persist + destroy
+ *
+ * ## Dirty Tracking
+ *
+ * We maintain two separate dirty flags for different purposes:
+ *
+ * - `#persistenceDirtyDocs`: Documents that have unsaved changes needing flush to SQLite.
+ *   Cleared after each successful persist operation.
+ *
+ * - `#snapshotDirtyDocs`: Documents that have changes since their last version snapshot.
+ *   Cleared after a snapshot is created. This prevents creating snapshots for unchanged
+ *   documents every interval.
+ *
+ * ## Epoch Tracking
+ *
+ * We use epochs to detect stale document instances. When a document is replaced
+ * (e.g., during restore), we bump its epoch. Any operations on the old Y.Doc
+ * instance are rejected if the epoch doesn't match the current one.
+ */
 export class YjsRuntime {
   #persistenceInitialized = false
   #snapshotTimer: ReturnType<typeof setInterval> | null = null
@@ -46,8 +92,20 @@ export class YjsRuntime {
   #observer: YjsContentObserver
   #initializedDocs = new Set<string>()
   #initializingDocs = new Map<string, Promise<void>>()
-  #dirtyDocs = new Set<string>()
+
+  /** Documents with unsaved changes that need to be flushed to SQLite */
+  #persistenceDirtyDocs = new Set<string>()
+
+  /** Documents with changes since their last version snapshot */
+  #snapshotDirtyDocs = new Set<string>()
+
+  /** Epoch counter per document, incremented on replace/restore operations */
   #documentEpochs = new Map<string, number>()
+
+  /** Monotonic live-instance counter per document, incremented on each rebind */
+  #documentInstances = new Map<string, number>()
+
+  /** Epoch attached to each Y.Doc instance, used to detect stale references */
   #docEpochs = new WeakMap<Y.Doc, number>()
 
   constructor(
@@ -60,6 +118,14 @@ export class YjsRuntime {
     this.#observer = observer
   }
 
+  /**
+   * Initializes the persistence layer by registering callbacks with y-websocket-server.
+   *
+   * This must be called before any document operations. It sets up:
+   * - `bindState`: Loads document state from SQLite when a Y.Doc is created
+   * - `writeState`: Persists document state when the last connection closes
+   * - Periodic flush loop: Persists dirty documents at configured intervals
+   */
   initialize(): void {
     if (this.#persistenceInitialized) return
 
@@ -71,7 +137,7 @@ export class YjsRuntime {
         })
       },
       writeState: async (documentName: string, doc: Y.Doc) => {
-        this.#dirtyDocs.delete(documentName)
+        this.#persistenceDirtyDocs.delete(documentName)
         await this.#persistDocumentState(documentName, doc)
       },
     })
@@ -171,9 +237,9 @@ export class YjsRuntime {
     this.#ensurePersistenceInitialized()
 
     const persistOps: Promise<void>[] = []
-    const flushed = new Set<string>(this.#dirtyDocs)
-    const dirtyDocumentNames = [...this.#dirtyDocs]
-    this.#dirtyDocs.clear()
+    const flushed = new Set<string>(this.#persistenceDirtyDocs)
+    const dirtyDocumentNames = [...this.#persistenceDirtyDocs]
+    this.#persistenceDirtyDocs.clear()
 
     for (const documentName of dirtyDocumentNames) {
       const doc = docs.get(documentName)
@@ -199,6 +265,13 @@ export class YjsRuntime {
     await Promise.all(persistOps)
   }
 
+  /**
+   * Starts periodic version snapshot creation for connected documents.
+   *
+   * Only documents that are both connected (have active WebSocket sessions) AND
+   * have been modified since their last snapshot will have a new snapshot created.
+   * This prevents creating redundant snapshots for idle documents.
+   */
   startSnapshotTimer(): void {
     this.#ensurePersistenceInitialized()
     if (this.#snapshotTimer || this.#config.versionSnapshotIntervalMs <= 0) return
@@ -206,9 +279,11 @@ export class YjsRuntime {
     this.#snapshotTimer = setInterval(async () => {
       for (const [documentName, doc] of docs) {
         if (doc.conns.size === 0) continue
+        if (!this.#snapshotDirtyDocs.has(documentName)) continue
 
         try {
           await this.#insertSnapshot(documentName, doc)
+          this.#snapshotDirtyDocs.delete(documentName)
         } catch (error) {
           console.error(`Failed to create snapshot for ${documentName}:`, error)
         }
@@ -244,6 +319,61 @@ export class YjsRuntime {
     return this.#repos
   }
 
+  /**
+   * Captures the current document version for race detection across restores,
+   * reconnects, and live in-memory document replacement.
+   */
+  captureDocumentVersion(documentName: string): YjsDocumentVersion {
+    return {
+      epoch: this.#getDocumentEpoch(documentName),
+      instance: this.#documentInstances.get(documentName) ?? 0,
+    }
+  }
+
+  /**
+   * Returns whether the document's persisted state or live Y.Doc instance has
+   * changed since a previously captured version snapshot.
+   */
+  hasDocumentChangedSince(documentName: string, version: YjsDocumentVersion): boolean {
+    const current = this.captureDocumentVersion(documentName)
+    return current.epoch !== version.epoch || current.instance !== version.instance
+  }
+
+  /**
+   * Forcefully evicts a live document from memory, closing all WebSocket connections.
+   *
+   * This is used when a document is restored from a snapshot - the in-memory Y.Doc
+   * contains the old content and must be replaced with a fresh instance that will
+   * load the restored state from storage.
+   *
+   * ## Critical: Connection Clearing Order
+   *
+   * We clear `doc.conns` BEFORE closing the WebSocket connections. This is essential
+   * because y-websocket-server's `closeConn()` function (in utils.js) checks if
+   * `doc.conns.size === 0` to decide whether to call `writeState()`:
+   *
+   * ```js
+   * // y-websocket-server closeConn() logic:
+   * if (doc.conns.has(conn)) {
+   *   doc.conns.delete(conn)
+   *   if (doc.conns.size === 0 && persistence !== null) {
+   *     persistence.writeState(doc.name, doc)  // <-- Would overwrite restored content!
+   *   }
+   * }
+   * ```
+   *
+   * If we close connections without clearing `conns` first, `writeState` would be
+   * called and overwrite the just-restored content in SQLite with the old in-memory
+   * state. By clearing first, `doc.conns.has(conn)` returns false and the writeState
+   * path is skipped.
+   *
+   * ## Restore Flow
+   *
+   * 1. `restoreToSnapshot()` writes restored content to SQLite
+   * 2. This method closes WebSockets with a special close code
+   * 3. Client sees the close code and reloads the page
+   * 4. Page reload → new WebSocket → new Y.Doc → loads restored content from SQLite
+   */
   evictLiveDocument(
     documentName: string,
     options: { closeCode?: number; closeReason?: string } = {}
@@ -251,7 +381,10 @@ export class YjsRuntime {
     const liveDoc = docs.get(documentName)
     if (!liveDoc) return
 
-    for (const conn of liveDoc.conns.keys()) {
+    const connections = [...liveDoc.conns.keys()]
+    liveDoc.conns.clear()
+
+    for (const conn of connections) {
       if (options.closeCode !== undefined) {
         conn.close(options.closeCode, options.closeReason)
       } else {
@@ -263,8 +396,8 @@ export class YjsRuntime {
     docs.delete(documentName)
     this.#initializedDocs.delete(documentName)
     this.#initializingDocs.delete(documentName)
-    this.#dirtyDocs.delete(documentName)
-    this.#documentEpochs.delete(documentName)
+    this.#persistenceDirtyDocs.delete(documentName)
+    this.#snapshotDirtyDocs.delete(documentName)
   }
 
   bumpDocumentEpoch(documentName: string): number {
@@ -273,6 +406,15 @@ export class YjsRuntime {
     return nextEpoch
   }
 
+  /**
+   * Replaces a document's persisted state and optionally evicts the live instance.
+   *
+   * This is the low-level operation used by restore functionality. It:
+   * 1. Encodes the new content as Yjs state
+   * 2. Writes it directly to SQLite (bypassing the in-memory Y.Doc)
+   * 3. Bumps the document epoch to invalidate any existing Y.Doc instances
+   * 4. Evicts the live document so clients reconnect with fresh state
+   */
   async replaceDocument(
     documentName: string,
     prosemirrorJson: JsonObject,
@@ -324,11 +466,18 @@ export class YjsRuntime {
     }
   }
 
+  /**
+   * Persists all dirty documents to SQLite.
+   *
+   * This runs on a timer and ensures changes are durably stored even if clients
+   * disconnect unexpectedly. After successful persist, documents are removed from
+   * the dirty set. Failed persists re-add documents to the dirty set for retry.
+   */
   async #flushDirtyDocuments(): Promise<void> {
-    if (this.#dirtyDocs.size === 0) return
+    if (this.#persistenceDirtyDocs.size === 0) return
 
-    const dirtyDocumentNames = [...this.#dirtyDocs]
-    this.#dirtyDocs.clear()
+    const dirtyDocumentNames = [...this.#persistenceDirtyDocs]
+    this.#persistenceDirtyDocs.clear()
 
     await Promise.all(
       dirtyDocumentNames.map(async (documentName) => {
@@ -339,7 +488,7 @@ export class YjsRuntime {
           await this.#persistDocumentState(documentName, doc)
         } catch (error) {
           console.error(`Failed to persist Yjs document ${documentName}:`, error)
-          this.#dirtyDocs.add(documentName)
+          this.#persistenceDirtyDocs.add(documentName)
         }
       })
     )
@@ -377,6 +526,13 @@ export class YjsRuntime {
     await this.#persistDocumentState(documentName, doc)
   }
 
+  /**
+   * Loads a document's state from SQLite and sets up dirty tracking.
+   *
+   * This is called by y-websocket-server's `bindState` hook when a Y.Doc is
+   * first created. It loads the persisted state and registers event handlers
+   * for tracking when the document becomes dirty (modified).
+   */
   async #initializeDocumentState(documentName: string, doc: Y.Doc): Promise<void> {
     if (this.#initializedDocs.has(documentName)) {
       if (this.#isCurrentDocumentInstance(documentName, doc)) return
@@ -399,6 +555,10 @@ export class YjsRuntime {
 
     const initPromise = (async () => {
       this.#setDocEpoch(documentName, doc)
+      this.#documentInstances.set(
+        documentName,
+        (this.#documentInstances.get(documentName) ?? 0) + 1
+      )
 
       const data = await this.#repos.yjsDocuments.getPersisted(documentName)
 
@@ -410,11 +570,13 @@ export class YjsRuntime {
 
       doc.on('update', () => {
         if (!this.#isCurrentDocumentInstance(documentName, doc)) return
-        this.#dirtyDocs.add(documentName)
+        this.#persistenceDirtyDocs.add(documentName)
+        this.#snapshotDirtyDocs.add(documentName)
       })
 
       doc.on('destroy', () => {
-        this.#dirtyDocs.delete(documentName)
+        this.#persistenceDirtyDocs.delete(documentName)
+        this.#snapshotDirtyDocs.delete(documentName)
         this.#initializedDocs.delete(documentName)
         this.#initializingDocs.delete(documentName)
       })

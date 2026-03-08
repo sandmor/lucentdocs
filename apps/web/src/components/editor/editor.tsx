@@ -4,15 +4,22 @@ import { EditorView } from 'prosemirror-view'
 import { initProseMirrorDoc } from 'y-prosemirror'
 import { toast } from 'sonner'
 import { schema } from '@lucentdocs/shared'
-import { buildPlugins, type ProsemirrorMapping } from './prosemirror/plugins'
+import {
+  buildPlugins,
+  finalizeCollaborationState,
+  type ProsemirrorMapping,
+} from './prosemirror/plugins'
 import { createAIWriterController, type AIWriterController } from './ai/writer'
 import { InlineAIControls } from './inline/controls'
 import { useAIWriterState } from './inline/hooks'
+import { RemotePresenceOverlay } from './collaboration/remote-presence-overlay'
 import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
 import { emitAIStateChange } from './ai/writer-store'
-import { hasActiveDomSelection } from './selection/dom-selection'
+import { getSelectionRangeInView, hasActiveDomSelection } from './selection/dom-selection'
 import { useInlineSessions } from './inline/use-sessions'
+import { emitEditorViewChange } from './prosemirror/view-store'
+import { getLocalPresenceUser, installLocalPresenceUser } from './prosemirror/presence'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
 
 export interface EditorHandle {
@@ -54,6 +61,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
   const [isEditorFocused, setIsEditorFocused] = useState(false)
   const [providerSessionKey, setProviderSessionKey] = useState(0)
+  const [presenceAwareness, setPresenceAwareness] = useState<
+    ReturnType<typeof createYjsProvider>['awareness'] | null
+  >(null)
 
   useEffect(() => {
     onGeneratingChange?.(isGenerating)
@@ -151,6 +161,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       }
     )
     providerRef.current = provider
+    installLocalPresenceUser(provider.awareness, getLocalPresenceUser(provider.doc.clientID))
 
     const type = provider.type
     const { doc: pmDoc, mapping } = initProseMirrorDoc(type, schema)
@@ -158,8 +169,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     const state = EditorState.create({
       doc: pmDoc,
       plugins: buildPlugins({
-        yjsFragment: type,
-        yjsMapping: mapping as ProsemirrorMapping,
+        collaboration: {
+          yjsFragment: type,
+          yjsMapping: mapping as ProsemirrorMapping,
+        },
         aiHandlers: {
           onAccept() {
             if (viewRef.current) aiController.acceptAI(viewRef.current)
@@ -173,12 +186,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         },
       }),
     })
+    finalizeCollaborationState(state)
 
     const view = new EditorView(containerRef.current, {
       state,
       dispatchTransaction(tr) {
         const newState = view.state.apply(tr)
         view.updateState(newState)
+
+        emitEditorViewChange(view)
         emitAIStateChange(view)
         onEditorSelectionChange?.({
           from: newState.selection.from,
@@ -227,6 +243,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     })
 
     viewRef.current = view
+    queueMicrotask(() => {
+      if (!destroyed) {
+        setPresenceAwareness(provider.awareness)
+      }
+    })
     setEditorView(view)
     onEditorViewReady?.(view)
     onEditorSelectionChange?.({
@@ -238,39 +259,20 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     const syncSelectionFromDOM = () => {
       if (destroyed) return
 
-      const domSelection = window.getSelection()
-      if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
+      const selection = getSelectionRangeInView(view)
+      if (!selection || selection.empty) {
         if (view.hasFocus() && !selectionToolbarInteractingRef.current) {
           setSelectionRange(null)
         }
         return
       }
 
-      const range = domSelection.getRangeAt(0)
-      if (!view.dom.contains(range.commonAncestorContainer)) {
-        if (view.hasFocus() && !selectionToolbarInteractingRef.current) {
-          setSelectionRange(null)
+      setSelectionRange((previous) => {
+        if (previous && previous.from === selection.from && previous.to === selection.to) {
+          return previous
         }
-        return
-      }
-
-      try {
-        const anchor = view.posAtDOM(range.startContainer, range.startOffset, 1)
-        const head = view.posAtDOM(range.endContainer, range.endOffset, -1)
-        const from = Math.min(anchor, head)
-        const to = Math.max(anchor, head)
-
-        if (from >= to) return
-
-        setSelectionRange((previous) => {
-          if (previous && previous.from === from && previous.to === to) {
-            return previous
-          }
-          return { from, to }
-        })
-      } catch {
-        // Ignore transient DOM ranges that cannot be mapped to ProseMirror positions.
-      }
+        return { from: selection.from, to: selection.to }
+      })
     }
 
     const handleViewFocusIn = () => {
@@ -308,6 +310,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       view.dom.removeEventListener('mouseup', syncSelectionFromDOM)
       view.destroy()
       viewRef.current = null
+      setPresenceAwareness(null)
       setEditorView(null)
       onEditorViewReady?.(null)
       onEditorSelectionChange?.(null)
@@ -410,6 +413,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         onInteractionChange={handleToolbarInteractionChange}
         sessionsById={inlineSessionsById}
       />
+      <RemotePresenceOverlay view={editorView} awareness={presenceAwareness} />
       <SelectionFakeOverlay
         view={editorView}
         selection={selectionRange}

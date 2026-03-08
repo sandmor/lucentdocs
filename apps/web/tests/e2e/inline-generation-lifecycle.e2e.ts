@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createProject, startInlineGeneration } from './helpers/inline-ai'
+import { createProject, startInlineGeneration, waitForEditorConnected } from './helpers/inline-ai'
 
 test('inline stop aborts an in-flight continuation without inserting output', async ({ page }) => {
   await createProject(page, 'Inline Stop Abort')
@@ -50,25 +50,40 @@ test('inline generation continues after initiator disconnect and reconnecting cl
 
   try {
     await peerPage.goto(url)
-    await expect(peerPage.locator('.ProseMirror')).toBeVisible()
+    await waitForEditorConnected(peerPage)
+    const peerEditor = peerPage.locator('.ProseMirror')
+    await expect(peerEditor).toBeVisible()
 
     const editorOne = page.locator('.ProseMirror')
     await editorOne.click()
     await page.keyboard.type('Once ')
     await startInlineGeneration(page)
 
+    await expect(
+      peerPage.locator('.ai-writer-floating-controls[data-state="processing"]')
+    ).toBeVisible({ timeout: 8_000 })
+
     await page.close()
     await peerPage.reload()
+    await waitForEditorConnected(peerPage)
 
-    await expect(
-      peerPage.locator('.ai-writer-floating-controls[data-state="processing"]')
-    ).toBeVisible({
-      timeout: 8_000,
-    })
-    await expect(peerPage.locator('.ProseMirror')).toContainText('Once spark', { timeout: 20_000 })
-    await expect(
-      peerPage.locator('.ai-writer-floating-controls[data-state="processing"]')
-    ).toHaveCount(0)
+    const processingControls = peerPage.locator(
+      '.ai-writer-floating-controls[data-state="processing"]'
+    )
+    await expect
+      .poll(
+        async () => {
+          if ((await processingControls.count()) > 0) return true
+          return (await peerEditor.textContent())?.includes('Once spark') ?? false
+        },
+        {
+          timeout: 20_000,
+        }
+      )
+      .toBe(true)
+
+    await expect(peerEditor).toContainText('Once spark', { timeout: 20_000 })
+    await expect(processingControls).toHaveCount(0)
   } finally {
     await peerContext.close()
   }

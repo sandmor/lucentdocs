@@ -240,6 +240,28 @@
   border-top-color: var(--foreground);
 }
 
+.ai-remote-presence-selection {
+  border-radius: 0.2rem;
+}
+
+.ai-remote-presence-caret {
+  border-left: 2px solid;
+  margin-left: -1px;
+}
+
+.ai-remote-presence-label {
+  border-radius: 999px;
+  color: white;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  left: -1px;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  position: absolute;
+  top: -1.1rem;
+  white-space: nowrap;
+}
+
 /* AI Writer inline continuation styles */
 .ai-generating-text {
   background: oklch(0.75 0.08 260 / 0.15);

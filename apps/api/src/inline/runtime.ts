@@ -28,9 +28,10 @@ import {
   type InlineSessionMetadataStore,
 } from './metadata-store.js'
 import type { RepositorySet } from '../core/ports/types.js'
-import type { YjsRuntime } from '../yjs/runtime.js'
+import type { YjsDocumentVersion, YjsRuntime } from '../yjs/runtime.js'
 import {
   applyInlineZoneWriteActionToDoc,
+  ensureInlineContinuationZoneAtDocumentEnd,
   getInlineZoneTextFromDoc,
   setInlineZoneStreamingInDoc,
 } from './zone-write.js'
@@ -185,6 +186,10 @@ function createEmptySession(): InlineZoneSession {
 
 function createInlineMessageId(role: 'user' | 'assistant'): string {
   return `inline-${role}-${nanoid()}`
+}
+
+function shouldSilenceInlineGenerationError(error: unknown): boolean {
+  return error instanceof InlineRuntimeError && error.code === 'NOT_FOUND'
 }
 
 function createUserMessage(text: string): InlineChatMessage {
@@ -666,6 +671,7 @@ export class InlineRuntime {
     const zoneTextBeforeGeneration = await this.#readZoneText(input)
     const rollbackZoneText =
       zoneTextBeforeGeneration ?? (input.mode === 'prompt' ? (input.selectedText ?? '') : '')
+    const documentVersion = this.#yjsRuntime.captureDocumentVersion(input.documentId)
 
     const generationId = nanoid()
     const controller = new AbortController()
@@ -692,7 +698,8 @@ export class InlineRuntime {
       sessionForGeneration,
       baseSession,
       rollbackZoneText,
-      requesterClientName
+      requesterClientName,
+      documentVersion
     )
 
     return { generationId }
@@ -812,6 +819,48 @@ export class InlineRuntime {
     }
   }
 
+  /**
+   * Recreates a missing continuation zone only after the backing document has
+   * been replaced or reloaded since the generation started.
+   *
+   * This intentionally refuses to recover from arbitrary zone loss in the same
+   * live document, which would otherwise resurrect zones after explicit user
+   * actions such as reject, accept, or delete.
+   */
+  async #ensureTerminalContinuationZone(
+    scope: InlineScope & { sessionId: string },
+    contextBefore: string,
+    contextAfter: string | undefined,
+    requesterClientName: string,
+    expectedDocumentVersion: YjsDocumentVersion
+  ): Promise<boolean> {
+    if ((contextAfter ?? '').length > 0) {
+      return false
+    }
+
+    if (!this.#yjsRuntime.hasDocumentChangedSince(scope.documentId, expectedDocumentVersion)) {
+      return false
+    }
+
+    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+      origin: toInlineServerOrigin(requesterClientName),
+      transform: (currentDoc) => {
+        const ensured = ensureInlineContinuationZoneAtDocumentEnd(
+          currentDoc,
+          scope.sessionId,
+          contextBefore
+        )
+        return {
+          changed: ensured.changed,
+          nextDoc: ensured.nextDoc,
+          result: ensured,
+        }
+      },
+    })
+
+    return transformed.result.zoneFound
+  }
+
   async #enqueueSessionWrite(
     scope: InlineScope & { sessionId: string },
     task: () => Promise<void>
@@ -836,7 +885,8 @@ export class InlineRuntime {
     generationSession: InlineZoneSession,
     baselineSession: InlineZoneSession,
     rollbackZoneText: string,
-    requesterClientName: string
+    requesterClientName: string,
+    documentVersion: YjsDocumentVersion
   ): Promise<void> {
     const key = toInlineKey(input)
     let finalSession = generationSession
@@ -849,7 +899,8 @@ export class InlineRuntime {
           input,
           generationId,
           controller,
-          generationSession
+          generationSession,
+          documentVersion
         )
         return
       }
@@ -886,7 +937,25 @@ export class InlineRuntime {
           }
 
           await this.#enqueueSessionWrite(input, async () => {
-            await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
+            try {
+              await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
+            } catch (error) {
+              if (
+                !(error instanceof InlineRuntimeError) ||
+                error.code !== 'NOT_FOUND' ||
+                !(await this.#ensureTerminalContinuationZone(
+                  input,
+                  input.contextBefore,
+                  input.contextAfter,
+                  requesterClientName,
+                  documentVersion
+                ))
+              ) {
+                throw error
+              }
+
+              await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
+            }
           })
 
           const active = this.#activeGenerations.get(key)
@@ -1058,7 +1127,9 @@ export class InlineRuntime {
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return
-      console.error('Inline generation failed', error)
+      if (!shouldSilenceInlineGenerationError(error)) {
+        console.error('Inline generation failed', error)
+      }
       generationError = error instanceof Error ? error.message : 'Inline AI generation failed.'
       finalSession = baselineSession
     } finally {
@@ -1077,7 +1148,9 @@ export class InlineRuntime {
             )
           })
         } catch (error) {
-          console.error('Failed to rollback inline zone content after generation error', error)
+          if (!shouldSilenceInlineGenerationError(error)) {
+            console.error('Failed to rollback inline zone content after generation error', error)
+          }
         }
       }
 
@@ -1126,7 +1199,8 @@ export class InlineRuntime {
     input: StartInlineGenerationInput,
     generationId: string,
     controller: AbortController,
-    baseSession: InlineZoneSession
+    baseSession: InlineZoneSession,
+    documentVersion: YjsDocumentVersion
   ): Promise<InlineZoneSession> {
     if (controller.signal.aborted) return baseSession
 
@@ -1153,7 +1227,25 @@ export class InlineRuntime {
       }
 
       await this.#enqueueSessionWrite(input, async () => {
-        await this.#applyWriteActionToDocument(input, action, 'inline-test-runtime')
+        try {
+          await this.#applyWriteActionToDocument(input, action, 'inline-test-runtime')
+        } catch (error) {
+          if (
+            !(error instanceof InlineRuntimeError) ||
+            error.code !== 'NOT_FOUND' ||
+            !(await this.#ensureTerminalContinuationZone(
+              input,
+              input.contextBefore,
+              input.contextAfter,
+              'inline-test-runtime',
+              documentVersion
+            ))
+          ) {
+            throw error
+          }
+
+          await this.#applyWriteActionToDocument(input, action, 'inline-test-runtime')
+        }
       })
 
       return baseSession

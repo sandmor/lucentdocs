@@ -8,6 +8,7 @@ export interface YjsProviderResult {
   doc: Y.Doc
   provider: WebsocketProvider
   type: Y.XmlFragment
+  awareness: WebsocketProvider['awareness']
   isConnected: () => boolean
   isSynced: () => boolean
   disconnect: () => void
@@ -63,6 +64,7 @@ export function createYjsProvider(
     doc,
     provider,
     type,
+    awareness: provider.awareness,
     isConnected: () => provider.wsconnected,
     isSynced: () => provider.synced,
     disconnect,

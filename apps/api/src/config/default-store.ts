@@ -39,10 +39,6 @@ function resolveConfiguredDataDir(env: NodeJS.ProcessEnv): string {
   }
 
   if (!isMainDataDir(desiredDataDir)) return desiredDataDir
-
-  console.warn(
-    `[lucentdocs:test-safety] Blocking unsafe test database path "${desiredDataDir}". Using "${DEFAULT_TEST_DATA_DIR}" instead.`
-  )
   return DEFAULT_TEST_DATA_DIR
 }
 

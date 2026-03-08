@@ -905,6 +905,8 @@ export function EditorPage() {
             <Badge
               variant={connectionStatus === 'disconnected' ? 'destructive' : 'secondary'}
               className="h-6 w-6 p-0 sm:w-auto sm:px-2"
+              data-testid="connection-status"
+              data-status={connectionStatus}
             >
               {connectionStatus === 'connected' && (
                 <>

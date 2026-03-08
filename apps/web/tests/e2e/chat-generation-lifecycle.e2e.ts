@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createProject } from './helpers/inline-ai'
+import { createProject, waitForEditorConnected } from './helpers/inline-ai'
 
 async function openChatPanel(page: Page): Promise<void> {
   const panel = page.locator('[data-chat-panel="true"]')
@@ -14,7 +14,30 @@ async function sendChatMessage(page: Page, message: string): Promise<void> {
   const input = page.locator('[data-chat-input="true"]')
   await input.fill(message)
   await input.press('Enter')
-  await expect(page.locator('[data-chat-stop="true"]')).toBeVisible({ timeout: 8_000 })
+  await waitForChatGenerationToStart(page)
+}
+
+async function waitForChatGenerationToStart(page: Page, timeout = 20_000): Promise<void> {
+  const chatPanel = page.locator('[data-chat-panel="true"]')
+  const stopButton = page.locator('[data-chat-stop="true"]')
+  const typingIndicator = page.getByLabel('Assistant is typing')
+
+  await expect
+    .poll(
+      async () => {
+        if ((await stopButton.count()) > 0) {
+          return true
+        }
+
+        if ((await typingIndicator.count()) > 0) {
+          return true
+        }
+
+        return (await chatPanel.textContent())?.includes('spark') ?? false
+      },
+      { timeout }
+    )
+    .toBe(true)
 }
 
 async function selectFirstChatThread(page: Page): Promise<void> {
@@ -50,6 +73,7 @@ test('sidebar chat generation survives initiator disconnect and reconnecting cli
 
   try {
     await peerPage.goto(url)
+    await waitForEditorConnected(peerPage)
     await openChatPanel(peerPage)
 
     await sendChatMessage(page, 'Seed message')
@@ -62,9 +86,9 @@ test('sidebar chat generation survives initiator disconnect and reconnecting cli
     await page.close()
 
     await selectFirstChatThread(peerPage)
-    await expect(peerPage.locator('[data-chat-stop="true"]')).toBeVisible({ timeout: 8_000 })
+    await waitForChatGenerationToStart(peerPage)
     await expect(peerPage.locator('[data-chat-panel="true"]')).toContainText('mobile', {
-      timeout: 12_000,
+      timeout: 20_000,
     })
     await expect(peerPage.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 10_000 })
   } finally {

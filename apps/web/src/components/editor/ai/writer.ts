@@ -407,7 +407,7 @@ export function createAIWriterController(
               requesterClientName: getRequesterClientName() ?? undefined,
             })
       activeGenerationId = started.generationId
-      if (cancelRequested || requestAbortController.signal.aborted) {
+      if (cancelRequested) {
         requestServerCancel(started.generationId)
       }
 
@@ -793,9 +793,16 @@ export function createAIWriterController(
     }
   }
 
+  /**
+   * Tears down local streaming observers while allowing the server-side run to continue.
+   *
+   * This prevents unmounted views from receiving stream updates while preserving
+   * the in-flight generation for reconnecting clients.
+   */
   function detachAI(): void {
     abortActiveRequest({ cancelServerOnAbort: false })
     abortController = null
+
     stuckDetector.reset()
     currentView = null
     onStreamingChange?.(false)
