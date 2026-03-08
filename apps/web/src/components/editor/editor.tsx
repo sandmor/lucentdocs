@@ -26,8 +26,6 @@ interface EditorProps {
   onConnectionChange?: (status: ConnectionStatus) => void
   onEditorViewReady?: (view: EditorView | null) => void
   onEditorSelectionChange?: (selection: { from: number; to: number } | null) => void
-  includeAfterContext?: boolean
-  onIncludeAfterContextChange?: (value: boolean) => void
   className?: string
 }
 
@@ -38,15 +36,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     onConnectionChange,
     onEditorViewReady,
     onEditorSelectionChange,
-    includeAfterContext,
-    onIncludeAfterContextChange,
     className,
   },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const includeAfterContextRef = useRef(includeAfterContext ?? true)
   const selectionToolbarInteractingRef = useRef(false)
   const aiControllerRef = useRef<AIWriterController | null>(null)
   const providerRef = useRef<ReturnType<typeof createYjsProvider> | null>(null)
@@ -64,10 +59,6 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     documentId,
     aiState,
   })
-
-  useEffect(() => {
-    includeAfterContextRef.current = includeAfterContext ?? true
-  }, [includeAfterContext])
 
   const showOfflineToast = useCallback(() => {
     if (!hasShownOfflineToastRef.current) {
@@ -90,9 +81,6 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     const aiController = createAIWriterController({
       onStreamingChange(streaming) {
         setIsGenerating(streaming)
-      },
-      getIncludeAfterContext() {
-        return includeAfterContextRef.current
       },
       getToolScope() {
         return {
@@ -362,11 +350,6 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     <div className="relative">
       <EditorToolbar
         isGenerating={isGenerating}
-        includeAfterContext={includeAfterContext ?? true}
-        onToggleIncludeAfterContext={(value) => {
-          includeAfterContextRef.current = value
-          onIncludeAfterContextChange?.(value)
-        }}
         onContinueWriting={() => {
           if (!viewRef.current) return
           aiControllerRef.current?.startAIContinuation(viewRef.current, true)

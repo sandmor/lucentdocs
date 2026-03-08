@@ -3,14 +3,13 @@ import type { InlineZoneSession } from '@lucentdocs/shared'
 
 export function getDocumentContext(
   view: EditorView,
-  pos: number,
-  includeAfter: boolean
+  pos: number
 ): { contextBefore: string; contextAfter?: string } {
   const docEnd = view.state.doc.content.size
 
   const contextBefore = view.state.doc.textBetween(0, pos, '\n\n', '\n')
 
-  if (!includeAfter || pos >= docEnd) {
+  if (pos >= docEnd) {
     return { contextBefore }
   }
 
@@ -21,15 +20,14 @@ export function getDocumentContext(
 export function getPromptContextForRange(
   view: EditorView,
   from: number,
-  to: number,
-  includeAfter: boolean
+  to: number
 ): { contextBefore: string; contextAfter?: string } {
   const docEnd = view.state.doc.content.size
   const safeFrom = Math.max(0, Math.min(from, docEnd))
   const safeTo = Math.max(safeFrom, Math.min(to, docEnd))
 
   const contextBefore = view.state.doc.textBetween(0, safeFrom, '\n\n', '\n')
-  if (!includeAfter || safeTo >= docEnd) {
+  if (safeTo >= docEnd) {
     return { contextBefore }
   }
 

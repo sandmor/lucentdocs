@@ -39,7 +39,6 @@ export function createAIWriterController(
   let currentRequestId = 0
   const abortPolicies = new WeakMap<AbortController, { cancelServerOnAbort: boolean }>()
   const onStreamingChange = options.onStreamingChange ?? null
-  const getIncludeAfterContext = options.getIncludeAfterContext ?? (() => false)
   const getToolScope =
     options.getToolScope ??
     (() => ({
@@ -511,7 +510,7 @@ export function createAIWriterController(
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
 
-    const { contextBefore, contextAfter } = getDocumentContext(view, pos, getIncludeAfterContext())
+    const { contextBefore, contextAfter } = getDocumentContext(view, pos)
     void streamAIPrompt(
       view,
       {
@@ -560,12 +559,7 @@ export function createAIWriterController(
     const originalSlice = view.state.doc.slice(from, to)
     const zoneId = createZoneId()
     const sessionId = createInlineSessionId()
-    const { contextBefore, contextAfter } = getPromptContextForRange(
-      view,
-      from,
-      to,
-      getIncludeAfterContext()
-    )
+    const { contextBefore, contextAfter } = getPromptContextForRange(view, from, to)
 
     const zoneSlice =
       originalSlice &&
@@ -655,12 +649,7 @@ export function createAIWriterController(
     })
 
     const selectedText = view.state.doc.textBetween(zone.nodeFrom, zone.nodeTo, '\n\n', '\n')
-    const fallbackContext = getPromptContextForRange(
-      view,
-      zone.nodeFrom,
-      zone.nodeTo,
-      getIncludeAfterContext()
-    )
+    const fallbackContext = getPromptContextForRange(view, zone.nodeFrom, zone.nodeTo)
     const zoneSession = zone.sessionId ? getSessionById(zone.sessionId) : null
     const contextBefore = zoneSession?.contextBefore ?? fallbackContext.contextBefore
     const contextAfter = zoneSession?.contextAfter ?? fallbackContext.contextAfter ?? null

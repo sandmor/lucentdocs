@@ -5,7 +5,6 @@ export type StreamingHandler = (streaming: boolean) => void
 
 export interface AIWriterControllerOptions {
   onStreamingChange?: StreamingHandler
-  getIncludeAfterContext?: () => boolean
   getToolScope?: () => { projectId?: string; documentId?: string }
   getRequesterClientName?: () => string | null
   getSessionById?: (sessionId: string) => InlineZoneSession | null

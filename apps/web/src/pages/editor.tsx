@@ -119,7 +119,6 @@ export function EditorPage() {
   const lastHandledSyncEventIdRef = useRef<string | null>(null)
   const initialDesktopSidebarState = useMemo(() => resolveDesktopSidebarState(id), [id])
 
-  const [includeAfterContext, setIncludeAfterContext] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
   const [titleInput, setTitleInput] = useState('')
   const [editorSessionKey, setEditorSessionKey] = useState(0)
@@ -847,8 +846,6 @@ export function EditorPage() {
             documentId={currentDocumentId}
             onConnectionChange={handleConnectionChange}
             onEditorSelectionChange={setEditorSelectionForChat}
-            includeAfterContext={includeAfterContext}
-            onIncludeAfterContextChange={setIncludeAfterContext}
             className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
           />
         </div>
