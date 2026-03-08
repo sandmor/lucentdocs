@@ -24,6 +24,10 @@ interface SessionZoneSegment {
   originalSlice: string | null
 }
 
+/**
+ * Adjacent `ai_zone` nodes with the same session id are treated as one logical
+ * zone unless meaningful document content separates them.
+ */
 function collectSessionZones(doc: ProseMirrorNode, sessionId: string): SessionZone[] {
   const zoneType = doc.type.schema.nodes.ai_zone
   if (!zoneType) return []

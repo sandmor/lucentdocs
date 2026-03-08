@@ -21,6 +21,8 @@ interface ResolvedProvider {
   config: AiConfig
 }
 
+// Cached across requests until configuration changes, so repeated generations do
+// not rebuild SDK clients on every call.
 let providerPromise: Promise<ResolvedProvider> | null = null
 let aiSettingsService: AiSettingsService | null = null
 

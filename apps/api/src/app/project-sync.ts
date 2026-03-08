@@ -100,6 +100,12 @@ export type ProjectSyncEvent =
 
 type ProjectSyncListener = (event: ProjectSyncEvent) => void
 
+/**
+ * In-process fan-out bus for project-level invalidation events.
+ *
+ * Events are ephemeral and only reach current subscribers. Reconnecting clients
+ * still need to re-read storage to rebuild state after missing a publication.
+ */
 class ProjectSyncBus {
   private listeners = new Set<ProjectSyncListener>()
 

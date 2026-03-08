@@ -158,6 +158,11 @@ function parseDocumentNode(content: string): ProseMirrorNode | null {
   }
 }
 
+/**
+ * Renders the current document into the prompt format expected by chat prompts.
+ * The selection range is clamped against the parsed ProseMirror document so stale
+ * client offsets degrade to a caret marker instead of throwing.
+ */
 export function buildCurrentFileContext(
   content: string,
   selectionFrom: number | undefined,
@@ -217,6 +222,8 @@ export function serializeConversationForPrompt(messages: UIMessage[]): string {
     lines.push(`${role}: ${text}`)
   }
 
+  // Keep only the recent tail so prompts stay within token budget while still
+  // preserving the latest conversational turns.
   return lines.slice(-24).join('\n')
 }
 

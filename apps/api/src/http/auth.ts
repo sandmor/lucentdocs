@@ -60,6 +60,8 @@ export function readSessionTokenFromCookieHeader(cookieHeader: string | undefine
 }
 
 export function readSessionToken(req: Request): string | null {
+  // Prefer parsed cookies from cookie-parser, but fall back to the raw header so
+  // partially initialized requests still resolve auth consistently.
   const fromParsedCookies = readCookieValue(req.cookies as Record<string, string>, AUTH_COOKIE_NAME)
   if (fromParsedCookies) return fromParsedCookies
   return readSessionTokenFromCookieHeader(req.headers.cookie)

@@ -24,6 +24,12 @@ export interface AppContainer {
   inlineRuntime: InlineRuntime
 }
 
+/**
+ * Builds the long-lived application graph in dependency order.
+ *
+ * AI and embedding providers are configured from persisted settings before any
+ * runtime is created so later calls resolve against the same store-backed config.
+ */
 export async function createContainer(
   dbPath: string,
   yjsConfig: YjsRuntimeConfig

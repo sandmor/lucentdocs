@@ -634,6 +634,11 @@ function fallbackModelsDevProvider(
   }
 }
 
+/**
+ * Prefer the live provider catalog when credentials allow it, then fall back to
+ * models.dev metadata when the provider does not expose a compatible listing or
+ * the provider request fails.
+ */
 export async function getSourceModelCatalog(
   source: {
     providerId: string

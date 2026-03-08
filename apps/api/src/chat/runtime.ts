@@ -55,6 +55,13 @@ interface ActiveGeneration {
   controller: AbortController
 }
 
+/**
+ * Coordinates chat generation lifecycles and observation streams.
+ *
+ * Persisted chat threads remain the source of truth, while `#liveStates` keeps
+ * enough transient state for reconnecting observers to resume a generation view
+ * without waiting for the next database write.
+ */
 export class ChatRuntime {
   #listeners = new Map<string, Set<ChatStateListener>>()
   #liveStates = new Map<string, ChatObserveSnapshotEvent>()
@@ -170,6 +177,8 @@ export class ChatRuntime {
     listeners.add(listener)
 
     try {
+      // Reuse the last live snapshot for reconnecting observers while a generation
+      // is still in flight; otherwise fall back to storage.
       const cachedState = this.#liveStates.get(key)
       if (cachedState) {
         listener(cachedState)
@@ -304,6 +313,9 @@ export class ChatRuntime {
         })
       )
 
+      // The generation engine finalizes persistence asynchronously. Keeping the
+      // controller in `#activeGenerations` lets later cancel/reconnect calls hit
+      // the same in-flight run.
       void this.#generationEngine.runGeneration(
         {
           scope: input,

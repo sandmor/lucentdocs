@@ -11,6 +11,10 @@ export interface TrpcWebSocketRuntime {
   handler: TrpcWsHandler
 }
 
+/**
+ * Mounts tRPC websocket handling on the shared HTTP server without intercepting
+ * unrelated upgrades such as the Yjs websocket endpoint.
+ */
 export function setupTrpcWebSocket(
   server: HttpServer,
   createContext: (options: { req: IncomingMessage }) => Promise<AppContext> | AppContext

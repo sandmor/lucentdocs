@@ -119,6 +119,10 @@ export class GenerationEngine {
     this.#services = services
   }
 
+  /**
+   * Streams a single chat response and always attempts to persist the terminal
+   * thread state, including partial assistant output on abort.
+   */
   async runGeneration(options: GenerationOptions, callbacks: GenerationCallbacks): Promise<void> {
     const {
       scope,
@@ -206,6 +210,8 @@ export class GenerationEngine {
         },
       })
 
+      // One branch forwards raw UI chunks to observers while the other branch is
+      // consumed into normalized assistant messages for persistence.
       const [chunkStream, messageStream] = uiMessageStream.tee()
       chunkReader = chunkStream.getReader()
       chunkForwardTask = (async () => {
@@ -259,6 +265,7 @@ export class GenerationEngine {
         console.error('AI chat generation failed', error)
         finalMessages = rollbackMessages
       } else {
+        // Aborts intentionally keep any assistant text that was already emitted.
         finalMessages = latestAssistantMessage
           ? [...baseMessages, latestAssistantMessage]
           : baseMessages

@@ -55,6 +55,10 @@ function createHttpTrpcContext(req: Request): AppContext {
   })
 }
 
+/**
+ * WebSocket upgrades bypass Express middleware, so auth must be reconstructed
+ * from the raw upgrade request instead of reusing `req.user`.
+ */
 async function createWsTrpcContext(req: IncomingMessage): Promise<AppContext> {
   if (!container.authPort.isEnabled()) {
     return createTrpcContext({
@@ -114,6 +118,8 @@ function applyHtmlThemeClass(template: string, theme: 'light' | 'dark'): string 
 
 async function setupWebRuntime(app: Express): Promise<ViteDevServer | null> {
   if (!isProd) {
+    // Tests disable Vite's websocket side channel so they do not inherit an extra
+    // long-lived connection that keeps the process alive unexpectedly.
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -134,6 +140,11 @@ async function setupWebRuntime(app: Express): Promise<ViteDevServer | null> {
   return null
 }
 
+/**
+ * The catch-all route serves SSR in both development and production.
+ * React Router may throw a `Response` to signal redirects or loader failures, so
+ * those are converted back into HTTP responses instead of being treated as bugs.
+ */
 function registerSsrRoute(app: Express, vite: ViteDevServer | null): void {
   app.use('{*path}', async (req, res) => {
     try {
@@ -211,6 +222,7 @@ function registerProcessHandlers(
     shuttingDown = true
 
     console.log('Shutting down...')
+    // Stop scheduling new background work before flushing current in-memory state.
     container.yjsRuntime.stopSnapshotTimer()
     container.yjsRuntime.stopPersistenceFlushLoop()
 
@@ -319,6 +331,8 @@ async function startServer() {
     projectDocuments: container.repositories.projectDocuments,
   })
   const trpcWs = setupTrpcWebSocket(httpServer, ({ req }) => createWsTrpcContext(req))
+  // Snapshotting starts only after websocket servers exist so connected-document
+  // tracking reflects real live sessions instead of startup state.
   container.yjsRuntime.startSnapshotTimer()
 
   yjsWss.on('error', (error) => {

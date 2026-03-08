@@ -62,6 +62,11 @@ export function resolveChatPrompt(
   return renderPrompt(definition, variables)
 }
 
+/**
+ * Guard against accidentally binding the wrong prompt definition to a runtime.
+ * The renderer is intentionally permissive, so mode/protocol mismatches have to
+ * be rejected here before they reach streaming code that assumes a format.
+ */
 export function assertPromptProtocolMode(
   definition: PromptDefinition,
   expectedMode: PromptMode

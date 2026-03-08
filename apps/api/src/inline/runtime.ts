@@ -378,6 +378,13 @@ export class InlineRuntimeError extends Error {
 
 type InlineListener = (event: InlineObserveEvent) => void
 
+/**
+ * Coordinates inline AI generation against both persisted session metadata and
+ * the live Yjs document.
+ *
+ * Unlike chat generation, observers may reconnect mid-stream and need both the
+ * latest snapshot and every streamed chunk that has not yet been persisted.
+ */
 export class InlineRuntime {
   #services: ServiceSet
   #store: InlineSessionMetadataStore
@@ -541,6 +548,8 @@ export class InlineRuntime {
       let lastDeliveredSeq = 0
       const activeGeneration = this.#activeGenerations.get(key)
       if (activeGeneration && activeGeneration.events.length > 0) {
+        // Replaying the buffered generation event log closes the race between a
+        // reconnecting subscriber and a generation that is still producing output.
         const baselineSnapshot = activeGeneration.events.find((event) => event.type === 'snapshot')
         if (baselineSnapshot) {
           listener(baselineSnapshot)
@@ -866,6 +875,9 @@ export class InlineRuntime {
     task: () => Promise<void>
   ): Promise<void> {
     const key = toInlineKey(scope)
+    // Inline tool calls can arrive concurrently from a single generation. Serialize
+    // document/session writes so offsets are applied in the same order the model
+    // produced them.
     const previous = this.#sessionWriteTasks.get(key) ?? Promise.resolve()
     const next = previous.catch(() => undefined).then(task)
     this.#sessionWriteTasks.set(key, next)
@@ -940,6 +952,9 @@ export class InlineRuntime {
             try {
               await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
             } catch (error) {
+              // Only terminal continuation generations are allowed to recreate a
+              // missing zone, and only after the underlying document instance has
+              // changed since generation start.
               if (
                 !(error instanceof InlineRuntimeError) ||
                 error.code !== 'NOT_FOUND' ||
@@ -1136,6 +1151,8 @@ export class InlineRuntime {
       if (generationError !== null) {
         try {
           await this.#enqueueSessionWrite(input, async () => {
+            // Roll back the zone text on hard failures so the document matches the
+            // reverted session state that will be emitted below.
             await this.#applyWriteActionToDocument(
               input,
               {
@@ -1284,6 +1301,8 @@ export class InlineRuntime {
     const snapshot = this.#toSnapshotEvent(state)
     const key = toInlineKey(state)
     if (options.recordInGeneration) {
+      // Record snapshots alongside chunks so late subscribers can replay a coherent
+      // sequence instead of jumping from persisted state to the latest partial UI.
       const active = this.#activeGenerations.get(key)
       if (active?.id === options.recordInGeneration) {
         active.events.push(snapshot)

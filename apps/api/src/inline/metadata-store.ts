@@ -24,6 +24,11 @@ interface ScopedDocument {
   metadata: JsonObject | null
 }
 
+/**
+ * Inline session state lives in document metadata, but orphan detection has to
+ * inspect the persisted Yjs document because the active zone set comes from the
+ * editor tree rather than metadata alone.
+ */
 function readInlineSessions(metadata: JsonObject | null): Record<string, InlineZoneSession> {
   if (!metadata) return {}
   return normalizeInlineZoneSessionMap(metadata[INLINE_SESSIONS_METADATA_KEY])
@@ -224,6 +229,8 @@ export class InlineSessionMetadataStore {
   }
 
   async #collectReferencedSessionIds(documentId: string): Promise<Set<string>> {
+    // Read the latest persisted Yjs payload rather than any live in-memory doc so
+    // pruning stays deterministic for callers that are not holding websocket state.
     const yjsData = await this.#repos.yjsDocuments.getLatest(documentId)
     if (!yjsData) return new Set()
 

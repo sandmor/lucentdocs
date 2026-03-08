@@ -256,6 +256,10 @@ function mergeConfig(
   return normalizedRecord as unknown as PersistedAppConfig
 }
 
+/**
+ * Freezes each nested branch so callers cannot mutate the cached resolved config
+ * and accidentally diverge from what the store can ever persist.
+ */
 function freezeResolvedConfig(config: AppConfig): AppConfig {
   Object.freeze(config.raw)
   Object.freeze(config.auth)
@@ -404,6 +408,11 @@ export class ConfigManager {
     this.storeProvider = options.storeProvider
   }
 
+  /**
+   * Lazily opens the config store and seeds it once. Environment overrides are
+   * applied later during reads, so the database keeps persisted defaults and user
+   * edits rather than the merged effective runtime view.
+   */
   private getStoreHandle(): ConfigStoreHandle {
     if (this.storeHandle) return this.storeHandle
 
@@ -469,6 +478,8 @@ export class ConfigManager {
     this.resolvedConfig = null
     const nextState = this.getState()
 
+    // Persisted changes can be masked by env overrides, so expose both the keys
+    // that changed in storage and the keys whose effective runtime values changed.
     const changedEffectiveKeys: PersistedConfigKey[] = PERSISTED_CONFIG_KEYS.filter(
       (key) => !configValuesEqual(previousState.config.raw[key], nextState.config.raw[key])
     )
