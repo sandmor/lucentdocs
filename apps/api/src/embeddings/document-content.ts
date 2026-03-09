@@ -1,22 +1,11 @@
 import * as Y from 'yjs'
 import { yDocToProsemirrorJSON } from 'y-prosemirror'
-import {
-  createDefaultContent,
-  parseContent,
-  proseMirrorDocToMarkdown,
-  type Document,
-} from '@lucentdocs/shared'
+import { createDefaultContent, type Document } from '@lucentdocs/shared'
 import type { RepositorySet } from '../core/ports/types.js'
-
-function serializeDocumentBody(content: string): string {
-  const parsed = parseContent(content)
-  const markdownResult = proseMirrorDocToMarkdown(parsed.doc)
-  if (markdownResult.ok) {
-    return markdownResult.value.trim()
-  }
-
-  return ''
-}
+import {
+  buildDocumentEmbeddingProjection,
+  type DocumentEmbeddingProjection,
+} from './document-projection.js'
 
 export async function readDocumentContentSnapshot(
   repos: RepositorySet,
@@ -34,13 +23,18 @@ export async function readDocumentContentSnapshot(
   }
 }
 
+export async function buildDocumentEmbeddingProjectionSnapshot(
+  repos: RepositorySet,
+  document: Document
+): Promise<DocumentEmbeddingProjection> {
+  const snapshot = await readDocumentContentSnapshot(repos, document.id)
+  return buildDocumentEmbeddingProjection(document, snapshot)
+}
+
 export async function buildDocumentEmbeddingText(
   repos: RepositorySet,
   document: Document
 ): Promise<string> {
-  const snapshot = await readDocumentContentSnapshot(repos, document.id)
-  const body = serializeDocumentBody(snapshot)
-  const title = document.title.trim()
-
-  return title ? `# ${title}\n\n${body}` : body
+  const projection = await buildDocumentEmbeddingProjectionSnapshot(repos, document)
+  return projection.text
 }

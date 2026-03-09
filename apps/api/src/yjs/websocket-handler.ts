@@ -71,14 +71,21 @@ export function setupYjsWebSocket(
           return
         }
 
-        const projectId = await options.projectDocuments.findSoleProjectIdByDocumentId(documentId)
-        if (!projectId) {
+        const projectIds = await options.projectDocuments.findProjectIdsByDocumentId(documentId)
+        if (projectIds.length === 0) {
           socket.destroy()
           return
         }
 
-        const project = await options.projects.findById(projectId)
-        if (!project || !canUserAccessProject(user, project)) {
+        const projects = await Promise.all(
+          projectIds.map((projectId) => options.projects.findById(projectId))
+        )
+        const accessibleProjectIds = new Set(
+          projects.flatMap((project) =>
+            project && canUserAccessProject(user, project) ? [project.id] : []
+          )
+        )
+        if (accessibleProjectIds.size === 0) {
           socket.destroy()
           return
         }
@@ -88,12 +95,15 @@ export function setupYjsWebSocket(
           setupWSConnection(ws, req, { docName: documentId })
 
           const unsubscribe = projectSyncBus.subscribe((event) => {
-            if (event.projectId !== projectId) return
+            if (!accessibleProjectIds.has(event.projectId)) return
             if (event.type !== 'project.updated' && event.type !== 'project.deleted') return
 
-            if (event.type === 'project.updated' && canUserAccessProject(user, event)) {
+            if (event.type === 'project.updated' && event.audienceUserIds.includes(user.id)) {
               return
             }
+
+            accessibleProjectIds.delete(event.projectId)
+            if (accessibleProjectIds.size > 0) return
 
             ws.close()
           })

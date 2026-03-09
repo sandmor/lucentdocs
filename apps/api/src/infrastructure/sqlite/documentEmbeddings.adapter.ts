@@ -3,8 +3,10 @@ import type {
   DocumentEmbeddingJobEntity,
   DocumentEmbeddingQueueStats,
   DocumentEmbeddingsRepositoryPort,
+  ProjectDocumentEmbeddingSearchMatch,
   ReplaceDocumentEmbeddingsInput,
   ReplaceDocumentEmbeddingsResult,
+  SearchProjectDocumentEmbeddingsInput,
 } from '../../core/ports/documentEmbeddings.port.js'
 import { indexingStrategySchema } from '@lucentdocs/shared'
 import { normalizeModelSourceType, normalizeBaseURL } from '../../core/ai/provider-types.js'
@@ -33,6 +35,8 @@ interface EmbeddingRow {
   chunkOrdinal: number
   chunkStart: number
   chunkEnd: number
+  selectionFrom: number | null
+  selectionTo: number | null
   chunkText: string
   dimensions: number
   documentTimestamp: number
@@ -45,6 +49,21 @@ interface QueueStatsRow {
   totalJobs: number
   oldestQueuedAt: number | null
   nextDebounceUntil: number | null
+}
+
+interface SearchMatchRow {
+  documentId: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  strategyType: 'whole_document' | 'sliding_window'
+  chunkOrdinal: number
+  chunkStart: number
+  chunkEnd: number
+  selectionFrom: number | null
+  selectionTo: number | null
+  chunkText: string
+  distance: number
 }
 
 function vectorTableName(dimensions: number): string {
@@ -74,6 +93,14 @@ function validateEmbeddingVector(embedding: number[]): void {
   }
 }
 
+function validateSearchLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error('Search limit must be a positive integer.')
+  }
+
+  return Math.min(limit, 200)
+}
+
 function validateReplacementChunks(input: ReplaceDocumentEmbeddingsInput): void {
   const ordinals = new Set<number>()
   const expectedDimensions = input.chunks[0]?.embedding.length ?? null
@@ -94,6 +121,23 @@ function validateReplacementChunks(input: ReplaceDocumentEmbeddingsInput): void 
 
     if (!Number.isInteger(chunk.end) || chunk.end < chunk.start) {
       throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid end offset.`)
+    }
+
+    const hasSelectionFrom = chunk.selectionFrom !== undefined && chunk.selectionFrom !== null
+    const hasSelectionTo = chunk.selectionTo !== undefined && chunk.selectionTo !== null
+    if (hasSelectionFrom !== hasSelectionTo) {
+      throw new Error(`Embedding chunk ${chunk.ordinal} has an incomplete editor selection range.`)
+    }
+    if (hasSelectionFrom) {
+      const selectionFrom = chunk.selectionFrom as number
+      const selectionTo = chunk.selectionTo as number
+
+      if (!Number.isInteger(selectionFrom) || selectionFrom < 0) {
+        throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid selection start.`)
+      }
+      if (!Number.isInteger(selectionTo) || selectionTo < selectionFrom) {
+        throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid selection end.`)
+      }
     }
 
     validateEmbeddingVector(chunk.embedding)
@@ -127,6 +171,8 @@ function toEmbeddingEntity(row: EmbeddingRow): DocumentEmbeddingEntity {
     chunkOrdinal: row.chunkOrdinal,
     chunkStart: row.chunkStart,
     chunkEnd: row.chunkEnd,
+    selectionFrom: row.selectionFrom,
+    selectionTo: row.selectionTo,
     chunkText: row.chunkText,
     dimensions: row.dimensions,
     documentTimestamp: row.documentTimestamp,
@@ -138,6 +184,17 @@ function toEmbeddingEntity(row: EmbeddingRow): DocumentEmbeddingEntity {
 
 export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositoryPort {
   constructor(private connection: SqliteConnection) {}
+
+  private hasVectorTable(tableName: string): boolean {
+    const row = this.connection.get<{ found: number }>(
+      `SELECT 1 AS found
+         FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        LIMIT 1`,
+      [tableName]
+    )
+    return row?.found === 1
+  }
 
   async enqueueDocument(
     documentId: string,
@@ -213,7 +270,8 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
   ): Promise<DocumentEmbeddingEntity[]> {
     const rows = this.connection.all<EmbeddingRow>(
       `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model,
-              strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd, chunkText,
+              strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd,
+              selectionFrom, selectionTo, chunkText,
               dimensions, documentTimestamp, contentHash, createdAt, updatedAt
        FROM document_embeddings
        WHERE documentId = ? AND baseUrl = ? AND model = ?`,
@@ -221,6 +279,60 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
     )
 
     return rows.sort((left, right) => left.chunkOrdinal - right.chunkOrdinal).map(toEmbeddingEntity)
+  }
+
+  async searchProjectDocuments(
+    input: SearchProjectDocumentEmbeddingsInput
+  ): Promise<ProjectDocumentEmbeddingSearchMatch[]> {
+    validateEmbeddingVector(input.queryEmbedding)
+
+    const limit = validateSearchLimit(input.limit)
+    const dimensions = input.queryEmbedding.length
+    const tableName = vectorTableName(dimensions)
+    if (!this.hasVectorTable(tableName)) {
+      return []
+    }
+
+    const normalizedBaseURL = normalizeBaseURL(input.baseURL)
+    const model = input.model.trim()
+
+    return this.connection.all<SearchMatchRow>(
+      `SELECT de.documentId,
+              d.title,
+              d.createdAt,
+              d.updatedAt,
+              de.strategyType,
+              de.chunkOrdinal,
+              de.chunkStart,
+              de.chunkEnd,
+              de.selectionFrom,
+              de.selectionTo,
+              de.chunkText,
+              v.distance
+         FROM ${tableName} AS v
+         JOIN document_embeddings AS de ON de.id = v.rowid
+         JOIN documents AS d ON d.id = de.documentId
+        WHERE v.embedding MATCH ?
+          AND k = ?
+          AND v.rowid IN (
+            SELECT candidate.id
+              FROM document_embeddings AS candidate
+              JOIN project_documents AS pd ON pd.documentId = candidate.documentId
+             WHERE pd.projectId = ?
+               AND candidate.baseUrl = ?
+               AND candidate.model = ?
+               AND candidate.dimensions = ?
+          )
+        ORDER BY v.distance ASC, de.documentId ASC, de.chunkOrdinal ASC`,
+      [
+        new Float32Array(input.queryEmbedding),
+        limit,
+        input.projectId,
+        normalizedBaseURL,
+        model,
+        dimensions,
+      ]
+    )
   }
 
   async replaceEmbeddings(
@@ -246,7 +358,8 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
       ) {
         const staleRows = this.connection.all<EmbeddingRow>(
           `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model,
-                  strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd, chunkText,
+                  strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd,
+                  selectionFrom, selectionTo, chunkText,
                   dimensions, documentTimestamp, contentHash, createdAt, updatedAt
              FROM document_embeddings
             WHERE documentId = ? AND baseUrl = ? AND model = ?
@@ -296,6 +409,8 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
               chunkOrdinal,
               chunkStart,
               chunkEnd,
+              selectionFrom,
+              selectionTo,
               chunkText,
               dimensions,
               documentTimestamp,
@@ -303,7 +418,7 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
               createdAt,
               updatedAt
             )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             input.documentId,
             input.providerConfigId,
@@ -316,6 +431,8 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
             chunk.ordinal,
             chunk.start,
             chunk.end,
+            chunk.selectionFrom ?? null,
+            chunk.selectionTo ?? null,
             chunk.text,
             dimensions,
             input.documentTimestamp,
@@ -348,7 +465,8 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
 
       const rows = this.connection.all<EmbeddingRow>(
         `SELECT id, documentId, providerConfigId, providerId, type, baseUrl, model,
-                strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd, chunkText,
+                strategyType, strategyProperties, chunkOrdinal, chunkStart, chunkEnd,
+                selectionFrom, selectionTo, chunkText,
                 dimensions, documentTimestamp, contentHash, createdAt, updatedAt
            FROM document_embeddings
           WHERE documentId = ? AND baseUrl = ? AND model = ?

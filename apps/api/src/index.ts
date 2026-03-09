@@ -25,13 +25,14 @@ const appConfig = configManager.getConfig()
 const isProd = appConfig.runtime.isProduction
 const isTestRuntime =
   appConfig.runtime.nodeEnv === 'test' || process.env.LUCENTDOCS_TEST_MODE === '1'
+const allowTestEmbeddingRuntime = process.env.LUCENTDOCS_TEST_FAKE_EMBEDDINGS === '1'
 const container = await createContainer(appConfig.paths.dbFile, {
   persistenceFlushIntervalMs: appConfig.yjs.persistenceFlushIntervalMs,
   versionSnapshotIntervalMs: appConfig.yjs.versionSnapshotIntervalMs,
 })
 
 container.yjsRuntime.initialize()
-if (!isTestRuntime) {
+if (!isTestRuntime || allowTestEmbeddingRuntime) {
   container.embeddingRuntime.start()
 }
 

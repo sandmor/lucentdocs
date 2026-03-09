@@ -157,6 +157,8 @@ const SCHEMA = `
     chunkOrdinal INTEGER NOT NULL CHECK (chunkOrdinal >= 0),
     chunkStart INTEGER NOT NULL CHECK (chunkStart >= 0),
     chunkEnd INTEGER NOT NULL CHECK (chunkEnd >= chunkStart),
+    selectionFrom INTEGER,
+    selectionTo INTEGER,
     chunkText TEXT NOT NULL,
     dimensions INTEGER NOT NULL CHECK (dimensions > 0),
     documentTimestamp INTEGER NOT NULL,
@@ -167,8 +169,11 @@ const SCHEMA = `
     UNIQUE(documentId, baseUrl, model, chunkOrdinal)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_document_embeddings_model_document_ts
-    ON document_embeddings(baseUrl ASC, model ASC, documentId ASC, documentTimestamp ASC);
+  CREATE INDEX IF NOT EXISTS idx_document_embeddings_search
+    ON document_embeddings(baseUrl ASC, model ASC, dimensions ASC, documentId ASC, documentTimestamp ASC);
+
+  CREATE INDEX IF NOT EXISTS idx_document_embeddings_document
+    ON document_embeddings(documentId ASC);
 
   CREATE TABLE IF NOT EXISTS app_config_values (
     key TEXT PRIMARY KEY,

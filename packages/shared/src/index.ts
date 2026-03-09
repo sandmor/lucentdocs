@@ -36,6 +36,7 @@ export type {
   ConfigFieldDefinition,
   EditableConfigInput,
   LimitsConfig,
+  SearchConfig,
 } from './config.js'
 export {
   AI_MODEL_SOURCE_TYPES,
@@ -45,6 +46,7 @@ export {
   DEFAULT_PERSISTED_CONFIG,
   EDITABLE_CONFIG_KEYS,
   LIMITS_CONFIG_KEYS,
+  SEARCH_CONFIG_KEYS,
   editableConfigSchema,
 } from './config.js'
 export type {

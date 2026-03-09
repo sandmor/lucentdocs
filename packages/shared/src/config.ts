@@ -17,6 +17,12 @@ export interface PersistedAppConfig {
   embeddingBatchMaxWaitMs: number
   yjsPersistenceFlushMs: number
   yjsVersionIntervalMs: number
+  searchDefaultLimit: number
+  searchMaxLimit: number
+  searchMaxQueryChars: number
+  searchSnippetDefaultLimit: number
+  searchSnippetMaxLimit: number
+  searchSnippetMaxLength: number
   maxContextChars: number
   maxPromptChars: number
   maxToolEntries: number
@@ -132,6 +138,60 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     defaultValue: 300000,
     allowEmptyString: false,
     min: 1,
+  },
+  {
+    key: 'searchDefaultLimit',
+    envVar: 'SEARCH_DEFAULT_LIMIT',
+    kind: 'int',
+    defaultValue: 8,
+    allowEmptyString: false,
+    min: 1,
+    max: 100,
+  },
+  {
+    key: 'searchMaxLimit',
+    envVar: 'SEARCH_MAX_LIMIT',
+    kind: 'int',
+    defaultValue: 20,
+    allowEmptyString: false,
+    min: 1,
+    max: 200,
+  },
+  {
+    key: 'searchMaxQueryChars',
+    envVar: 'SEARCH_MAX_QUERY_CHARS',
+    kind: 'int',
+    defaultValue: 400,
+    allowEmptyString: false,
+    min: 1,
+    max: 10000,
+  },
+  {
+    key: 'searchSnippetDefaultLimit',
+    envVar: 'SEARCH_SNIPPET_DEFAULT_LIMIT',
+    kind: 'int',
+    defaultValue: 8,
+    allowEmptyString: false,
+    min: 1,
+    max: 20,
+  },
+  {
+    key: 'searchSnippetMaxLimit',
+    envVar: 'SEARCH_SNIPPET_MAX_LIMIT',
+    kind: 'int',
+    defaultValue: 10,
+    allowEmptyString: false,
+    min: 1,
+    max: 50,
+  },
+  {
+    key: 'searchSnippetMaxLength',
+    envVar: 'SEARCH_SNIPPET_MAX_LENGTH',
+    kind: 'int',
+    defaultValue: 180,
+    allowEmptyString: false,
+    min: 50,
+    max: 1000,
   },
   {
     key: 'maxContextChars',
@@ -257,6 +317,12 @@ export const EDITABLE_CONFIG_KEYS = [
   'embeddingBatchMaxWaitMs',
   'yjsPersistenceFlushMs',
   'yjsVersionIntervalMs',
+  'searchDefaultLimit',
+  'searchMaxLimit',
+  'searchMaxQueryChars',
+  'searchSnippetDefaultLimit',
+  'searchSnippetMaxLimit',
+  'searchSnippetMaxLength',
   'maxContextChars',
   'maxPromptChars',
   'maxToolEntries',
@@ -286,6 +352,15 @@ export const LIMITS_CONFIG_KEYS = [
   'maxDocExportChars',
 ] as const satisfies ReadonlyArray<PersistedConfigKey>
 
+export const SEARCH_CONFIG_KEYS = [
+  'searchDefaultLimit',
+  'searchMaxLimit',
+  'searchMaxQueryChars',
+  'searchSnippetDefaultLimit',
+  'searchSnippetMaxLimit',
+  'searchSnippetMaxLength',
+] as const satisfies ReadonlyArray<PersistedConfigKey>
+
 export interface LimitsConfig {
   contextChars: number
   promptChars: number
@@ -301,8 +376,23 @@ export interface LimitsConfig {
   docExportChars: number
 }
 
+export interface SearchConfig {
+  defaultLimit: number
+  maxLimit: number
+  maxQueryChars: number
+  snippetDefaultLimit: number
+  snippetMaxLimit: number
+  snippetMaxLength: number
+}
+
 const yjsPersistenceFlushField = CONFIG_FIELD_BY_KEY.yjsPersistenceFlushMs
 const yjsVersionIntervalField = CONFIG_FIELD_BY_KEY.yjsVersionIntervalMs
+const searchDefaultLimitField = CONFIG_FIELD_BY_KEY.searchDefaultLimit
+const searchMaxLimitField = CONFIG_FIELD_BY_KEY.searchMaxLimit
+const searchMaxQueryCharsField = CONFIG_FIELD_BY_KEY.searchMaxQueryChars
+const searchSnippetDefaultLimitField = CONFIG_FIELD_BY_KEY.searchSnippetDefaultLimit
+const searchSnippetMaxLimitField = CONFIG_FIELD_BY_KEY.searchSnippetMaxLimit
+const searchSnippetMaxLengthField = CONFIG_FIELD_BY_KEY.searchSnippetMaxLength
 const limitsContextCharsField = CONFIG_FIELD_BY_KEY.maxContextChars
 const limitsPromptCharsField = CONFIG_FIELD_BY_KEY.maxPromptChars
 const limitsToolEntriesField = CONFIG_FIELD_BY_KEY.maxToolEntries
@@ -351,6 +441,36 @@ export const editableConfigSchema = z.object({
     .number()
     .int()
     .min(yjsVersionIntervalField.min ?? 1),
+  searchDefaultLimit: z
+    .number()
+    .int()
+    .min(searchDefaultLimitField.min ?? 1)
+    .max(searchDefaultLimitField.max ?? 100),
+  searchMaxLimit: z
+    .number()
+    .int()
+    .min(searchMaxLimitField.min ?? 1)
+    .max(searchMaxLimitField.max ?? 200),
+  searchMaxQueryChars: z
+    .number()
+    .int()
+    .min(searchMaxQueryCharsField.min ?? 1)
+    .max(searchMaxQueryCharsField.max ?? 10000),
+  searchSnippetDefaultLimit: z
+    .number()
+    .int()
+    .min(searchSnippetDefaultLimitField.min ?? 1)
+    .max(searchSnippetDefaultLimitField.max ?? 20),
+  searchSnippetMaxLimit: z
+    .number()
+    .int()
+    .min(searchSnippetMaxLimitField.min ?? 1)
+    .max(searchSnippetMaxLimitField.max ?? 50),
+  searchSnippetMaxLength: z
+    .number()
+    .int()
+    .min(searchSnippetMaxLengthField.min ?? 50)
+    .max(searchSnippetMaxLengthField.max ?? 1000),
   maxContextChars: z
     .number()
     .int()

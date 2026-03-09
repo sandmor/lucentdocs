@@ -70,7 +70,7 @@ export function RowActionsMenu({
               Delete
             </DropdownMenuItem>
           </>
-        ) : (
+        ) : item.type === 'directory' ? (
           <>
             <DropdownMenuItem onClick={() => onRenameDirectory(item.path)}>
               <Pencil className="size-4" />
@@ -85,6 +85,8 @@ export function RowActionsMenu({
               Delete directory
             </DropdownMenuItem>
           </>
+        ) : (
+          <DropdownMenuItem disabled>Search result</DropdownMenuItem>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

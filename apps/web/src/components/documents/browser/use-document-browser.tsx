@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import {
   PointerSensor,
@@ -31,6 +31,7 @@ import { RowActionsMenu } from './row-actions-menu'
 import type {
   BrowserRow,
   DeleteTarget,
+  DocumentSearchResultItem,
   DocumentBrowserProps,
   DocumentItem,
   DragData,
@@ -47,6 +48,8 @@ export function useDocumentBrowser({
   onOpenDocument,
 }: DocumentBrowserProps) {
   const [userPath, setUserPath] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [newDocumentName, setNewDocumentName] = useState('')
   const [newDirectoryName, setNewDirectoryName] = useState('')
   const [createDocumentOpen, setCreateDocumentOpen] = useState(false)
@@ -59,6 +62,15 @@ export function useDocumentBrowser({
   const [settingsDocumentId, setSettingsDocumentId] = useState<string | null>(null)
 
   const prevSignatureRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim())
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const isSearchActive = debouncedSearchQuery.length > 0
 
   const utils = trpc.useUtils()
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -104,8 +116,43 @@ export function useDocumentBrowser({
 
   const currentPath = userPath ?? (activeDocumentPath ? parentPath(activeDocumentPath) : '')
 
-  const rows = useMemo(() => buildRows(allDocuments, currentPath), [allDocuments, currentPath])
+  const searchResultsQuery = trpc.documents.search.useQuery(
+    {
+      projectId,
+      query: debouncedSearchQuery,
+    },
+    {
+      enabled: isSearchActive,
+    }
+  )
+
+  const searchRows = useMemo<Array<BrowserRow>>(
+    () =>
+      (searchResultsQuery.data ?? []).map((result: DocumentSearchResultItem) => ({
+        key: `search:${result.id}`,
+        type: 'search-result',
+        id: result.id,
+        name: basename(normalizeDocumentPath(result.title)),
+        path: normalizeDocumentPath(result.title),
+        createdAt: result.createdAt,
+        updatedAt: result.updatedAt,
+        score: result.score,
+        matchType: result.matchType,
+        snippets: result.snippets,
+      })),
+    [searchResultsQuery.data]
+  )
+
+  const rows = useMemo(
+    () => (isSearchActive ? searchRows : buildRows(allDocuments, currentPath)),
+    [allDocuments, currentPath, isSearchActive, searchRows]
+  )
   const breadcrumbs = useMemo(() => pathSegments(currentPath), [currentPath])
+
+  const invalidateBrowserQueries = useCallback(() => {
+    utils.documents.list.invalidate({ projectId })
+    utils.documents.search.invalidate()
+  }, [projectId, utils.documents.list, utils.documents.search])
 
   const isDirectoryPathTaken = useCallback(
     (path: string): boolean => {
@@ -127,7 +174,7 @@ export function useDocumentBrowser({
     onSuccess: (doc) => {
       setCreateDocumentOpen(false)
       setNewDocumentName('')
-      utils.documents.list.invalidate({ projectId })
+      invalidateBrowserQueries()
       utils.documents.get.invalidate({ projectId, id: doc.id })
       onOpenDocument(doc.id)
     },
@@ -141,7 +188,7 @@ export function useDocumentBrowser({
       setCreateDirectoryOpen(false)
       setNewDirectoryName('')
       setUserPath(normalizeDocumentPath(variables.path))
-      utils.documents.list.invalidate({ projectId })
+      invalidateBrowserQueries()
     },
     onError: (error) => {
       toast.error('Failed to create directory', { description: error.message })
@@ -152,7 +199,7 @@ export function useDocumentBrowser({
     onSuccess: (doc) => {
       setRenameTarget(null)
       setRenameName('')
-      utils.documents.list.invalidate({ projectId })
+      invalidateBrowserQueries()
       utils.documents.get.invalidate({ projectId, id: doc.id })
     },
     onError: (error) => {
@@ -164,7 +211,7 @@ export function useDocumentBrowser({
     onSuccess: (doc) => {
       setMoveTarget(null)
       setMoveDestination('')
-      utils.documents.list.invalidate({ projectId })
+      invalidateBrowserQueries()
       utils.documents.get.invalidate({ projectId, id: doc.id })
     },
     onError: (error) => {
@@ -176,7 +223,7 @@ export function useDocumentBrowser({
     onSuccess: (result, variables) => {
       setMoveTarget(null)
       setMoveDestination('')
-      utils.documents.list.invalidate({ projectId })
+      invalidateBrowserQueries()
       for (const documentId of result.movedDocumentIds) {
         utils.documents.get.invalidate({ projectId, id: documentId })
       }
@@ -195,7 +242,7 @@ export function useDocumentBrowser({
   const deleteMutation = trpc.documents.delete.useMutation({
     onSuccess: (_result, variables) => {
       setDeleteTarget(null)
-      utils.documents.list.invalidate({ projectId })
+      invalidateBrowserQueries()
       utils.documents.get.invalidate({ projectId, id: variables.id })
 
       if (variables.id === activeDocumentId) {
@@ -211,7 +258,7 @@ export function useDocumentBrowser({
   const deleteDirectoryMutation = trpc.documents.deleteDirectory.useMutation({
     onSuccess: (result, variables) => {
       setDeleteTarget(null)
-      utils.documents.list.invalidate({ projectId })
+      invalidateBrowserQueries()
       for (const documentId of result.deletedDocumentIds) {
         utils.documents.get.invalidate({ projectId, id: documentId })
       }
@@ -235,7 +282,7 @@ export function useDocumentBrowser({
 
   const importMutation = trpc.documents.import.useMutation({
     onSuccess: (doc) => {
-      utils.documents.list.invalidate({ projectId })
+      invalidateBrowserQueries()
       utils.documents.get.invalidate({ projectId, id: doc.id })
       onOpenDocument(doc.id)
     },
@@ -634,9 +681,9 @@ export function useDocumentBrowser({
 
           return item.type === 'directory' ? (
             <DirectoryCell name={item.name} path={item.path} isActive={isActive} />
-          ) : (
+          ) : item.type === 'document' ? (
             <DocumentCell id={item.id} name={item.name} path={item.path} isActive={isActive} />
-          )
+          ) : null
         },
       },
       {
@@ -745,6 +792,15 @@ export function useDocumentBrowser({
     setRootDropRef,
     isOverRoot,
     isLoading,
+    isSearchActive,
+    isSearchLoading: searchResultsQuery.isFetching,
+    searchQuery,
+    setSearchQuery,
+    clearSearch: () => setSearchQuery(''),
+    searchResultCount: searchRows.length,
+    emptyMessage: isSearchActive
+      ? 'No semantic matches found in this project.'
+      : 'No documents in this directory.',
     rows,
     columns,
     breadcrumbs,

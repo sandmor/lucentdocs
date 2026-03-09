@@ -31,6 +31,7 @@ import {
   COLLABORATION_FIELD_KEYS,
   DEFAULT_PROVIDER_OPTIONS,
   LIMIT_FIELD_ROWS,
+  SEARCH_FIELD_KEYS,
   VISIBLE_FIELD_META,
   createProviderDraft,
   formatDisplayValue,
@@ -913,6 +914,18 @@ export function AdminConfigPage() {
               </CardHeader>
               <CardContent className="grid gap-6 sm:grid-cols-2">
                 {COLLABORATION_FIELD_KEYS.map(renderNumberField)}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Search</CardTitle>
+                <CardDescription>
+                  Configure semantic search behavior for project documents.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-6 sm:grid-cols-2">
+                {SEARCH_FIELD_KEYS.map(renderNumberField)}
               </CardContent>
             </Card>
 

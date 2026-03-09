@@ -25,6 +25,7 @@ import type { ConnectionStatus } from '@/lib/yjs-provider'
 import { parseProjectSyncEvent } from '@/lib/project-sync-events'
 import type { PanelImperativeHandle } from 'react-resizable-panels'
 import { cn } from '@/lib/utils'
+import type { EditorView } from 'prosemirror-view'
 
 const DESKTOP_SIDEBAR_STORAGE_KEY_PREFIX = 'lucentdocs:editor:desktop-sidebar:'
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH_PERCENTAGE = 25
@@ -146,6 +147,8 @@ export function EditorPage() {
     to: number
   } | null>(null)
   const sidebarPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const editorViewRef = useRef<EditorView | null>(null)
+  const appliedSearchSelectionRef = useRef<string | null>(null)
 
   const updateCurrentSidebarState = useCallback(
     (updater: (previous: PersistedDesktopSidebarState) => PersistedDesktopSidebarState) => {
@@ -224,12 +227,12 @@ export function EditorPage() {
   }, [visibleDocuments])
 
   const currentDocumentId = useMemo(() => {
-    if (!fallbackDocumentId) return null
-
     const requestedDocumentId = searchParams.get('document')
-    if (requestedDocumentId && visibleDocuments.some((doc) => doc.id === requestedDocumentId)) {
+    if (requestedDocumentId) {
       return requestedDocumentId
     }
+
+    if (!fallbackDocumentId) return null
 
     if (
       defaultDocumentIdFromProject &&
@@ -240,6 +243,11 @@ export function EditorPage() {
 
     return fallbackDocumentId
   }, [defaultDocumentIdFromProject, fallbackDocumentId, searchParams, visibleDocuments])
+
+  const currentDocumentIsVisible = useMemo(
+    () => !!currentDocumentId && visibleDocuments.some((doc) => doc.id === currentDocumentId),
+    [currentDocumentId, visibleDocuments]
+  )
 
   const documentQuery = trpc.documents.get.useQuery(
     {
@@ -269,6 +277,7 @@ export function EditorPage() {
 
   useEffect(() => {
     if (!id || !projectQuery.data || documentsQuery.isLoading) return
+    if (currentDocumentId) return
     if (visibleDocuments.length > 0) return
     if (openOrCreateDefaultDocumentMutation.isPending) return
     if (autoOpenAttemptedProjectRef.current === id) return
@@ -278,7 +287,7 @@ export function EditorPage() {
       { projectId: id },
       {
         onSuccess: (document) => {
-          const next = new URLSearchParams(searchParams)
+          const next = new URLSearchParams()
           next.set('document', document.id)
           setSearchParams(next, { replace: true })
 
@@ -308,16 +317,17 @@ export function EditorPage() {
     id,
     openOrCreateDefaultDocumentMutation,
     projectQuery.data,
-    searchParams,
     setSearchParams,
     utils.documents.get,
     utils.documents.list,
+    currentDocumentId,
     visibleDocuments.length,
   ])
 
   useEffect(() => {
     if (!id) return
     if (!currentDocumentId) return
+    if (!currentDocumentIsVisible) return
 
     const signature = `${id}:${currentDocumentId}`
     if (persistedDefaultSignatureRef.current === signature) return
@@ -343,7 +353,13 @@ export function EditorPage() {
         },
       }
     )
-  }, [currentDocumentId, id, setDefaultDocumentMutation, utils.projects.get])
+  }, [
+    currentDocumentId,
+    currentDocumentIsVisible,
+    id,
+    setDefaultDocumentMutation,
+    utils.projects.get,
+  ])
 
   const documentPath = useMemo(
     () => normalizeDocumentPath(documentQuery.data?.title ?? ''),
@@ -591,13 +607,84 @@ export function EditorPage() {
     setConnectionStatus(status)
   }, [])
 
-  const handleOpenDocument = useCallback(
-    (documentId: string) => {
-      const next = new URLSearchParams(searchParams)
+  const handleEditorViewReady = useCallback((view: EditorView | null) => {
+    editorViewRef.current = view
+    if (!view) {
+      appliedSearchSelectionRef.current = null
+    }
+  }, [])
+
+  const buildDocumentSearchParams = useCallback(
+    (
+      documentId: string,
+      options?: { range?: { start: number; end: number }; preserveExisting?: boolean }
+    ) => {
+      const next = new URLSearchParams(options?.preserveExisting ? searchParams : undefined)
       next.set('document', documentId)
-      setSearchParams(next)
+
+      if (options?.range) {
+        next.set('from', options.range.start.toString())
+        next.set('to', options.range.end.toString())
+      } else {
+        next.delete('from')
+        next.delete('to')
+      }
+
+      return next
     },
-    [searchParams, setSearchParams]
+    [searchParams]
+  )
+
+  const requestedSearchRange = useMemo(() => {
+    const fromParam = searchParams.get('from')
+    const toParam = searchParams.get('to')
+    if (!fromParam || !toParam) return null
+
+    const from = parseInt(fromParam, 10)
+    const to = parseInt(toParam, 10)
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return null
+    if (from < 0 || to < from) return null
+
+    return { from, to }
+  }, [searchParams])
+
+  useEffect(() => {
+    if (requestedSearchRange) return
+    appliedSearchSelectionRef.current = null
+  }, [requestedSearchRange])
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected') return
+    if (!currentDocumentId || documentQuery.data?.id !== currentDocumentId) return
+    if (!requestedSearchRange) return
+    if (!editorViewRef.current || !editorRef.current) return
+
+    const signature = `${currentDocumentId}:${requestedSearchRange.from}:${requestedSearchRange.to}`
+    if (appliedSearchSelectionRef.current === signature) return
+    appliedSearchSelectionRef.current = signature
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        editorRef.current?.scrollToRange(requestedSearchRange.from, requestedSearchRange.to)
+      })
+    })
+  }, [connectionStatus, currentDocumentId, documentQuery.data?.id, requestedSearchRange])
+
+  const handleOpenDocument = useCallback(
+    (documentId: string, range?: { start: number; end: number }) => {
+      const next = buildDocumentSearchParams(documentId, {
+        range,
+        preserveExisting: true,
+      })
+      setSearchParams(next)
+
+      if (documentId === currentDocumentId && range) {
+        requestAnimationFrame(() => {
+          editorRef.current?.scrollToRange(range.start, range.end)
+        })
+      }
+    },
+    [buildDocumentSearchParams, currentDocumentId, setSearchParams]
   )
 
   useEffect(() => {
@@ -655,8 +742,7 @@ export function EditorPage() {
 
       const redirectDocumentId = parsedEvent.defaultDocumentId
       if (redirectDocumentId && redirectDocumentId !== activeId) {
-        const next = new URLSearchParams(searchParams)
-        next.set('document', redirectDocumentId)
+        const next = buildDocumentSearchParams(redirectDocumentId)
         setSearchParams(next, { replace: true })
         toast.info('The open document was removed. Switched to the default document.')
         return
@@ -670,8 +756,7 @@ export function EditorPage() {
         { projectId: id },
         {
           onSuccess: (document) => {
-            const next = new URLSearchParams(searchParams)
-            next.set('document', document.id)
+            const next = buildDocumentSearchParams(document.id)
             setSearchParams(next, { replace: true })
             toast.info('The open document was removed. A new default document was opened.')
           },
@@ -679,10 +764,10 @@ export function EditorPage() {
       )
     },
     [
+      buildDocumentSearchParams,
       id,
       navigate,
       openOrCreateDefaultDocumentMutation,
-      searchParams,
       setSearchParams,
       utils.documents.get,
       utils.documents.list,
@@ -738,8 +823,8 @@ export function EditorPage() {
   )
 
   const handleMobileOpenDocument = useCallback(
-    (documentId: string) => {
-      handleOpenDocument(documentId)
+    (documentId: string, range?: { start: number; end: number }) => {
+      handleOpenDocument(documentId, range)
       // Close mobile drawer if open
       if (isMobileMenuOpen) {
         setIsMobileMenuOpen(false)
@@ -778,7 +863,8 @@ export function EditorPage() {
   const project = projectQuery.data
 
   const versions: VersionSnapshotInfo[] = versionsQuery.data ?? []
-  const hasDocuments = visibleDocuments.length > 0
+  const hasVisibleDocuments = visibleDocuments.length > 0
+  const hasDocumentSelection = currentDocumentId !== null
 
   const sidebarContent = (
     <>
@@ -804,7 +890,8 @@ export function EditorPage() {
 
   const mainContent = (
     <main className="flex-1 overflow-y-auto h-full">
-      {!hasDocuments &&
+      {!hasVisibleDocuments &&
+        !hasDocumentSelection &&
         !documentsQuery.isLoading &&
         !openOrCreateDefaultDocumentMutation.isPending && (
           <div className="text-muted-foreground flex h-full items-center justify-center px-6 text-sm">
@@ -818,49 +905,62 @@ export function EditorPage() {
         </div>
       )}
 
-      {hasDocuments && documentQuery.isLoading && (
+      {hasDocumentSelection && documentQuery.isLoading && (
         <div className="flex h-full items-center justify-center">
           <Loader2 className="text-muted-foreground size-8 animate-spin" />
         </div>
       )}
 
-      {hasDocuments && (documentQuery.error || !documentQuery.data) && !documentQuery.isLoading && (
-        <div className="flex h-full flex-col items-center justify-center gap-4">
-          <p className="text-destructive">{documentQuery.error?.message ?? 'Document not found'}</p>
-          <Button
-            variant="outline"
-            onClick={() => {
-              if (fallbackDocumentId) handleOpenDocument(fallbackDocumentId)
-            }}
-          >
-            Open default document
-          </Button>
-        </div>
-      )}
+      {hasDocumentSelection &&
+        (documentQuery.error || !documentQuery.data) &&
+        !documentQuery.isLoading && (
+          <div className="flex h-full flex-col items-center justify-center gap-4">
+            <p className="text-destructive">
+              {documentQuery.error?.message ?? 'Document not found'}
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (fallbackDocumentId) handleOpenDocument(fallbackDocumentId)
+              }}
+            >
+              Open default document
+            </Button>
+          </div>
+        )}
 
-      {hasDocuments && documentQuery.data && !documentQuery.isLoading && currentDocumentId && (
-        <div className="mx-auto max-w-3xl px-4 sm:px-8 py-6 sm:py-10">
-          <EditorToolbar
-            isGenerating={isGenerating}
-            onContinueWriting={() => editorRef.current?.startAIContinuation(true)}
-            titleInput={titleInput}
-            onTitleChange={setTitleInput}
-            onTitleBlur={handleTitleBlur}
-            onTitleKeyDown={handleTitleKeyDown}
-            titleDisabled={!currentDocumentId || documentQuery.isLoading || !!documentQuery.error}
-          />
-          <Editor
-            key={`${currentDocumentId}-${editorSessionKey}`}
-            ref={editorRef}
-            projectId={id}
-            documentId={currentDocumentId}
-            onConnectionChange={handleConnectionChange}
-            onEditorSelectionChange={setEditorSelectionForChat}
-            onGeneratingChange={setIsGenerating}
-            className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
-          />
-        </div>
-      )}
+      {hasDocumentSelection &&
+        documentQuery.data &&
+        !documentQuery.isLoading &&
+        currentDocumentId && (
+          <div className="mx-auto max-w-3xl px-4 sm:px-8 py-6 sm:py-10">
+            <EditorToolbar
+              isGenerating={isGenerating}
+              onContinueWriting={() => editorRef.current?.startAIContinuation(true)}
+              titleInput={titleInput}
+              onTitleChange={setTitleInput}
+              onTitleBlur={handleTitleBlur}
+              onTitleKeyDown={handleTitleKeyDown}
+              titleDisabled={
+                !currentDocumentId ||
+                documentQuery.isLoading ||
+                !!documentQuery.error ||
+                !currentDocumentIsVisible
+              }
+            />
+            <Editor
+              key={`${currentDocumentId}-${editorSessionKey}`}
+              ref={editorRef}
+              projectId={id}
+              documentId={currentDocumentId}
+              onConnectionChange={handleConnectionChange}
+              onEditorViewReady={handleEditorViewReady}
+              onEditorSelectionChange={setEditorSelectionForChat}
+              onGeneratingChange={setIsGenerating}
+              className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
+            />
+          </div>
+        )}
     </main>
   )
 

@@ -60,7 +60,7 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
 
   const services: ServiceSet = {
     projects: createProjectsService(repositories, transaction),
-    documents: createDocumentsService(repositories, transaction, {
+    documents: createDocumentsService(repositories, transaction, aiSettings, {
       onDocumentContentStored: (documentId) => embeddingIndex.enqueueDocument(documentId),
       onDocumentDeleted: (documentId) => embeddingIndex.deleteDocument(documentId),
     }),

@@ -469,4 +469,78 @@ describe('EmbeddingIndexService', () => {
 
     adapter.connection.close()
   })
+
+  test('keeps embeddings for the same model isolated by base URL', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-baseurl-scope')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
+
+    const doc = await adapter.services.documents.create('scope.md')
+
+    const firstWrite = await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: doc.id,
+      providerConfigId: null,
+      providerId: 'test-provider',
+      type: 'openai',
+      baseURL: 'https://provider-a.example/v1',
+      model: 'shared-model',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 100,
+      contentHash: 'provider-a',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 5,
+          text: 'alpha',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: 100,
+      updatedAt: 100,
+    })
+    expect(firstWrite.status).toBe('applied')
+
+    const secondWrite = await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: doc.id,
+      providerConfigId: null,
+      providerId: 'test-provider',
+      type: 'openai',
+      baseURL: 'https://provider-b.example/v1',
+      model: 'shared-model',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 90,
+      contentHash: 'provider-b',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 4,
+          text: 'beta',
+          embedding: [0.4, 0.5, 0.6],
+        },
+      ],
+      createdAt: 90,
+      updatedAt: 90,
+    })
+    expect(secondWrite.status).toBe('applied')
+
+    const providerAEmbeddings = await adapter.repositories.documentEmbeddings.findEmbeddings(
+      doc.id,
+      'https://provider-a.example/v1',
+      'shared-model'
+    )
+    const providerBEmbeddings = await adapter.repositories.documentEmbeddings.findEmbeddings(
+      doc.id,
+      'https://provider-b.example/v1',
+      'shared-model'
+    )
+
+    expect(providerAEmbeddings).toHaveLength(1)
+    expect(providerAEmbeddings[0]?.contentHash).toBe('provider-a')
+    expect(providerBEmbeddings).toHaveLength(1)
+    expect(providerBEmbeddings[0]?.contentHash).toBe('provider-b')
+
+    adapter.connection.close()
+  })
 })

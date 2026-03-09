@@ -5,6 +5,21 @@ export type DocumentItem = {
   updatedAt: number
 }
 
+export type DocumentSearchResultItem = {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  score: number
+  matchType: 'snippet' | 'whole_document'
+  snippets: Array<{
+    text: string
+    score: number
+    start: number
+    end: number
+  }>
+}
+
 export type BrowserRow =
   | {
       key: string
@@ -13,6 +28,23 @@ export type BrowserRow =
       path: string
       createdAt: number
       updatedAt: number
+    }
+  | {
+      key: string
+      type: 'search-result'
+      id: string
+      name: string
+      path: string
+      createdAt: number
+      updatedAt: number
+      score: number
+      matchType: 'snippet' | 'whole_document'
+      snippets: Array<{
+        text: string
+        score: number
+        start: number
+        end: number
+      }>
     }
   | {
       key: string
@@ -79,5 +111,5 @@ export interface DocumentBrowserProps {
   documents: DocumentItem[]
   isLoading: boolean
   activeDocumentId: string
-  onOpenDocument: (documentId: string) => void
+  onOpenDocument: (documentId: string, range?: { start: number; end: number }) => void
 }

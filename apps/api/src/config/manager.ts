@@ -6,6 +6,7 @@ import {
   type LimitsConfig,
   type PersistedAppConfig,
   type PersistedConfigKey,
+  type SearchConfig,
 } from '@lucentdocs/shared'
 import type { AppConfigRepositoryPort } from '../core/ports/appConfig.port.js'
 
@@ -45,6 +46,7 @@ export interface AppConfig {
     persistenceFlushIntervalMs: number
     versionSnapshotIntervalMs: number
   }
+  search: SearchConfig
   limits: LimitsConfig
 }
 
@@ -269,6 +271,7 @@ function freezeResolvedConfig(config: AppConfig): AppConfig {
   Object.freeze(config.ai)
   Object.freeze(config.embeddings)
   Object.freeze(config.yjs)
+  Object.freeze(config.search)
   Object.freeze(config.limits)
   return Object.freeze(config)
 }
@@ -287,6 +290,17 @@ function buildLimitsConfig(rawConfig: PersistedAppConfig): LimitsConfig {
     promptUserChars: rawConfig.maxPromptUserChars,
     docImportChars: rawConfig.maxDocImportChars,
     docExportChars: rawConfig.maxDocExportChars,
+  }
+}
+
+function buildSearchConfig(rawConfig: PersistedAppConfig): SearchConfig {
+  return {
+    defaultLimit: rawConfig.searchDefaultLimit,
+    maxLimit: rawConfig.searchMaxLimit,
+    maxQueryChars: rawConfig.searchMaxQueryChars,
+    snippetDefaultLimit: rawConfig.searchSnippetDefaultLimit,
+    snippetMaxLimit: rawConfig.searchSnippetMaxLimit,
+    snippetMaxLength: rawConfig.searchSnippetMaxLength,
   }
 }
 
@@ -321,6 +335,7 @@ function buildResolvedConfig(rawConfig: PersistedAppConfig, store: ConfigStoreHa
       persistenceFlushIntervalMs: rawConfig.yjsPersistenceFlushMs,
       versionSnapshotIntervalMs: rawConfig.yjsVersionIntervalMs,
     },
+    search: buildSearchConfig(rawConfig),
     limits: buildLimitsConfig(rawConfig),
   })
 }

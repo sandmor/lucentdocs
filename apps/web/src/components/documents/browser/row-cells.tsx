@@ -1,8 +1,32 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { ChevronRight, FileText, Folder, GripVertical } from 'lucide-react'
+import { Fragment } from 'react'
 import { cn } from '@/lib/utils'
 import { toDirectoryDropId, toDragId } from './dnd-utils'
+import { buildHighlightPattern } from './highlight-utils'
 import type { DragData, DropData } from './types'
+
+export function HighlightedSnippet({ text, query }: { text: string; query: string }) {
+  const pattern = buildHighlightPattern(query)
+  if (!pattern) return <span>{text}</span>
+
+  const parts = text.split(pattern)
+  return (
+    <span>
+      {parts.map((part, index) => {
+        const isMatch = pattern.test(part)
+        pattern.lastIndex = 0
+        return isMatch ? (
+          <mark key={`${part}-${index}`} className="bg-primary/15 text-foreground rounded px-0.5">
+            {part}
+          </mark>
+        ) : (
+          <Fragment key={`${part}-${index}`}>{part}</Fragment>
+        )
+      })}
+    </span>
+  )
+}
 
 function DragHandle({ dragData }: { dragData: DragData }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({

@@ -24,6 +24,115 @@ import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
 
 export interface EditorHandle {
   startAIContinuation: (at_doc_end: boolean) => void
+  scrollToRange: (from: number, to: number) => void
+}
+
+function findScrollParent(element: HTMLElement): HTMLElement | null {
+  let current: HTMLElement | null = element.parentElement
+
+  while (current) {
+    const style = window.getComputedStyle(current)
+    const overflowY = style.overflowY
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll') &&
+      current.scrollHeight > current.clientHeight
+    ) {
+      return current
+    }
+    current = current.parentElement
+  }
+
+  return null
+}
+
+function forceSelectionIntoViewport(view: EditorView, position: number): void {
+  const anchorPosition = Math.max(1, Math.min(position, view.state.doc.content.size))
+  const coords = view.coordsAtPos(anchorPosition)
+  const scrollParent = findScrollParent(view.dom)
+  const padding = 96
+
+  if (scrollParent) {
+    const parentRect = scrollParent.getBoundingClientRect()
+    if (coords.top < parentRect.top + padding) {
+      scrollParent.scrollTop += coords.top - parentRect.top - padding
+      return
+    }
+    if (coords.bottom > parentRect.bottom - padding) {
+      scrollParent.scrollTop += coords.bottom - parentRect.bottom + padding
+    }
+    return
+  }
+
+  const viewportHeight = window.innerHeight
+  if (coords.top < padding) {
+    window.scrollBy({ top: coords.top - padding, behavior: 'auto' })
+    return
+  }
+  if (coords.bottom > viewportHeight - padding) {
+    window.scrollBy({ top: coords.bottom - viewportHeight + padding, behavior: 'auto' })
+  }
+}
+
+function scrollSelectedDomRangeIntoView(): void {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return
+
+  const range = selection.getRangeAt(0)
+  const anchorNode = range.startContainer
+  const anchorElement =
+    anchorNode instanceof HTMLElement
+      ? anchorNode
+      : anchorNode.parentElement instanceof HTMLElement
+        ? anchorNode.parentElement
+        : null
+
+  if (!anchorElement) return
+
+  const scrollParent = findScrollParent(anchorElement)
+  if (!scrollParent) {
+    anchorElement.scrollIntoView({ block: 'center', inline: 'nearest' })
+    return
+  }
+
+  const parentRect = scrollParent.getBoundingClientRect()
+  const elementRect = anchorElement.getBoundingClientRect()
+  const targetTop =
+    scrollParent.scrollTop +
+    (elementRect.top - parentRect.top) -
+    (parentRect.height - elementRect.height) / 2
+
+  scrollParent.scrollTo({ top: Math.max(0, targetTop), behavior: 'auto' })
+}
+
+function scrollElementIntoNearestView(element: HTMLElement): void {
+  const scrollParent = findScrollParent(element)
+  if (!scrollParent) {
+    element.scrollIntoView({ block: 'center', inline: 'nearest' })
+    return
+  }
+
+  const parentRect = scrollParent.getBoundingClientRect()
+  const elementRect = element.getBoundingClientRect()
+  const targetTop =
+    scrollParent.scrollTop +
+    (elementRect.top - parentRect.top) -
+    (parentRect.height - elementRect.height) / 2
+
+  scrollParent.scrollTo({ top: Math.max(0, targetTop), behavior: 'auto' })
+}
+
+function scrollEditorPositionIntoView(view: EditorView, position: number): void {
+  const targetPosition = Math.max(1, Math.min(position, view.state.doc.content.size))
+  const domAtPos = view.domAtPos(targetPosition)
+  const element =
+    domAtPos.node instanceof HTMLElement
+      ? domAtPos.node
+      : domAtPos.node.parentElement instanceof HTMLElement
+        ? domAtPos.node.parentElement
+        : null
+
+  if (!element) return
+  scrollElementIntoNearestView(element)
 }
 
 interface EditorProps {
@@ -339,6 +448,37 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     startAIContinuation(at_doc_end: boolean) {
       if (!viewRef.current) return
       aiControllerRef.current?.startAIContinuation(viewRef.current, at_doc_end)
+    },
+    scrollToRange(from: number, to: number) {
+      if (!viewRef.current) return
+      const doc = viewRef.current.state.doc
+      const max = doc.content.size
+      if (max <= 0) return
+
+      const resolvedFrom = Math.max(1, Math.min(from, max))
+      const resolvedTo = Math.max(resolvedFrom, Math.min(to, max))
+
+      const tr = viewRef.current.state.tr
+      tr.setSelection(TextSelection.create(doc, resolvedFrom, resolvedTo))
+      tr.scrollIntoView()
+      viewRef.current.dispatch(tr)
+      viewRef.current.focus()
+
+      let attemptsRemaining = 4
+      const settleScroll = () => {
+        requestAnimationFrame(() => {
+          if (!viewRef.current) return
+          scrollEditorPositionIntoView(viewRef.current, Math.floor((resolvedFrom + resolvedTo) / 2))
+          scrollSelectedDomRangeIntoView()
+          forceSelectionIntoViewport(viewRef.current, resolvedFrom)
+          attemptsRemaining -= 1
+          if (attemptsRemaining > 0) {
+            settleScroll()
+          }
+        })
+      }
+
+      settleScroll()
     },
   }))
 

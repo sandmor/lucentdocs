@@ -4,6 +4,7 @@ import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/prov
 
 const PROVIDER_REQUEST_TIMEOUT_MS = 30_000
 const MAX_EMBEDDING_DIMENSIONS = 8192
+const TEST_FAKE_EMBEDDINGS_ENV = 'LUCENTDOCS_TEST_FAKE_EMBEDDINGS'
 
 export interface EmbeddingConfig {
   provider: 'openai' | 'openai-compatible' | 'openrouter'
@@ -25,6 +26,60 @@ export interface EmbeddingResult {
 export interface EmbeddingProvider {
   config: EmbeddingConfig
   embed(inputs: string[]): Promise<EmbeddingResult[]>
+}
+
+function shouldUseFakeEmbeddings(): boolean {
+  return process.env[TEST_FAKE_EMBEDDINGS_ENV] === '1'
+}
+
+function tokenizeEmbeddingInput(input: string): string[] {
+  return input
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2)
+}
+
+function hashToken(token: string): number {
+  let hash = 2166136261
+  for (let index = 0; index < token.length; index += 1) {
+    hash ^= token.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+function buildFakeEmbedding(input: string): number[] {
+  const dimensions = 32
+  const vector = new Array<number>(dimensions).fill(0)
+  const tokens = tokenizeEmbeddingInput(input)
+
+  if (tokens.length === 0) {
+    vector[0] = 1
+    return vector
+  }
+
+  for (const token of tokens) {
+    const hash = hashToken(token)
+    const index = hash % dimensions
+    const sign = hash % 2 === 0 ? 1 : -1
+    vector[index] += sign * (1 + (token.length % 3) * 0.25)
+  }
+
+  const magnitude = Math.hypot(...vector)
+  if (magnitude === 0) {
+    vector[0] = 1
+    return vector
+  }
+
+  return vector.map((value) => value / magnitude)
+}
+
+function buildFakeEmbeddingBatch(inputs: string[]): EmbeddingResult[] {
+  return inputs.map((input, index) => ({
+    index,
+    embedding: buildFakeEmbedding(input),
+  }))
 }
 
 let providerPromise: Promise<EmbeddingProvider> | null = null
@@ -140,6 +195,15 @@ function validateEmbeddingBatch(embeddings: EmbeddingResult[]): void {
 
 async function createProvider(): Promise<EmbeddingProvider> {
   const config = await resolveRuntimeConfig()
+  if (shouldUseFakeEmbeddings()) {
+    return {
+      config,
+      async embed(inputs: string[]): Promise<EmbeddingResult[]> {
+        return buildFakeEmbeddingBatch(inputs)
+      },
+    }
+  }
+
   const requiresApiKey = config.provider !== 'openai-compatible'
   if (requiresApiKey && !config.apiKey) {
     throw new Error('Missing API key for the active embedding provider configuration.')

@@ -18,6 +18,10 @@ import {
 import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
+import { configManager } from '../../config/runtime.js'
+import { getEmbeddingProvider } from '../../embeddings/provider.js'
+import type { ProjectDocumentEmbeddingSearchMatch } from '../ports/documentEmbeddings.port.js'
+import type { AiSettingsService } from './aiSettings.service.js'
 
 export interface DocumentWithContent extends Document {
   content: string
@@ -27,6 +31,25 @@ export interface VersionSnapshot {
   id: string
   documentId: string
   createdAt: number
+}
+
+export interface ProjectDocumentSearchSnippet {
+  text: string
+  start: number
+  end: number
+  score: number
+}
+
+export interface ProjectDocumentSearchResult {
+  id: string
+  title: string
+  type: string
+  metadata: JsonObject | null
+  createdAt: number
+  updatedAt: number
+  score: number
+  matchType: 'snippet' | 'whole_document'
+  snippets: ProjectDocumentSearchSnippet[]
 }
 
 export type ImportDocumentErrorKind =
@@ -51,6 +74,11 @@ export interface DocumentsService {
   getWithContentByIds(documentIds: string[]): Promise<Map<string, DocumentWithContent>>
   listAllIds(): Promise<string[]>
   listForProject(projectId: string): Promise<Document[]>
+  searchForProject(
+    projectId: string,
+    query: string,
+    options?: { limit?: number; maxSnippetsPerDocument?: number }
+  ): Promise<ProjectDocumentSearchResult[]>
   hasProjectAssociation(projectId: string, documentId: string): Promise<boolean>
 
   create(title: string, content?: string, type?: string): Promise<DocumentWithContent>
@@ -213,11 +241,213 @@ async function getProjectScopedDocument(
   return doc
 }
 
+async function getAssociatedProjectDocument(
+  repos: RepositorySet,
+  projectId: string,
+  documentId: string
+): Promise<Document | null> {
+  if (!isValidId(projectId) || !isValidId(documentId)) return null
+  if (!(await repos.projectDocuments.hasProjectDocument(projectId, documentId))) return null
+
+  const doc = await repos.documents.findById(documentId)
+  if (!doc) return null
+  if (isDirectorySentinelPath(normalizeDocumentPath(doc.title))) return null
+  return doc
+}
+
+/**
+ * Resolves the effective search result limit, applying config defaults and caps.
+ * Falls back to the configured default when no explicit limit is provided.
+ * Always respects the configured maximum to prevent excessive result sets.
+ */
+function clampSearchLimit(limit: number | undefined): number {
+  const config = configManager.getConfig().search
+  if (limit === undefined) return config.defaultLimit
+  if (!Number.isInteger(limit) || limit <= 0) return config.defaultLimit
+  return Math.min(limit, config.maxLimit)
+}
+
+/**
+ * Resolves the maximum snippets per document for search results.
+ * Snippets show the matching text excerpt within a document; capping them
+ * prevents overwhelming the UI when a single document has many matches.
+ */
+function clampSnippetLimit(limit: number | undefined): number {
+  const config = configManager.getConfig().search
+  if (limit === undefined) return config.snippetDefaultLimit
+  if (!Number.isInteger(limit) || limit <= 0) return config.snippetDefaultLimit
+  return Math.min(limit, config.snippetMaxLimit)
+}
+
+function normalizeSearchText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function buildSearchTerms(query: string): string[] {
+  return Array.from(
+    new Set(
+      normalizeSearchText(query)
+        .toLowerCase()
+        .split(' ')
+        .map((term) => term.trim())
+        .filter((term) => term.length >= 2)
+    )
+  )
+}
+
+/**
+ * Builds a human-readable preview snippet from chunk text, centering around
+ * the first matching search term. The snippet is truncated to the configured
+ * max length with ellipsis indicators when content is omitted.
+ */
+function buildSnippetPreview(chunkText: string, query: string): string {
+  const normalized = normalizeSearchText(chunkText)
+  if (!normalized) return ''
+
+  const lowerText = normalized.toLowerCase()
+  const anchor = buildSearchTerms(query)
+    .map((term) => lowerText.indexOf(term))
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0]
+
+  const maxLength = configManager.getConfig().search.snippetMaxLength
+  const preferredStart = anchor === undefined ? 0 : Math.max(0, anchor - 56)
+  const start = Math.min(preferredStart, Math.max(0, normalized.length - maxLength))
+  const end = Math.min(normalized.length, start + maxLength)
+  const prefix = start > 0 ? '...' : ''
+  const suffix = end < normalized.length ? '...' : ''
+  return `${prefix}${normalized.slice(start, end).trim()}${suffix}`
+}
+
+/**
+ * Determines whether two snippet ranges overlap significantly (>=60%).
+ * Used to deduplicate snippets that would show nearly identical content
+ * to the user, improving result diversity.
+ */
+function rangesSubstantiallyOverlap(
+  left: { start: number; end: number },
+  right: { start: number; end: number }
+): boolean {
+  const overlapStart = Math.max(left.start, right.start)
+  const overlapEnd = Math.min(left.end, right.end)
+  if (overlapEnd <= overlapStart) return false
+
+  const overlap = overlapEnd - overlapStart
+  const leftLength = Math.max(1, left.end - left.start)
+  const rightLength = Math.max(1, right.end - right.start)
+  return overlap / Math.min(leftLength, rightLength) >= 0.6
+}
+
+/**
+ * Aggregates raw embedding chunk matches into document-level search results.
+ *
+ * The embedding index stores text chunks, not whole documents. Multiple chunks
+ * from the same document may match a query. This function:
+ * 1. Groups chunks by document ID
+ * 2. Assigns each document the best (lowest) distance score from its chunks
+ * 3. Builds snippet previews for each match (up to maxSnippetsPerDocument)
+ * 4. Deduplicates overlapping snippets to avoid showing redundant content
+ * 5. Sorts results by score (best first), with recency as a tiebreaker
+ *
+ * Whole-document matches are treated specially: they indicate the entire
+ * document matched without a specific location, so no snippets are shown.
+ */
+function aggregateProjectSearchMatches(
+  matches: ProjectDocumentEmbeddingSearchMatch[],
+  query: string,
+  maxSnippetsPerDocument: number,
+  documentById: Map<string, Document>
+): ProjectDocumentSearchResult[] {
+  const resultsByDocumentId = new Map<string, ProjectDocumentSearchResult>()
+
+  for (const match of matches) {
+    const document = documentById.get(match.documentId)
+    if (!document) continue
+
+    let result = resultsByDocumentId.get(match.documentId)
+    if (!result) {
+      result = {
+        id: document.id,
+        title: document.title,
+        type: document.type,
+        metadata: document.metadata,
+        createdAt: document.createdAt,
+        updatedAt: document.updatedAt,
+        score: match.distance,
+        matchType: 'snippet',
+        snippets: [],
+      }
+      resultsByDocumentId.set(match.documentId, result)
+    } else {
+      result.score = Math.min(result.score, match.distance)
+    }
+
+    const isWholeDocumentMatch = match.strategyType === 'whole_document'
+
+    if (isWholeDocumentMatch) {
+      result.matchType = 'whole_document'
+      result.snippets = []
+      continue
+    }
+
+    if (result.matchType === 'whole_document') {
+      continue
+    }
+
+    const snippetText = buildSnippetPreview(match.chunkText, query)
+    if (!snippetText) continue
+
+    if (result.snippets.length >= maxSnippetsPerDocument) continue
+
+    const selectionFrom = match.selectionFrom
+    const selectionTo = match.selectionTo
+    if (selectionFrom === null || selectionTo === null) continue
+
+    const nextRange = { start: selectionFrom, end: selectionTo }
+    if (
+      result.snippets.some(
+        (snippet) =>
+          snippet.text === snippetText ||
+          rangesSubstantiallyOverlap(nextRange, { start: snippet.start, end: snippet.end })
+      )
+    ) {
+      continue
+    }
+
+    result.snippets.push({
+      text: snippetText,
+      start: selectionFrom,
+      end: selectionTo,
+      score: match.distance,
+    })
+  }
+
+  return [...resultsByDocumentId.values()]
+    .map((result) => ({
+      ...result,
+      snippets: result.snippets.sort((left, right) => left.score - right.score),
+    }))
+    .sort((left, right) => {
+      if (left.score !== right.score) return left.score - right.score
+      return right.updatedAt - left.updatedAt
+    })
+}
+
 export function createDocumentsService(
   repos: RepositorySet,
   transaction: TransactionPort,
+  aiSettingsServiceOrObserver?: AiSettingsService | DocumentContentObserver,
   observer: DocumentContentObserver = {}
 ): DocumentsService {
+  const aiSettingsService =
+    aiSettingsServiceOrObserver && 'resolveRuntimeSelection' in aiSettingsServiceOrObserver
+      ? aiSettingsServiceOrObserver
+      : null
+  const resolvedObserver =
+    aiSettingsServiceOrObserver && 'resolveRuntimeSelection' in aiSettingsServiceOrObserver
+      ? observer
+      : (aiSettingsServiceOrObserver ?? observer)
+
   const getDocumentContent = async (id: string): Promise<string> => {
     const yjsData = await repos.yjsDocuments.getLatest(id)
     if (!yjsData) return createDefaultContent()
@@ -267,7 +497,7 @@ export function createDocumentsService(
       await repos.yjsDocuments.set(id, buffer)
     })
 
-    await observer.onDocumentContentStored?.(id)
+    await resolvedObserver.onDocumentContentStored?.(id)
 
     return { ...doc, content: docContent }
   }
@@ -332,6 +562,82 @@ export function createDocumentsService(
     },
 
     listForProject: listDocumentsForProject,
+
+    /**
+     * Performs semantic search over all documents linked to a project.
+     *
+     * The search uses vector embeddings to find documents whose content
+     * semantically matches the query, not just keyword matches.
+     *
+     * Results are returned as document entries with snippet previews showing
+     * where the match occurred. Multiple chunks from the same document are
+     * aggregated into a single result with multiple snippets.
+     *
+     * The candidate multiplier logic ensures we fetch enough embedding chunks
+     * to satisfy the requested document count: since one document can have
+     * many matching chunks, we may need to fetch more chunks than the final
+     * result count. We start small (limit * 4) and exponentially increase
+     * (doubling each iteration) until we have enough unique documents or
+     * hit the safety cap (limit * 12).
+     *
+     * @param projectId - The project to search within
+     * @param query - The natural language search query
+     * @param options.limit - Max results to return (uses config default if omitted)
+     * @param options.maxSnippetsPerDocument - Max snippets per document (default 4)
+     */
+    async searchForProject(
+      projectId: string,
+      query: string,
+      options?: { limit?: number; maxSnippetsPerDocument?: number }
+    ): Promise<ProjectDocumentSearchResult[]> {
+      if (!isValidId(projectId)) return []
+
+      const normalizedQuery = normalizeSearchText(query)
+      if (!normalizedQuery) return []
+
+      const limit = clampSearchLimit(options?.limit)
+      const maxSnippetsPerDocument = clampSnippetLimit(options?.maxSnippetsPerDocument)
+      if (!aiSettingsService) return []
+
+      const selection = await aiSettingsService.resolveRuntimeSelection('embedding')
+      const provider = await getEmbeddingProvider()
+      const [queryResult] = await provider.embed([normalizedQuery])
+      const queryEmbedding = queryResult?.embedding
+      if (!queryEmbedding) return []
+
+      const maxCandidateLimit = Math.max(limit * 12, 48)
+      let candidateLimit = Math.max(limit * 4, 16)
+      let bestResults: ProjectDocumentSearchResult[] = []
+
+      while (candidateLimit <= maxCandidateLimit) {
+        const matches = await repos.documentEmbeddings.searchProjectDocuments({
+          projectId,
+          baseURL: selection.baseURL,
+          model: selection.model,
+          queryEmbedding,
+          limit: candidateLimit,
+        })
+        if (matches.length === 0) return []
+
+        const documents = await repos.documents.findByIds(
+          Array.from(new Set(matches.map((match) => match.documentId)))
+        )
+        bestResults = aggregateProjectSearchMatches(
+          matches,
+          normalizedQuery,
+          maxSnippetsPerDocument,
+          new Map(documents.map((document) => [document.id, document]))
+        ).slice(0, limit)
+
+        if (bestResults.length >= limit || matches.length < candidateLimit) {
+          break
+        }
+
+        candidateLimit *= 2
+      }
+
+      return bestResults
+    },
 
     async hasProjectAssociation(projectId: string, documentId: string): Promise<boolean> {
       if (!isValidId(projectId) || !isValidId(documentId)) return false
@@ -440,7 +746,7 @@ export function createDocumentsService(
         await repos.yjsDocuments.delete(id)
       })
 
-      await observer.onDocumentDeleted?.(id)
+      await resolvedObserver.onDocumentDeleted?.(id)
 
       return true
     },
@@ -671,7 +977,7 @@ export function createDocumentsService(
       })
 
       for (const doc of docsToDelete) {
-        await observer.onDocumentDeleted?.(doc.id)
+        await resolvedObserver.onDocumentDeleted?.(doc.id)
       }
 
       return { deletedDocumentIds: docsToDelete.map((d) => d.id) }
@@ -681,7 +987,7 @@ export function createDocumentsService(
       projectId: string,
       documentId: string
     ): Promise<DocumentWithContent | null> => {
-      const doc = await getProjectScopedDocument(repos, projectId, documentId)
+      const doc = await getAssociatedProjectDocument(repos, projectId, documentId)
       if (!doc) return null
       return getDocumentWithContent(documentId)
     },
@@ -748,7 +1054,7 @@ export function createDocumentsService(
       projectId: string,
       documentId: string
     ): Promise<VersionSnapshot[]> {
-      if (!(await getProjectScopedDocument(repos, projectId, documentId))) return []
+      if (!(await getAssociatedProjectDocument(repos, projectId, documentId))) return []
       return this.getVersionHistory(documentId)
     },
 
@@ -776,7 +1082,7 @@ export function createDocumentsService(
       projectId: string,
       documentId: string
     ): Promise<VersionSnapshot | null> {
-      if (!(await getProjectScopedDocument(repos, projectId, documentId))) return null
+      if (!(await getAssociatedProjectDocument(repos, projectId, documentId))) return null
       return this.createSnapshot(documentId)
     },
 
@@ -824,7 +1130,7 @@ export function createDocumentsService(
         await repos.documents.update(documentId, { updatedAt: restoredAt })
       })
 
-      await observer.onDocumentContentStored?.(documentId)
+      await resolvedObserver.onDocumentContentStored?.(documentId)
 
       return {
         ...doc,
@@ -838,7 +1144,7 @@ export function createDocumentsService(
       documentId: string,
       snapshotId: string
     ): Promise<DocumentWithContent | null> {
-      if (!(await getProjectScopedDocument(repos, projectId, documentId))) return null
+      if (!(await getAssociatedProjectDocument(repos, projectId, documentId))) return null
       return this.restoreToSnapshot(documentId, snapshotId)
     },
   }

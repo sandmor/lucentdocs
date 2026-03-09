@@ -5,6 +5,7 @@ import { BrowserDialogs } from './browser/dialogs'
 import { BrowserHeader } from './browser/header'
 import { useDocumentBrowser } from './browser/use-document-browser'
 import type { DocumentBrowserProps } from './browser/types'
+import { SearchResultsList } from './browser/search-results'
 
 export function DocumentBrowser(props: DocumentBrowserProps) {
   const browser = useDocumentBrowser(props)
@@ -25,19 +26,33 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
           isImporting={browser.isImporting}
           rootDropRef={browser.setRootDropRef}
           isOverRoot={browser.isOverRoot}
+          searchQuery={browser.searchQuery}
+          onSearchQueryChange={browser.setSearchQuery}
+          onClearSearch={browser.clearSearch}
+          isSearchActive={browser.isSearchActive}
+          isSearchLoading={browser.isSearchLoading}
+          searchResultCount={browser.searchResultCount}
         />
 
         <div className="flex-1 overflow-y-auto p-3">
-          {browser.isLoading ? (
+          {browser.isLoading && !browser.isSearchActive ? (
             <div className="text-muted-foreground flex h-24 items-center justify-center gap-2 text-sm">
               <Loader2 className="size-4 animate-spin" />
               Loading documents...
             </div>
+          ) : browser.isSearchActive ? (
+            <SearchResultsList
+              results={browser.rows}
+              query={browser.searchQuery}
+              activeDocumentId={props.activeDocumentId}
+              emptyMessage={browser.emptyMessage}
+              onOpenDocument={props.onOpenDocument}
+            />
           ) : (
             <DataTable
               columns={browser.columns}
               data={browser.rows}
-              emptyMessage="No documents in this directory."
+              emptyMessage={browser.emptyMessage}
               onRowClick={browser.handleRowClick}
             />
           )}

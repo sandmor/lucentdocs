@@ -19,6 +19,8 @@ export interface DocumentEmbeddingEntity {
   chunkOrdinal: number
   chunkStart: number
   chunkEnd: number
+  selectionFrom: number | null
+  selectionTo: number | null
   chunkText: string
   dimensions: number
   documentTimestamp: number
@@ -31,6 +33,8 @@ export interface ReplaceDocumentEmbeddingChunkInput {
   ordinal: number
   start: number
   end: number
+  selectionFrom?: number | null
+  selectionTo?: number | null
   text: string
   embedding: number[]
 }
@@ -61,6 +65,29 @@ export interface DocumentEmbeddingQueueStats {
   nextDebounceUntil: number | null
 }
 
+export interface SearchProjectDocumentEmbeddingsInput {
+  projectId: string
+  baseURL: string
+  model: string
+  queryEmbedding: number[]
+  limit: number
+}
+
+export interface ProjectDocumentEmbeddingSearchMatch {
+  documentId: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  strategyType: 'whole_document' | 'sliding_window'
+  chunkOrdinal: number
+  chunkStart: number
+  chunkEnd: number
+  selectionFrom: number | null
+  selectionTo: number | null
+  chunkText: string
+  distance: number
+}
+
 export interface DocumentEmbeddingsRepositoryPort {
   enqueueDocument(documentId: string, queuedAt: number, debounceUntil: number): Promise<void>
   listQueuedDocuments(): Promise<DocumentEmbeddingJobEntity[]>
@@ -72,6 +99,9 @@ export interface DocumentEmbeddingsRepositoryPort {
     baseURL: string,
     model: string
   ): Promise<DocumentEmbeddingEntity[]>
+  searchProjectDocuments(
+    input: SearchProjectDocumentEmbeddingsInput
+  ): Promise<ProjectDocumentEmbeddingSearchMatch[]>
   replaceEmbeddings(input: ReplaceDocumentEmbeddingsInput): Promise<ReplaceDocumentEmbeddingsResult>
   deleteEmbeddingsByDocumentId(documentId: string): Promise<void>
 }

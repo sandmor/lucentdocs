@@ -10,8 +10,19 @@ import type {
   DocumentEmbeddingEntity,
 } from '../ports/documentEmbeddings.port.js'
 import { buildEmbeddingChunks } from '../../embeddings/chunking.js'
-import { buildDocumentEmbeddingText } from '../../embeddings/document-content.js'
+import { buildDocumentEmbeddingProjectionSnapshot } from '../../embeddings/document-content.js'
+import { mapProjectionGraphemeRangeToSelection } from '../../embeddings/document-projection.js'
 import { getEmbeddingProvider } from '../../embeddings/provider.js'
+import { normalizeBaseURL } from '../ai/provider-types.js'
+
+interface PreparedEmbeddingChunk {
+  ordinal: number
+  start: number
+  end: number
+  selectionFrom: number | null
+  selectionTo: number | null
+  text: string
+}
 
 export interface EmbeddingIndexRuntimeConfig {
   debounceMs: number
@@ -54,8 +65,9 @@ function pickDueJobs(
 
 function isStoredEmbeddingSetCurrent(
   existing: DocumentEmbeddingEntity[],
+  baseURL: string,
   contentHash: string,
-  chunks: ReturnType<typeof buildEmbeddingChunks>
+  chunks: PreparedEmbeddingChunk[]
 ): boolean {
   if (chunks.length === 0) {
     return existing.length === 0
@@ -65,13 +77,18 @@ function isStoredEmbeddingSetCurrent(
     return false
   }
 
+  const normalizedBaseURL = normalizeBaseURL(baseURL)
+
   return existing.every((entry, index) => {
     const chunk = chunks[index]
     return (
+      normalizeBaseURL(entry.baseURL) === normalizedBaseURL &&
       entry.contentHash === contentHash &&
       entry.chunkOrdinal === chunk?.ordinal &&
       entry.chunkStart === chunk?.start &&
       entry.chunkEnd === chunk?.end &&
+      entry.selectionFrom === chunk?.selectionFrom &&
+      entry.selectionTo === chunk?.selectionTo &&
       entry.chunkText === chunk?.text
     )
   })
@@ -131,7 +148,7 @@ export function createEmbeddingIndexService(
           contentHash: string
           documentTimestamp: number
           expectedLastQueuedAt: number
-          chunks: ReturnType<typeof buildEmbeddingChunks>
+          chunks: PreparedEmbeddingChunk[]
           strategy: IndexingStrategy
         }> = []
         const candidatesToClear: Array<{ documentId: string; expectedLastQueuedAt: number }> = []
@@ -147,7 +164,7 @@ export function createEmbeddingIndexService(
             continue
           }
 
-          const text = await buildDocumentEmbeddingText(repos, document)
+          const projection = await buildDocumentEmbeddingProjectionSnapshot(repos, document)
           const documentTimestamp = now
           const resolvedStrategy = await indexingSettingsService.resolveForDocument(document.id)
           if (!resolvedStrategy) {
@@ -158,12 +175,28 @@ export function createEmbeddingIndexService(
             continue
           }
 
-          const chunks = buildEmbeddingChunks(text, resolvedStrategy.strategy)
+          const chunks = buildEmbeddingChunks(projection.text, resolvedStrategy.strategy).map(
+            (chunk) => {
+              const selectionRange =
+                resolvedStrategy.strategy.type === 'whole_document'
+                  ? null
+                  : mapProjectionGraphemeRangeToSelection(projection, chunk.start, chunk.end)
+
+              return {
+                ordinal: chunk.ordinal,
+                start: chunk.start,
+                end: chunk.end,
+                selectionFrom: selectionRange?.from ?? null,
+                selectionTo: selectionRange?.to ?? null,
+                text: chunk.text,
+              }
+            }
+          )
 
           const contentHash = hashEmbeddingText(
             JSON.stringify({
               strategy: resolvedStrategy.strategy,
-              text,
+              text: projection.text,
             })
           )
           const existing = await repos.documentEmbeddings.findEmbeddings(
@@ -172,7 +205,7 @@ export function createEmbeddingIndexService(
             selection.model
           )
 
-          if (isStoredEmbeddingSetCurrent(existing, contentHash, chunks)) {
+          if (isStoredEmbeddingSetCurrent(existing, selection.baseURL, contentHash, chunks)) {
             candidatesToClear.push({
               documentId: document.id,
               expectedLastQueuedAt: job.lastQueuedAt,
@@ -224,6 +257,8 @@ export function createEmbeddingIndexService(
                   ordinal: chunk.ordinal,
                   start: chunk.start,
                   end: chunk.end,
+                  selectionFrom: chunk.selectionFrom,
+                  selectionTo: chunk.selectionTo,
                   text: chunk.text,
                   embedding,
                 }

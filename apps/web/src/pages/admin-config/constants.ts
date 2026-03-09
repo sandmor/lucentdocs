@@ -98,6 +98,15 @@ export const COLLABORATION_FIELD_KEYS = [
   'yjsVersionIntervalMs',
 ] as const satisfies ReadonlyArray<VisibleNumberFieldKey>
 
+export const SEARCH_FIELD_KEYS = [
+  'searchDefaultLimit',
+  'searchMaxLimit',
+  'searchMaxQueryChars',
+  'searchSnippetDefaultLimit',
+  'searchSnippetMaxLimit',
+  'searchSnippetMaxLength',
+] as const satisfies ReadonlyArray<VisibleNumberFieldKey>
+
 export const LIMIT_FIELD_ROWS = [
   {
     keys: ['maxContextChars', 'maxPromptChars'],
@@ -175,6 +184,36 @@ export const VISIBLE_FIELD_META: Record<
     label: 'Snapshot interval (ms)',
     description: 'How often active documents auto-create version snapshots.',
     overrideSuffix: ' ms',
+  },
+  searchDefaultLimit: {
+    id: 'search-default-limit',
+    label: 'Default search results',
+    description: 'Number of documents returned by default when searching.',
+  },
+  searchMaxLimit: {
+    id: 'search-max-limit',
+    label: 'Max search results',
+    description: 'Maximum number of documents that can be requested in a search.',
+  },
+  searchMaxQueryChars: {
+    id: 'search-max-query-chars',
+    label: 'Max query chars',
+    description: 'Maximum length of search query text.',
+  },
+  searchSnippetDefaultLimit: {
+    id: 'search-snippet-default-limit',
+    label: 'Default snippets per doc',
+    description: 'Number of text snippets shown per document by default.',
+  },
+  searchSnippetMaxLimit: {
+    id: 'search-snippet-max-limit',
+    label: 'Max snippets per doc',
+    description: 'Maximum snippets that can be shown per document.',
+  },
+  searchSnippetMaxLength: {
+    id: 'search-snippet-max-length',
+    label: 'Snippet max length',
+    description: 'Maximum characters shown in each search result snippet.',
   },
   maxContextChars: {
     id: 'max-context',

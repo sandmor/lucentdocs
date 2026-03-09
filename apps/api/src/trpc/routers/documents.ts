@@ -75,6 +75,30 @@ export const documentsRouter = router({
       return docs
     }),
 
+  search: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        query: z.string().trim().min(1),
+        limit: z.number().int().min(1).optional(),
+        maxSnippetsPerDocument: z.number().int().min(1).optional(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      const maxQueryChars = configManager.getConfig().search.maxQueryChars
+      if (input.query.length > maxQueryChars) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Query exceeds maximum length of ${maxQueryChars} characters`,
+        })
+      }
+      return ctx.services.documents.searchForProject(input.projectId, input.query, {
+        limit: input.limit,
+        maxSnippetsPerDocument: input.maxSnippetsPerDocument,
+      })
+    }),
+
   openOrCreateDefault: protectedProcedure
     .input(
       z.object({
