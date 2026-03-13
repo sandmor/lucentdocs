@@ -15,6 +15,7 @@ export interface InlineZoneSession {
   choices: string[]
   contextBefore: string | null
   contextAfter: string | null
+  contextTruncated: boolean
 }
 
 function normalizeToolChip(value: unknown): InlineToolChip | null {
@@ -69,6 +70,7 @@ export function normalizeInlineZoneSession(value: unknown): InlineZoneSession | 
     typeof record.contextAfter === 'string' && record.contextAfter.length > 0
       ? record.contextAfter
       : null
+  const contextTruncated = record.contextTruncated === true
 
   return {
     messages: rawMessages.flatMap((entry) => {
@@ -78,6 +80,7 @@ export function normalizeInlineZoneSession(value: unknown): InlineZoneSession | 
     choices: rawChoices.filter((entry): entry is string => typeof entry === 'string'),
     contextBefore,
     contextAfter,
+    contextTruncated,
   }
 }
 

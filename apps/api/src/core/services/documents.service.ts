@@ -22,6 +22,11 @@ import { configManager } from '../../config/runtime.js'
 import { getEmbeddingProvider } from '../../embeddings/provider.js'
 import type { ProjectDocumentEmbeddingSearchMatch } from '../ports/documentEmbeddings.port.js'
 import type { AiSettingsService } from './aiSettings.service.js'
+import {
+  buildSnippetPreview as buildSearchSnippetPreview,
+  normalizeValidatedSearchText,
+  rangesSubstantiallyOverlap,
+} from './documentSearch.js'
 
 export interface DocumentWithContent extends Document {
   content: string
@@ -35,8 +40,8 @@ export interface VersionSnapshot {
 
 export interface ProjectDocumentSearchSnippet {
   text: string
-  start: number
-  end: number
+  selectionFrom: number
+  selectionTo: number
   score: number
 }
 
@@ -50,6 +55,17 @@ export interface ProjectDocumentSearchResult {
   score: number
   matchType: 'snippet' | 'whole_document'
   snippets: ProjectDocumentSearchSnippet[]
+}
+
+export interface ProjectDocumentSemanticSearchMatch {
+  strategyType: 'whole_document' | 'sliding_window'
+  chunkOrdinal: number
+  chunkStart: number
+  chunkEnd: number
+  selectionFrom: number | null
+  selectionTo: number | null
+  chunkText: string
+  score: number
 }
 
 export type ImportDocumentErrorKind =
@@ -79,6 +95,12 @@ export interface DocumentsService {
     query: string,
     options?: { limit?: number; maxSnippetsPerDocument?: number }
   ): Promise<ProjectDocumentSearchResult[]>
+  searchForProjectDocument(
+    projectId: string,
+    documentId: string,
+    query: string,
+    options?: { limit?: number }
+  ): Promise<ProjectDocumentSemanticSearchMatch[]>
   hasProjectAssociation(projectId: string, documentId: string): Promise<boolean>
 
   create(title: string, content?: string, type?: string): Promise<DocumentWithContent>
@@ -279,63 +301,15 @@ function clampSnippetLimit(limit: number | undefined): number {
   return Math.min(limit, config.snippetMaxLimit)
 }
 
-function normalizeSearchText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim()
-}
-
-function buildSearchTerms(query: string): string[] {
-  return Array.from(
-    new Set(
-      normalizeSearchText(query)
-        .toLowerCase()
-        .split(' ')
-        .map((term) => term.trim())
-        .filter((term) => term.length >= 2)
-    )
-  )
-}
-
 /**
  * Builds a human-readable preview snippet from chunk text, centering around
  * the first matching search term. The snippet is truncated to the configured
  * max length with ellipsis indicators when content is omitted.
  */
 function buildSnippetPreview(chunkText: string, query: string): string {
-  const normalized = normalizeSearchText(chunkText)
-  if (!normalized) return ''
-
-  const lowerText = normalized.toLowerCase()
-  const anchor = buildSearchTerms(query)
-    .map((term) => lowerText.indexOf(term))
-    .filter((index) => index >= 0)
-    .sort((left, right) => left - right)[0]
-
-  const maxLength = configManager.getConfig().search.snippetMaxLength
-  const preferredStart = anchor === undefined ? 0 : Math.max(0, anchor - 56)
-  const start = Math.min(preferredStart, Math.max(0, normalized.length - maxLength))
-  const end = Math.min(normalized.length, start + maxLength)
-  const prefix = start > 0 ? '...' : ''
-  const suffix = end < normalized.length ? '...' : ''
-  return `${prefix}${normalized.slice(start, end).trim()}${suffix}`
-}
-
-/**
- * Determines whether two snippet ranges overlap significantly (>=60%).
- * Used to deduplicate snippets that would show nearly identical content
- * to the user, improving result diversity.
- */
-function rangesSubstantiallyOverlap(
-  left: { start: number; end: number },
-  right: { start: number; end: number }
-): boolean {
-  const overlapStart = Math.max(left.start, right.start)
-  const overlapEnd = Math.min(left.end, right.end)
-  if (overlapEnd <= overlapStart) return false
-
-  const overlap = overlapEnd - overlapStart
-  const leftLength = Math.max(1, left.end - left.start)
-  const rightLength = Math.max(1, right.end - right.start)
-  return overlap / Math.min(leftLength, rightLength) >= 0.6
+  return buildSearchSnippetPreview(chunkText, query, {
+    maxLength: configManager.getConfig().search.snippetMaxLength,
+  })
 }
 
 /**
@@ -408,7 +382,10 @@ function aggregateProjectSearchMatches(
       result.snippets.some(
         (snippet) =>
           snippet.text === snippetText ||
-          rangesSubstantiallyOverlap(nextRange, { start: snippet.start, end: snippet.end })
+          rangesSubstantiallyOverlap(nextRange, {
+            start: snippet.selectionFrom,
+            end: snippet.selectionTo,
+          })
       )
     ) {
       continue
@@ -416,8 +393,8 @@ function aggregateProjectSearchMatches(
 
     result.snippets.push({
       text: snippetText,
-      start: selectionFrom,
-      end: selectionTo,
+      selectionFrom,
+      selectionTo,
       score: match.distance,
     })
   }
@@ -465,6 +442,22 @@ export function createDocumentsService(
     if (!doc) return null
     const content = await getDocumentContent(id)
     return { ...doc, content }
+  }
+
+  const getDocumentsWithContentByIds = async (
+    documentIds: string[]
+  ): Promise<Map<string, DocumentWithContent>> => {
+    const result = new Map<string, DocumentWithContent>()
+    if (documentIds.length === 0) return result
+
+    const docs = await repos.documents.findByIds(documentIds)
+    if (docs.length === 0) return result
+
+    for (const doc of docs) {
+      const content = await getDocumentContent(doc.id)
+      result.set(doc.id, { ...doc, content })
+    }
+    return result
   }
 
   const createDocument = async (
@@ -543,19 +536,7 @@ export function createDocumentsService(
 
     getContent: getDocumentContent,
 
-    async getWithContentByIds(documentIds: string[]): Promise<Map<string, DocumentWithContent>> {
-      const result = new Map<string, DocumentWithContent>()
-      if (documentIds.length === 0) return result
-
-      const docs = await repos.documents.findByIds(documentIds)
-      if (docs.length === 0) return result
-
-      for (const doc of docs) {
-        const content = await getDocumentContent(doc.id)
-        result.set(doc.id, { ...doc, content })
-      }
-      return result
-    },
+    getWithContentByIds: getDocumentsWithContentByIds,
 
     async listAllIds(): Promise<string[]> {
       return repos.projectDocuments.listDocumentIds()
@@ -592,7 +573,10 @@ export function createDocumentsService(
     ): Promise<ProjectDocumentSearchResult[]> {
       if (!isValidId(projectId)) return []
 
-      const normalizedQuery = normalizeSearchText(query)
+      const normalizedQuery = normalizeValidatedSearchText(
+        query,
+        configManager.getConfig().search.maxQueryChars
+      )
       if (!normalizedQuery) return []
 
       const limit = clampSearchLimit(options?.limit)
@@ -637,6 +621,49 @@ export function createDocumentsService(
       }
 
       return bestResults
+    },
+
+    async searchForProjectDocument(
+      projectId: string,
+      documentId: string,
+      query: string,
+      options?: { limit?: number }
+    ): Promise<ProjectDocumentSemanticSearchMatch[]> {
+      if (!(await getAssociatedProjectDocument(repos, projectId, documentId))) return []
+
+      const normalizedQuery = normalizeValidatedSearchText(
+        query,
+        configManager.getConfig().search.maxQueryChars
+      )
+      if (!normalizedQuery) return []
+
+      const limit = clampSearchLimit(options?.limit)
+      if (!aiSettingsService) return []
+
+      const selection = await aiSettingsService.resolveRuntimeSelection('embedding')
+      const provider = await getEmbeddingProvider()
+      const [queryResult] = await provider.embed([normalizedQuery])
+      const queryEmbedding = queryResult?.embedding
+      if (!queryEmbedding) return []
+
+      const matches = await repos.documentEmbeddings.searchDocument({
+        documentId,
+        baseURL: selection.baseURL,
+        model: selection.model,
+        queryEmbedding,
+        limit,
+      })
+
+      return matches.map((match) => ({
+        strategyType: match.strategyType,
+        chunkOrdinal: match.chunkOrdinal,
+        chunkStart: match.chunkStart,
+        chunkEnd: match.chunkEnd,
+        selectionFrom: match.selectionFrom,
+        selectionTo: match.selectionTo,
+        chunkText: match.chunkText,
+        score: match.distance,
+      }))
     },
 
     async hasProjectAssociation(projectId: string, documentId: string): Promise<boolean> {

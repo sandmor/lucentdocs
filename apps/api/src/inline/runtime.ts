@@ -8,6 +8,7 @@ import {
   type UIMessageChunk,
 } from 'ai'
 import type {
+  ContextParts,
   InlineChatMessage,
   InlineToolChip,
   InlineZoneSession,
@@ -32,9 +33,11 @@ import type { YjsDocumentVersion, YjsRuntime } from '../yjs/runtime.js'
 import {
   applyInlineZoneWriteActionToDoc,
   ensureInlineContinuationZoneAtDocumentEnd,
+  getInlineZoneSnapshotFromDoc,
   getInlineZoneTextFromDoc,
   setInlineZoneStreamingInDoc,
 } from './zone-write.js'
+import { getPromptContextForRange, type InlinePromptContextResult } from './context.js'
 
 export interface InlineObserveState extends InlineScope {
   sessionId: string
@@ -62,29 +65,66 @@ export interface InlineObserveSnapshotEvent extends InlineObserveState {
 
 export type InlineObserveEvent = InlineObserveSnapshotEvent | InlineObserveChunkEvent
 
-export interface StartInlinePromptGenerationInput extends InlineScope {
+export interface StartInlinePromptGenerationRequest extends InlineScope {
+  mode: 'prompt'
+  sessionId: string
+  prompt: string
+  selectionFrom: number
+  selectionTo: number
+  maxOutputTokens?: number
+  requesterClientName?: string
+}
+
+export interface StartInlineContinuationGenerationRequest extends InlineScope {
+  mode: 'continue'
+  sessionId: string
+  selectionFrom: number
+  selectionTo: number
+  maxOutputTokens?: number
+  requesterClientName?: string
+}
+
+export type StartInlineGenerationRequest =
+  | StartInlinePromptGenerationRequest
+  | StartInlineContinuationGenerationRequest
+
+type InlineContextResolution = {
+  context: InlinePromptContextResult
+  selectionFrom: number
+  selectionTo: number
+  continuationTailAnchor: string
+}
+
+interface ResolvedInlinePromptGenerationInput extends InlineScope {
   mode: 'prompt'
   sessionId: string
   contextBefore: string
   contextAfter?: string
+  truncated?: boolean
   prompt: string
   selectedText?: string
+  selectionFrom: number
+  selectionTo: number
   maxOutputTokens?: number
   requesterClientName?: string
 }
 
-export interface StartInlineContinuationGenerationInput extends InlineScope {
+interface ResolvedInlineContinuationGenerationInput extends InlineScope {
   mode: 'continue'
   sessionId: string
   contextBefore: string
   contextAfter?: string
+  truncated?: boolean
+  continuationTailAnchor: string
+  selectionFrom: number
+  selectionTo: number
   maxOutputTokens?: number
   requesterClientName?: string
 }
 
-export type StartInlineGenerationInput =
-  | StartInlinePromptGenerationInput
-  | StartInlineContinuationGenerationInput
+type ResolvedInlineGenerationInput =
+  | ResolvedInlinePromptGenerationInput
+  | ResolvedInlineContinuationGenerationInput
 
 interface ActiveGeneration {
   id: string
@@ -175,12 +215,15 @@ function createObserveState(
   }
 }
 
+const CONTINUATION_TAIL_ANCHOR_CHARS = 512
+
 function createEmptySession(): InlineZoneSession {
   return {
     messages: [],
     choices: [],
     contextBefore: null,
     contextAfter: null,
+    contextTruncated: false,
   }
 }
 
@@ -617,15 +660,135 @@ export class InlineRuntime {
     return true
   }
 
-  async startGeneration(input: StartInlineGenerationInput): Promise<{ generationId: string }> {
-    const key = toInlineKey(input)
+  async #resolveInlineContext(
+    request: StartInlineGenerationRequest
+  ): Promise<ResolvedInlineGenerationInput> {
+    const limits = configManager.getConfig().limits
+    const budget = limits.promptExcerptChars
+
+    const resolved = await this.#yjsRuntime.applyProsemirrorTransform<InlineContextResolution>(
+      request.documentId,
+      {
+        transform: (currentDoc) => {
+          const zoneSnapshot = getInlineZoneSnapshotFromDoc(currentDoc, request.sessionId)
+          const docEnd = currentDoc.content.size
+
+          const rawFrom = Math.max(0, Math.min(request.selectionFrom, docEnd))
+          const rawTo = Math.max(0, Math.min(request.selectionTo, docEnd))
+
+          if (request.mode === 'continue') {
+            const caretPos = zoneSnapshot.zoneFound
+              ? zoneSnapshot.nodeFrom
+              : Math.min(rawFrom, rawTo)
+            const contextResult = getPromptContextForRange(currentDoc, caretPos, caretPos, budget)
+            const anchorWindow = Math.min(caretPos, 8192)
+            const anchorText = currentDoc.textBetween(
+              Math.max(0, caretPos - anchorWindow),
+              caretPos,
+              '\n\n',
+              '\n'
+            )
+            const continuationTailAnchor =
+              anchorText.length > CONTINUATION_TAIL_ANCHOR_CHARS
+                ? anchorText.slice(anchorText.length - CONTINUATION_TAIL_ANCHOR_CHARS)
+                : anchorText
+            return {
+              changed: false,
+              nextDoc: currentDoc,
+              result: {
+                context: contextResult,
+                selectionFrom: caretPos,
+                selectionTo: caretPos,
+                continuationTailAnchor,
+              },
+            }
+          }
+
+          const selectionFrom = zoneSnapshot.zoneFound ? zoneSnapshot.nodeFrom : rawFrom
+          const selectionTo = zoneSnapshot.zoneFound ? zoneSnapshot.nodeTo : rawTo
+          const contextResult = getPromptContextForRange(
+            currentDoc,
+            selectionFrom,
+            selectionTo,
+            budget
+          )
+
+          return {
+            changed: false,
+            nextDoc: currentDoc,
+            result: {
+              context: contextResult,
+              selectionFrom: contextResult.selectionFrom,
+              selectionTo: contextResult.selectionTo,
+              continuationTailAnchor: '',
+            },
+          }
+        },
+      }
+    )
+
+    const contextResult = resolved.result.context
+    const { parts } = contextResult
+    const totalContext = parts.before.length + (parts.after?.length ?? 0)
+    if (totalContext > limits.contextChars) {
+      throw new InlineRuntimeError(
+        'BAD_REQUEST',
+        `Combined contextBefore and contextAfter exceeds ${limits.contextChars} characters`
+      )
+    }
+
+    if (request.mode === 'prompt') {
+      if (parts.truncatedMarker) {
+        throw new InlineRuntimeError(
+          'BAD_REQUEST',
+          'Selected text is too large for inline AI. Narrow the selection and try again.'
+        )
+      }
+
+      if (parts.markerContent.length > limits.contextChars) {
+        throw new InlineRuntimeError(
+          'BAD_REQUEST',
+          `Selected text exceeds ${limits.contextChars} characters`
+        )
+      }
+    }
+
+    if (request.mode === 'prompt') {
+      const promptRequest = request
+      const promptInput: ResolvedInlinePromptGenerationInput = {
+        ...promptRequest,
+        contextBefore: parts.before,
+        contextAfter: parts.after,
+        truncated: parts.truncated,
+        selectionFrom: resolved.result.selectionFrom,
+        selectionTo: resolved.result.selectionTo,
+        selectedText: parts.markerKind === 'selection' ? parts.markerContent : undefined,
+      }
+      return promptInput
+    }
+
+    const continuationRequest = request
+    const continuationInput: ResolvedInlineContinuationGenerationInput = {
+      ...continuationRequest,
+      contextBefore: parts.before,
+      contextAfter: parts.after,
+      truncated: parts.truncated,
+      continuationTailAnchor: resolved.result.continuationTailAnchor,
+      selectionFrom: resolved.result.selectionFrom,
+      selectionTo: resolved.result.selectionTo,
+    }
+    return continuationInput
+  }
+
+  async startGeneration(request: StartInlineGenerationRequest): Promise<{ generationId: string }> {
+    const key = toInlineKey(request)
     if (this.#activeGenerations.has(key)) {
       throw new InlineRuntimeError('CONFLICT', 'Inline generation is already in progress.')
     }
 
     let prompt: string | null = null
-    if (input.mode === 'prompt') {
-      prompt = input.prompt.trim()
+    if (request.mode === 'prompt') {
+      prompt = request.prompt.trim()
       const maxPromptChars = configManager.getConfig().limits.promptChars
       if (!prompt || prompt.length > maxPromptChars) {
         throw new InlineRuntimeError(
@@ -635,13 +798,15 @@ export class InlineRuntime {
       }
     }
 
-    const documentExists = await this.#store.isDocumentInScope(input)
+    const documentExists = await this.#store.isDocumentInScope(request)
     if (!documentExists) {
       throw new InlineRuntimeError(
         'NOT_FOUND',
-        `Document ${input.documentId} not found in project ${input.projectId}`
+        `Document ${request.documentId} not found in project ${request.projectId}`
       )
     }
+
+    const input = await this.#resolveInlineContext(request)
 
     const persistedSession = await this.#store.getSession(input, input.sessionId)
     if (persistedSession === undefined) {
@@ -652,10 +817,12 @@ export class InlineRuntime {
     }
 
     const baseSession = persistedSession ?? createEmptySession()
+    const hasStoredContext = baseSession.contextBefore !== null || baseSession.contextAfter !== null
     const sessionWithContext: InlineZoneSession = {
       ...baseSession,
       contextBefore: baseSession.contextBefore ?? input.contextBefore,
       contextAfter: baseSession.contextAfter ?? input.contextAfter ?? null,
+      contextTruncated: hasStoredContext ? baseSession.contextTruncated : input.truncated === true,
     }
     const sessionForGeneration: InlineZoneSession =
       input.mode === 'prompt' && prompt
@@ -838,7 +1005,7 @@ export class InlineRuntime {
    */
   async #ensureTerminalContinuationZone(
     scope: InlineScope & { sessionId: string },
-    contextBefore: string,
+    continuationTailAnchor: string,
     contextAfter: string | undefined,
     requesterClientName: string,
     expectedDocumentVersion: YjsDocumentVersion
@@ -857,7 +1024,7 @@ export class InlineRuntime {
         const ensured = ensureInlineContinuationZoneAtDocumentEnd(
           currentDoc,
           scope.sessionId,
-          contextBefore
+          continuationTailAnchor
         )
         return {
           changed: ensured.changed,
@@ -891,7 +1058,7 @@ export class InlineRuntime {
   }
 
   async #runGeneration(
-    input: StartInlineGenerationInput,
+    input: ResolvedInlineGenerationInput,
     generationId: string,
     controller: AbortController,
     generationSession: InlineZoneSession,
@@ -960,7 +1127,7 @@ export class InlineRuntime {
                 error.code !== 'NOT_FOUND' ||
                 !(await this.#ensureTerminalContinuationZone(
                   input,
-                  input.contextBefore,
+                  input.continuationTailAnchor,
                   input.contextAfter,
                   requesterClientName,
                   documentVersion
@@ -1002,11 +1169,20 @@ export class InlineRuntime {
         await appendGeneratedText(cleaner.flush())
       } else {
         const prompt = input.prompt.trim()
+        const selectedText = input.selectedText ?? null
+        const contextParts: ContextParts = {
+          before: generationSession.contextBefore ?? input.contextBefore,
+          markerKind: selectedText ? 'selection' : 'caret',
+          markerContent: selectedText ?? '',
+          after: generationSession.contextAfter ?? input.contextAfter ?? undefined,
+          truncated: generationSession.contextTruncated,
+          truncatedBefore: false,
+          truncatedAfter: false,
+          truncatedMarker: false,
+        }
         const rendered = resolveSelectionPrompt(
-          generationSession.contextBefore ?? input.contextBefore,
-          generationSession.contextAfter ?? input.contextAfter ?? null,
+          contextParts,
           prompt,
-          input.selectedText ?? null,
           serializeInlineConversation(generationSession)
         )
         assertPromptProtocolMode(rendered.definition, 'prompt')
@@ -1213,7 +1389,7 @@ export class InlineRuntime {
   }
 
   async #runTestGeneration(
-    input: StartInlineGenerationInput,
+    input: ResolvedInlineGenerationInput,
     generationId: string,
     controller: AbortController,
     baseSession: InlineZoneSession,
@@ -1252,7 +1428,7 @@ export class InlineRuntime {
             error.code !== 'NOT_FOUND' ||
             !(await this.#ensureTerminalContinuationZone(
               input,
-              input.contextBefore,
+              input.continuationTailAnchor,
               input.contextAfter,
               'inline-test-runtime',
               documentVersion

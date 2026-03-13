@@ -1,5 +1,6 @@
 import { z } from 'zod/v4'
 import { INLINE_AI_DEFAULT_TOOL_STEP_LIMIT } from './inline-ai.js'
+import { DEFAULT_PROMPT_EXCERPT_CHARS, MIN_PROMPT_EXCERPT_CHARS } from './prompt-excerpt.js'
 
 export const AI_MODEL_SOURCE_TYPES = ['openai', 'anthropic', 'openrouter'] as const
 
@@ -35,6 +36,7 @@ export interface PersistedAppConfig {
   maxPromptUserChars: number
   maxDocImportChars: number
   maxDocExportChars: number
+  maxPromptExcerptChars: number
 }
 
 export type PersistedConfigKey = keyof PersistedAppConfig
@@ -289,6 +291,14 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     allowEmptyString: false,
     min: 1,
   },
+  {
+    key: 'maxPromptExcerptChars',
+    envVar: 'LIMITS_PROMPT_EXCERPT_CHARS',
+    kind: 'int',
+    defaultValue: DEFAULT_PROMPT_EXCERPT_CHARS,
+    allowEmptyString: false,
+    min: MIN_PROMPT_EXCERPT_CHARS,
+  },
 ] as const
 
 export const PERSISTED_CONFIG_KEYS = CONFIG_FIELD_DEFINITIONS.map(
@@ -335,6 +345,7 @@ export const EDITABLE_CONFIG_KEYS = [
   'maxPromptUserChars',
   'maxDocImportChars',
   'maxDocExportChars',
+  'maxPromptExcerptChars',
 ] as const satisfies ReadonlyArray<PersistedConfigKey>
 
 export const LIMITS_CONFIG_KEYS = [
@@ -350,6 +361,7 @@ export const LIMITS_CONFIG_KEYS = [
   'maxPromptUserChars',
   'maxDocImportChars',
   'maxDocExportChars',
+  'maxPromptExcerptChars',
 ] as const satisfies ReadonlyArray<PersistedConfigKey>
 
 export const SEARCH_CONFIG_KEYS = [
@@ -374,6 +386,7 @@ export interface LimitsConfig {
   promptUserChars: number
   docImportChars: number
   docExportChars: number
+  promptExcerptChars: number
 }
 
 export interface SearchConfig {
@@ -405,6 +418,7 @@ const limitsPromptSystemCharsField = CONFIG_FIELD_BY_KEY.maxPromptSystemChars
 const limitsPromptUserCharsField = CONFIG_FIELD_BY_KEY.maxPromptUserChars
 const limitsDocImportCharsField = CONFIG_FIELD_BY_KEY.maxDocImportChars
 const limitsDocExportCharsField = CONFIG_FIELD_BY_KEY.maxDocExportChars
+const limitsPromptExcerptCharsField = CONFIG_FIELD_BY_KEY.maxPromptExcerptChars
 
 const aiDefaultTempField = CONFIG_FIELD_BY_KEY.aiDefaultTemperature
 const aiSelEditTempField = CONFIG_FIELD_BY_KEY.aiSelectionEditTemperature
@@ -412,113 +426,128 @@ const aiDefaultMaxTokensField = CONFIG_FIELD_BY_KEY.aiDefaultMaxOutputTokens
 const embeddingDebounceField = CONFIG_FIELD_BY_KEY.embeddingDebounceMs
 const embeddingBatchMaxWaitField = CONFIG_FIELD_BY_KEY.embeddingBatchMaxWaitMs
 
-export const editableConfigSchema = z.object({
-  aiDefaultTemperature: z
-    .number()
-    .min(aiDefaultTempField.min ?? 0)
-    .max(aiDefaultTempField.max ?? 2),
-  aiSelectionEditTemperature: z
-    .number()
-    .min(aiSelEditTempField.min ?? 0)
-    .max(aiSelEditTempField.max ?? 2),
-  aiDefaultMaxOutputTokens: z
-    .number()
-    .int()
-    .min(aiDefaultMaxTokensField.min ?? 1),
-  embeddingDebounceMs: z
-    .number()
-    .int()
-    .min(embeddingDebounceField.min ?? 0),
-  embeddingBatchMaxWaitMs: z
-    .number()
-    .int()
-    .min(embeddingBatchMaxWaitField.min ?? 1),
-  yjsPersistenceFlushMs: z
-    .number()
-    .int()
-    .min(yjsPersistenceFlushField.min ?? 1),
-  yjsVersionIntervalMs: z
-    .number()
-    .int()
-    .min(yjsVersionIntervalField.min ?? 1),
-  searchDefaultLimit: z
-    .number()
-    .int()
-    .min(searchDefaultLimitField.min ?? 1)
-    .max(searchDefaultLimitField.max ?? 100),
-  searchMaxLimit: z
-    .number()
-    .int()
-    .min(searchMaxLimitField.min ?? 1)
-    .max(searchMaxLimitField.max ?? 200),
-  searchMaxQueryChars: z
-    .number()
-    .int()
-    .min(searchMaxQueryCharsField.min ?? 1)
-    .max(searchMaxQueryCharsField.max ?? 10000),
-  searchSnippetDefaultLimit: z
-    .number()
-    .int()
-    .min(searchSnippetDefaultLimitField.min ?? 1)
-    .max(searchSnippetDefaultLimitField.max ?? 20),
-  searchSnippetMaxLimit: z
-    .number()
-    .int()
-    .min(searchSnippetMaxLimitField.min ?? 1)
-    .max(searchSnippetMaxLimitField.max ?? 50),
-  searchSnippetMaxLength: z
-    .number()
-    .int()
-    .min(searchSnippetMaxLengthField.min ?? 50)
-    .max(searchSnippetMaxLengthField.max ?? 1000),
-  maxContextChars: z
-    .number()
-    .int()
-    .min(limitsContextCharsField.min ?? 1),
-  maxPromptChars: z
-    .number()
-    .int()
-    .min(limitsPromptCharsField.min ?? 1),
-  maxToolEntries: z
-    .number()
-    .int()
-    .min(limitsToolEntriesField.min ?? 1),
-  maxToolReadChars: z
-    .number()
-    .int()
-    .min(limitsToolReadCharsField.min ?? 1),
-  maxAiToolSteps: z
-    .number()
-    .int()
-    .min(limitsAiToolStepsField.min ?? 1),
-  maxChatMessageChars: z
-    .number()
-    .int()
-    .min(limitsChatMessageCharsField.min ?? 1),
-  maxPromptNameChars: z
-    .number()
-    .int()
-    .min(limitsPromptNameCharsField.min ?? 1),
-  maxPromptDescChars: z
-    .number()
-    .int()
-    .min(limitsPromptDescCharsField.min ?? 1),
-  maxPromptSystemChars: z
-    .number()
-    .int()
-    .min(limitsPromptSystemCharsField.min ?? 1),
-  maxPromptUserChars: z
-    .number()
-    .int()
-    .min(limitsPromptUserCharsField.min ?? 1),
-  maxDocImportChars: z
-    .number()
-    .int()
-    .min(limitsDocImportCharsField.min ?? 1),
-  maxDocExportChars: z
-    .number()
-    .int()
-    .min(limitsDocExportCharsField.min ?? 1),
-})
+export const editableConfigSchema = z
+  .object({
+    aiDefaultTemperature: z
+      .number()
+      .min(aiDefaultTempField.min ?? 0)
+      .max(aiDefaultTempField.max ?? 2),
+    aiSelectionEditTemperature: z
+      .number()
+      .min(aiSelEditTempField.min ?? 0)
+      .max(aiSelEditTempField.max ?? 2),
+    aiDefaultMaxOutputTokens: z
+      .number()
+      .int()
+      .min(aiDefaultMaxTokensField.min ?? 1),
+    embeddingDebounceMs: z
+      .number()
+      .int()
+      .min(embeddingDebounceField.min ?? 0),
+    embeddingBatchMaxWaitMs: z
+      .number()
+      .int()
+      .min(embeddingBatchMaxWaitField.min ?? 1),
+    yjsPersistenceFlushMs: z
+      .number()
+      .int()
+      .min(yjsPersistenceFlushField.min ?? 1),
+    yjsVersionIntervalMs: z
+      .number()
+      .int()
+      .min(yjsVersionIntervalField.min ?? 1),
+    searchDefaultLimit: z
+      .number()
+      .int()
+      .min(searchDefaultLimitField.min ?? 1)
+      .max(searchDefaultLimitField.max ?? 100),
+    searchMaxLimit: z
+      .number()
+      .int()
+      .min(searchMaxLimitField.min ?? 1)
+      .max(searchMaxLimitField.max ?? 200),
+    searchMaxQueryChars: z
+      .number()
+      .int()
+      .min(searchMaxQueryCharsField.min ?? 1)
+      .max(searchMaxQueryCharsField.max ?? 10000),
+    searchSnippetDefaultLimit: z
+      .number()
+      .int()
+      .min(searchSnippetDefaultLimitField.min ?? 1)
+      .max(searchSnippetDefaultLimitField.max ?? 20),
+    searchSnippetMaxLimit: z
+      .number()
+      .int()
+      .min(searchSnippetMaxLimitField.min ?? 1)
+      .max(searchSnippetMaxLimitField.max ?? 50),
+    searchSnippetMaxLength: z
+      .number()
+      .int()
+      .min(searchSnippetMaxLengthField.min ?? 50)
+      .max(searchSnippetMaxLengthField.max ?? 1000),
+    maxContextChars: z
+      .number()
+      .int()
+      .min(limitsContextCharsField.min ?? 1),
+    maxPromptChars: z
+      .number()
+      .int()
+      .min(limitsPromptCharsField.min ?? 1),
+    maxToolEntries: z
+      .number()
+      .int()
+      .min(limitsToolEntriesField.min ?? 1),
+    maxToolReadChars: z
+      .number()
+      .int()
+      .min(limitsToolReadCharsField.min ?? 1),
+    maxAiToolSteps: z
+      .number()
+      .int()
+      .min(limitsAiToolStepsField.min ?? 1),
+    maxChatMessageChars: z
+      .number()
+      .int()
+      .min(limitsChatMessageCharsField.min ?? 1),
+    maxPromptNameChars: z
+      .number()
+      .int()
+      .min(limitsPromptNameCharsField.min ?? 1),
+    maxPromptDescChars: z
+      .number()
+      .int()
+      .min(limitsPromptDescCharsField.min ?? 1),
+    maxPromptSystemChars: z
+      .number()
+      .int()
+      .min(limitsPromptSystemCharsField.min ?? 1),
+    maxPromptUserChars: z
+      .number()
+      .int()
+      .min(limitsPromptUserCharsField.min ?? 1),
+    maxDocImportChars: z
+      .number()
+      .int()
+      .min(limitsDocImportCharsField.min ?? 1),
+    maxDocExportChars: z
+      .number()
+      .int()
+      .min(limitsDocExportCharsField.min ?? 1),
+    maxPromptExcerptChars: z
+      .number()
+      .int()
+      .min(limitsPromptExcerptCharsField.min ?? MIN_PROMPT_EXCERPT_CHARS)
+      .max(limitsPromptExcerptCharsField.max ?? 50_000),
+  })
+  .superRefine((value, context) => {
+    if (value.maxPromptExcerptChars > value.maxContextChars) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['maxPromptExcerptChars'],
+        message: 'maxPromptExcerptChars must be less than or equal to maxContextChars.',
+      })
+    }
+  })
 
 export type EditableConfigInput = z.infer<typeof editableConfigSchema>

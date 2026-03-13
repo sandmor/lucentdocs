@@ -6,6 +6,7 @@ import type {
   ProjectDocumentEmbeddingSearchMatch,
   ReplaceDocumentEmbeddingsInput,
   ReplaceDocumentEmbeddingsResult,
+  SearchDocumentEmbeddingsInput,
   SearchProjectDocumentEmbeddingsInput,
 } from '../../core/ports/documentEmbeddings.port.js'
 import { indexingStrategySchema } from '@lucentdocs/shared'
@@ -64,6 +65,18 @@ interface SearchMatchRow {
   selectionTo: number | null
   chunkText: string
   distance: number
+}
+
+type EmbeddingSearchScope =
+  | { kind: 'document'; documentId: string }
+  | { kind: 'project'; projectId: string }
+
+interface EmbeddingSearchQueryOptions {
+  input: SearchDocumentEmbeddingsInput | SearchProjectDocumentEmbeddingsInput
+  dimensions: number
+  normalizedBaseURL: string
+  model: string
+  scope: EmbeddingSearchScope
 }
 
 function vectorTableName(dimensions: number): string {
@@ -185,6 +198,64 @@ function toEmbeddingEntity(row: EmbeddingRow): DocumentEmbeddingEntity {
 export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositoryPort {
   constructor(private connection: SqliteConnection) {}
 
+  /**
+   * Executes a vector search against stored document embedding rows after the
+   * caller provides the scope filter for the candidate set.
+   */
+  private searchMatches(
+    options: EmbeddingSearchQueryOptions
+  ): ProjectDocumentEmbeddingSearchMatch[] {
+    const limit = validateSearchLimit(options.input.limit)
+    const tableName = vectorTableName(options.dimensions)
+    if (!this.hasVectorTable(tableName)) {
+      return []
+    }
+
+    const scopeSql =
+      options.scope.kind === 'document'
+        ? 'candidate.documentId = ?'
+        : 'candidate.documentId IN (SELECT pd.documentId FROM project_documents AS pd WHERE pd.projectId = ?)'
+    const scopeParam =
+      options.scope.kind === 'document' ? options.scope.documentId : options.scope.projectId
+
+    return this.connection.all<SearchMatchRow>(
+      `SELECT de.documentId,
+              d.title,
+              d.createdAt,
+              d.updatedAt,
+              de.strategyType,
+              de.chunkOrdinal,
+              de.chunkStart,
+              de.chunkEnd,
+              de.selectionFrom,
+              de.selectionTo,
+              de.chunkText,
+              v.distance
+         FROM ${tableName} AS v
+         JOIN document_embeddings AS de ON de.id = v.rowid
+         JOIN documents AS d ON d.id = de.documentId
+        WHERE v.embedding MATCH ?
+          AND k = ?
+          AND v.rowid IN (
+            SELECT candidate.id
+              FROM document_embeddings AS candidate
+             WHERE ${scopeSql}
+               AND candidate.baseUrl = ?
+               AND candidate.model = ?
+               AND candidate.dimensions = ?
+          )
+        ORDER BY v.distance ASC, de.documentId ASC, de.chunkOrdinal ASC`,
+      [
+        new Float32Array(options.input.queryEmbedding),
+        limit,
+        scopeParam,
+        options.normalizedBaseURL,
+        options.model,
+        options.dimensions,
+      ]
+    )
+  }
+
   private hasVectorTable(tableName: string): boolean {
     const row = this.connection.get<{ found: number }>(
       `SELECT 1 AS found
@@ -281,58 +352,40 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
     return rows.sort((left, right) => left.chunkOrdinal - right.chunkOrdinal).map(toEmbeddingEntity)
   }
 
+  async searchDocument(
+    input: SearchDocumentEmbeddingsInput
+  ): Promise<ProjectDocumentEmbeddingSearchMatch[]> {
+    validateEmbeddingVector(input.queryEmbedding)
+
+    const dimensions = input.queryEmbedding.length
+    const normalizedBaseURL = normalizeBaseURL(input.baseURL)
+    const model = input.model.trim()
+
+    return this.searchMatches({
+      input,
+      dimensions,
+      normalizedBaseURL,
+      model,
+      scope: { kind: 'document', documentId: input.documentId },
+    })
+  }
+
   async searchProjectDocuments(
     input: SearchProjectDocumentEmbeddingsInput
   ): Promise<ProjectDocumentEmbeddingSearchMatch[]> {
     validateEmbeddingVector(input.queryEmbedding)
 
-    const limit = validateSearchLimit(input.limit)
     const dimensions = input.queryEmbedding.length
-    const tableName = vectorTableName(dimensions)
-    if (!this.hasVectorTable(tableName)) {
-      return []
-    }
-
     const normalizedBaseURL = normalizeBaseURL(input.baseURL)
     const model = input.model.trim()
 
-    return this.connection.all<SearchMatchRow>(
-      `SELECT de.documentId,
-              d.title,
-              d.createdAt,
-              d.updatedAt,
-              de.strategyType,
-              de.chunkOrdinal,
-              de.chunkStart,
-              de.chunkEnd,
-              de.selectionFrom,
-              de.selectionTo,
-              de.chunkText,
-              v.distance
-         FROM ${tableName} AS v
-         JOIN document_embeddings AS de ON de.id = v.rowid
-         JOIN documents AS d ON d.id = de.documentId
-        WHERE v.embedding MATCH ?
-          AND k = ?
-          AND v.rowid IN (
-            SELECT candidate.id
-              FROM document_embeddings AS candidate
-              JOIN project_documents AS pd ON pd.documentId = candidate.documentId
-             WHERE pd.projectId = ?
-               AND candidate.baseUrl = ?
-               AND candidate.model = ?
-               AND candidate.dimensions = ?
-          )
-        ORDER BY v.distance ASC, de.documentId ASC, de.chunkOrdinal ASC`,
-      [
-        new Float32Array(input.queryEmbedding),
-        limit,
-        input.projectId,
-        normalizedBaseURL,
-        model,
-        dimensions,
-      ]
-    )
+    return this.searchMatches({
+      input,
+      dimensions,
+      normalizedBaseURL,
+      model,
+      scope: { kind: 'project', projectId: input.projectId },
+    })
   }
 
   async replaceEmbeddings(

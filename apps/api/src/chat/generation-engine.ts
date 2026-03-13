@@ -175,7 +175,7 @@ export class GenerationEngine {
       }
 
       const currentFilePath = normalizeDocumentPath(currentDocument.title) || '(untitled)'
-      const currentFileContent = buildCurrentFileContext(
+      const fileContextParts = buildCurrentFileContext(
         currentDocument.content,
         selectionFrom,
         selectionTo
@@ -183,7 +183,7 @@ export class GenerationEngine {
 
       const rendered = resolveChatPrompt(
         currentFilePath,
-        currentFileContent,
+        fileContextParts,
         serializeConversationForPrompt(baseMessages)
       )
       assertPromptProtocolMode(rendered.definition, 'chat')

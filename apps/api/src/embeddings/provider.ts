@@ -28,6 +28,10 @@ export interface EmbeddingProvider {
   embed(inputs: string[]): Promise<EmbeddingResult[]>
 }
 
+export interface EmbeddingProviderRuntimeOptions {
+  fetchImpl?: typeof fetch
+}
+
 function shouldUseFakeEmbeddings(): boolean {
   return process.env[TEST_FAKE_EMBEDDINGS_ENV] === '1'
 }
@@ -84,10 +88,15 @@ function buildFakeEmbeddingBatch(inputs: string[]): EmbeddingResult[] {
 
 let providerPromise: Promise<EmbeddingProvider> | null = null
 let aiSettingsService: AiSettingsService | null = null
+let embeddingFetchOverride: typeof fetch | null = null
 
-export function configureEmbeddingProvider(service: AiSettingsService): void {
-  aiSettingsService = service
+export function configureEmbeddingProvider(
+  service: AiSettingsService,
+  options: EmbeddingProviderRuntimeOptions = {}
+): void {
   resetEmbeddingClient()
+  aiSettingsService = service
+  embeddingFetchOverride = options.fetchImpl ?? null
 }
 
 function getAiSettingsService(): AiSettingsService {
@@ -214,7 +223,8 @@ async function createProvider(): Promise<EmbeddingProvider> {
     async embed(inputs: string[]): Promise<EmbeddingResult[]> {
       if (inputs.length === 0) return []
 
-      const response = await fetch(buildEmbeddingsEndpoint(config.source.baseURL), {
+      const fetchImpl = embeddingFetchOverride ?? globalThis.fetch
+      const response = await fetchImpl(buildEmbeddingsEndpoint(config.source.baseURL), {
         method: 'POST',
         headers: {
           accept: 'application/json',
@@ -260,4 +270,5 @@ export async function getEmbeddingProvider(): Promise<EmbeddingProvider> {
 
 export function resetEmbeddingClient(): void {
   providerPromise = null
+  embeddingFetchOverride = null
 }

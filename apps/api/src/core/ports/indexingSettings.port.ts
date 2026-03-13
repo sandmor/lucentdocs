@@ -19,6 +19,10 @@ export interface IndexingSettingsRepositoryPort {
     scopeType: IndexingStrategyScopeType,
     scopeId: string
   ): Promise<IndexingSettingsEntity | undefined>
+  getMany(
+    scopeType: IndexingStrategyScopeType,
+    scopeIds: string[]
+  ): Promise<IndexingSettingsEntity[]>
   upsert(input: UpsertIndexingSettingsInput): Promise<IndexingSettingsEntity>
   delete(scopeType: IndexingStrategyScopeType, scopeId: string): Promise<void>
 }

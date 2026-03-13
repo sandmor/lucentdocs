@@ -1,28 +1,17 @@
 import {
+  buildPromptContextExcerpt,
   directoryPathFromSentinel,
   isDirectorySentinelPath,
   normalizeDocumentPath,
   parentDocumentPath,
-  parseContent,
   pathSegments,
-  schema,
+  type ContextParts,
 } from '@lucentdocs/shared'
-import { Node as ProseMirrorNode } from 'prosemirror-model'
-import { MarkdownSerializer, defaultMarkdownSerializer } from 'prosemirror-markdown'
 import { nanoid } from 'nanoid'
 import { safeValidateUIMessages, type UIMessage } from 'ai'
 import { configManager } from '../config/runtime.js'
 import type { ChatThread } from '../core/services/chats.service.js'
-
-const markdownSerializer = new MarkdownSerializer(
-  {
-    ...defaultMarkdownSerializer.nodes,
-    ai_zone(state, node) {
-      state.renderContent(node)
-    },
-  },
-  defaultMarkdownSerializer.marks
-)
+import { parseDocumentNode } from '../core/services/documentContent.js'
 
 export interface ProjectFileIndex {
   files: Map<string, string>
@@ -149,27 +138,28 @@ export async function buildProjectFileIndex(
   return { files, directories }
 }
 
-function parseDocumentNode(content: string): ProseMirrorNode | null {
-  try {
-    const parsed = parseContent(content)
-    return ProseMirrorNode.fromJSON(schema, parsed.doc)
-  } catch {
-    return null
-  }
+function getPromptExcerptBudget(): number {
+  return configManager.getConfig().limits.promptExcerptChars
 }
 
-/**
- * Renders the current document into the prompt format expected by chat prompts.
- * The selection range is clamped against the parsed ProseMirror document so stale
- * client offsets degrade to a caret marker instead of throwing.
- */
 export function buildCurrentFileContext(
   content: string,
   selectionFrom: number | undefined,
   selectionTo: number | undefined
-): string {
+): ContextParts {
   const documentNode = parseDocumentNode(content)
-  if (!documentNode) return '<caret />'
+  if (!documentNode) {
+    return {
+      before: '',
+      markerKind: 'caret',
+      markerContent: '',
+      after: undefined,
+      truncated: false,
+      truncatedBefore: false,
+      truncatedAfter: false,
+      truncatedMarker: false,
+    }
+  }
 
   const docEnd = documentNode.content.size
   const rawFrom = selectionFrom ?? docEnd
@@ -179,27 +169,20 @@ export function buildCurrentFileContext(
   const from = Math.min(clampedFrom, clampedTo)
   const to = Math.max(clampedFrom, clampedTo)
 
+  const budget = getPromptExcerptBudget()
+  const windowSize = Math.min(docEnd, Math.max(2048, Math.floor(budget * 2)))
+  const beforeStart = Math.max(0, from - windowSize)
+  const afterEnd = Math.min(docEnd, to + windowSize)
+
+  const before = documentNode.textBetween(beforeStart, from, '\n\n', '\n')
+  const after = documentNode.textBetween(to < docEnd ? to : docEnd, afterEnd, '\n\n', '\n')
+
   if (from < to) {
-    const before = documentNode.textBetween(0, from, '\n\n', '\n')
     const selection = documentNode.textBetween(from, to, '\n\n', '\n')
-    const after = documentNode.textBetween(to, docEnd, '\n\n', '\n')
-    return `${before}<selection>${selection}</selection>${after}`
+    return buildPromptContextExcerpt(before, 'selection', selection, after, budget)
   }
 
-  const before = documentNode.textBetween(0, from, '\n\n', '\n')
-  const after = documentNode.textBetween(from, docEnd, '\n\n', '\n')
-  return `${before}<caret />${after}`
-}
-
-export function projectDocumentToMarkdown(content: string): string {
-  const documentNode = parseDocumentNode(content)
-  if (!documentNode) return ''
-
-  try {
-    return markdownSerializer.serialize(documentNode).trimEnd()
-  } catch {
-    return documentNode.textBetween(0, documentNode.content.size, '\n\n', '\n').trimEnd()
-  }
+  return buildPromptContextExcerpt(before, 'caret', '', to < docEnd ? after : undefined, budget)
 }
 
 export function serializeConversationForPrompt(messages: UIMessage[]): string {

@@ -139,3 +139,14 @@ export {
   wrapNodeWithZoneNodes,
   wrapSliceWithZoneNodes,
 } from './ai-zone-utils.js'
+export type { ExcerptPart, ContextMarkerKind, ContextParts } from './prompt-excerpt.js'
+export {
+  DEFAULT_PROMPT_EXCERPT_CHARS,
+  MIN_PROMPT_EXCERPT_CHARS,
+  takeTailExcerpt,
+  takeHeadExcerpt,
+  clipMiddleExcerpt,
+  buildBoundedExcerpt,
+  buildPromptContextExcerpt,
+  renderContextParts,
+} from './prompt-excerpt.js'

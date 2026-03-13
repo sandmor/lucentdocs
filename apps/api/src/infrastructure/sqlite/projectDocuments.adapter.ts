@@ -25,6 +25,26 @@ export class ProjectDocumentsRepository implements ProjectDocumentsRepositoryPor
     return row?.found === 1
   }
 
+  async findAssociatedDocumentIds(projectId: string, documentIds: string[]): Promise<Set<string>> {
+    const uniqueDocumentIds = Array.from(
+      new Set(documentIds.filter((documentId) => documentId.length > 0))
+    )
+    if (projectId.length === 0 || uniqueDocumentIds.length === 0) {
+      return new Set()
+    }
+
+    const placeholders = uniqueDocumentIds.map(() => '?').join(',')
+    const rows = this.connection.all<{ documentId: string }>(
+      `SELECT DISTINCT documentId
+         FROM project_documents
+        WHERE projectId = ?
+          AND documentId IN (${placeholders})`,
+      [projectId, ...uniqueDocumentIds]
+    )
+
+    return new Set(rows.map((row) => row.documentId))
+  }
+
   async listDocumentIds(): Promise<string[]> {
     const rows = this.connection.all<{ documentId: string }>(
       `SELECT DISTINCT documentId
@@ -74,5 +94,26 @@ export class ProjectDocumentsRepository implements ProjectDocumentsRepositoryPor
       [documentId]
     )
     return row?.projectId
+  }
+
+  async findSoleProjectIdsByDocumentIds(documentIds: string[]): Promise<Map<string, string>> {
+    const uniqueDocumentIds = Array.from(
+      new Set(documentIds.filter((documentId) => documentId.length > 0))
+    )
+    if (uniqueDocumentIds.length === 0) {
+      return new Map()
+    }
+
+    const placeholders = uniqueDocumentIds.map(() => '?').join(',')
+    const rows = this.connection.all<{ documentId: string; projectId: string }>(
+      `SELECT documentId, MIN(projectId) AS projectId
+         FROM project_documents
+        WHERE documentId IN (${placeholders})
+        GROUP BY documentId
+       HAVING COUNT(DISTINCT projectId) = 1`,
+      uniqueDocumentIds
+    )
+
+    return new Map(rows.map((row) => [row.documentId, row.projectId]))
   }
 }

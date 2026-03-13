@@ -141,6 +141,7 @@ export function BrowserHeader({
             placeholder="Search linked documents semantically"
             className="h-9 rounded-xl border-border/70 bg-background pl-9 pr-20 text-sm shadow-none"
             data-document-search="true"
+            autoComplete="off"
           />
           <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
             {isSearchLoading ? (

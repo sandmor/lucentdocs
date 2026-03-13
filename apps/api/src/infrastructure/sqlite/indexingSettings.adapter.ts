@@ -44,6 +44,26 @@ export class IndexingSettingsRepository implements IndexingSettingsRepositoryPor
     return row ? toEntity(row) : undefined
   }
 
+  async getMany(
+    scopeType: IndexingStrategyScopeType,
+    scopeIds: string[]
+  ): Promise<IndexingSettingsEntity[]> {
+    const uniqueScopeIds = Array.from(new Set(scopeIds.filter((scopeId) => scopeId.length > 0)))
+    if (uniqueScopeIds.length === 0) {
+      return []
+    }
+
+    const placeholders = uniqueScopeIds.map(() => '?').join(',')
+    const rows = this.connection.all<IndexingSettingsRow>(
+      `SELECT scopeType, scopeId, strategyType, strategyProperties, updatedAt
+         FROM indexing_strategy_settings
+        WHERE scopeType = ? AND scopeId IN (${placeholders})`,
+      [scopeType, ...uniqueScopeIds]
+    )
+
+    return rows.map(toEntity)
+  }
+
   async upsert(input: UpsertIndexingSettingsInput): Promise<IndexingSettingsEntity> {
     this.connection.run(
       `INSERT INTO indexing_strategy_settings

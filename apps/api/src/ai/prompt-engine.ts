@@ -1,4 +1,4 @@
-import type { PromptDefinition, PromptMode } from '@lucentdocs/shared'
+import type { PromptDefinition, PromptMode, ContextParts } from '@lucentdocs/shared'
 import { promptManager } from './prompt-manager.js'
 import {
   buildChatVariables,
@@ -35,30 +35,22 @@ export function resolveContinuePrompt(
 }
 
 export function resolveSelectionPrompt(
-  contextBefore: string,
-  contextAfter: string | null,
+  contextParts: ContextParts,
   prompt: string,
-  selectedText: string | null,
   conversation = ''
 ): RenderedPrompt {
   const definition = promptManager.resolvePromptForMode('prompt')
-  const variables = buildPromptVariables(
-    contextBefore,
-    contextAfter,
-    prompt,
-    selectedText,
-    conversation
-  )
+  const variables = buildPromptVariables(contextParts, prompt, conversation)
   return renderPrompt(definition, variables)
 }
 
 export function resolveChatPrompt(
   currentFilePath: string,
-  currentFileContent: string,
+  contextParts: ContextParts,
   conversation: string
 ): RenderedPrompt {
   const definition = promptManager.resolvePromptForMode('chat')
-  const variables = buildChatVariables(currentFilePath, currentFileContent, conversation)
+  const variables = buildChatVariables(currentFilePath, contextParts, conversation)
   return renderPrompt(definition, variables)
 }
 

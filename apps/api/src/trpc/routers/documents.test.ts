@@ -235,7 +235,7 @@ describe('documentsRouter', () => {
     expect(results[0]?.matchType).toBe('snippet')
     expect(results[0]?.snippets).toHaveLength(3)
     expect(results[0]?.snippets[0]?.text.toLowerCase()).toContain('moonlight')
-    expect(results[0]?.snippets[0]).toMatchObject({ start: 5, end: 39 })
+    expect(results[0]?.snippets[0]).toMatchObject({ selectionFrom: 5, selectionTo: 39 })
     expect(results[1]?.matchType).toBe('whole_document')
     expect(results[1]?.snippets).toEqual([])
     expect(results.some((result) => result.id === foreignDoc.id)).toBe(false)

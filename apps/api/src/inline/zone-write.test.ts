@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
-import { schema, type InlineZoneWriteAction } from '@lucentdocs/shared'
+import { buildPromptContextExcerpt, schema, type InlineZoneWriteAction } from '@lucentdocs/shared'
 import {
   applyInlineZoneWriteActionToDoc,
+  ensureInlineContinuationZoneAtDocumentEnd,
   getInlineZoneTextFromDoc,
   setInlineZoneStreamingInDoc,
 } from './zone-write.js'
@@ -216,5 +217,26 @@ describe('setInlineZoneStreamingInDoc', () => {
       return true
     })
     expect(streamingStates).toEqual([false, false])
+  })
+})
+
+describe('ensureInlineContinuationZoneAtDocumentEnd', () => {
+  test('recreates a terminal continuation zone even when the prompt context is truncated', () => {
+    const sessionId = 'session-terminal-truncated'
+    const documentText = `START ${'x'.repeat(4096)} END`
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.paragraph.create(null, [schema.text(documentText)]),
+    ])
+
+    // Prompt excerpting can include synthetic truncation markers in the prompt-facing context,
+    // but continuation recovery should rely on a raw tail anchor derived from the document text.
+    const excerpt = buildPromptContextExcerpt(documentText, 'caret', '', undefined, 256)
+    expect(excerpt.before).toContain('<truncation_notice>')
+
+    const tailAnchor = documentText.slice(-64)
+    const result = ensureInlineContinuationZoneAtDocumentEnd(doc, sessionId, tailAnchor)
+
+    expect(result.zoneFound).toBe(true)
+    expect(result.changed).toBe(true)
   })
 })

@@ -32,10 +32,12 @@ describe('InlineSessionMetadataStore.pruneOrphans', () => {
       projectDocuments: {
         insert: async () => {},
         hasProjectDocument: async () => true,
+        findAssociatedDocumentIds: async () => new Set(['d1']),
         listDocumentIds: async () => ['d1'],
         findSoleDocumentIdsByProjectId: async () => ['d1'],
         findProjectIdsByDocumentId: async () => ['p1'],
         findSoleProjectIdByDocumentId: async () => 'p1',
+        findSoleProjectIdsByDocumentIds: async () => new Map([['d1', 'p1']]),
       },
       yjsDocuments: {
         getPersisted: async () => null,
@@ -87,10 +89,12 @@ describe('InlineSessionMetadataStore.pruneOrphans', () => {
       projectDocuments: {
         insert: async () => {},
         hasProjectDocument: async () => true,
+        findAssociatedDocumentIds: async () => new Set(['d1']),
         listDocumentIds: async () => ['d1'],
         findSoleDocumentIdsByProjectId: async () => ['d1'],
         findProjectIdsByDocumentId: async () => ['p1'],
         findSoleProjectIdByDocumentId: async () => 'p1',
+        findSoleProjectIdsByDocumentIds: async () => new Map([['d1', 'p1']]),
       },
       yjsDocuments: {
         getPersisted: async () => null,

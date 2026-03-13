@@ -6,17 +6,6 @@ export function createEmptySession(): InlineZoneSession {
     choices: [],
     contextBefore: null,
     contextAfter: null,
-  }
-}
-
-export function createSessionWithPromptContext(
-  contextBefore: string,
-  contextAfter: string | null
-): InlineZoneSession {
-  return {
-    messages: [],
-    choices: [],
-    contextBefore,
-    contextAfter,
+    contextTruncated: false,
   }
 }

@@ -44,6 +44,11 @@ export interface IndexingSettingsService {
     strategy: IndexingStrategy | null
   ): Promise<IndexingSettingsSnapshot | null>
   resolveForDocument(documentId: string): Promise<ResolvedIndexingStrategy | null>
+  resolveForDocuments(documentIds: string[]): Promise<Map<string, ResolvedIndexingStrategy | null>>
+  resolveForProjectDocuments(
+    projectId: string,
+    documentIds: string[]
+  ): Promise<Map<string, ResolvedIndexingStrategy | null>>
 }
 
 function toScopeSetting(
@@ -169,6 +174,214 @@ export function createIndexingSettingsService(repos: RepositorySet): IndexingSet
     })
   }
 
+  const resolveForDocuments = async (
+    documentIds: string[]
+  ): Promise<Map<string, ResolvedIndexingStrategy | null>> => {
+    const result = new Map<string, ResolvedIndexingStrategy | null>()
+    if (documentIds.length === 0) {
+      return result
+    }
+
+    const global = await getGlobal()
+    const uniqueDocumentIds = Array.from(new Set(documentIds))
+    const validDocumentIds = uniqueDocumentIds.filter((documentId) => isValidId(documentId))
+
+    for (const documentId of uniqueDocumentIds) {
+      if (!isValidId(documentId)) {
+        result.set(documentId, null)
+      }
+    }
+
+    if (validDocumentIds.length === 0) {
+      return result
+    }
+
+    const documentSettings = await repos.indexingSettings.getMany('document', validDocumentIds)
+    const documentSettingsById = new Map(
+      documentSettings.map((setting) => [setting.scopeId, setting])
+    )
+    const remainingDocumentIds = validDocumentIds.filter(
+      (documentId) => !documentSettingsById.has(documentId)
+    )
+
+    const soleProjectIdsByDocumentId =
+      await repos.projectDocuments.findSoleProjectIdsByDocumentIds(remainingDocumentIds)
+    const soleProjectIds = Array.from(new Set(soleProjectIdsByDocumentId.values()))
+
+    const projectSettings = await repos.indexingSettings.getMany('project', soleProjectIds)
+    const projectSettingsById = new Map(
+      projectSettings.map((setting) => [setting.scopeId, setting])
+    )
+
+    const projects = await repos.projects.findByIds(soleProjectIds)
+    const ownerUserIdByProjectId = new Map(
+      projects
+        .filter((project) => isValidId(project.ownerUserId))
+        .map((project) => [project.id, project.ownerUserId])
+    )
+
+    const ownerUserIds = Array.from(new Set(ownerUserIdByProjectId.values()))
+    const userSettings = await repos.indexingSettings.getMany('user', ownerUserIds)
+    const userSettingsById = new Map(userSettings.map((setting) => [setting.scopeId, setting]))
+
+    for (const documentId of validDocumentIds) {
+      const documentSetting = documentSettingsById.get(documentId)
+      if (documentSetting) {
+        result.set(documentId, {
+          scopeType: 'document',
+          scopeId: documentSetting.scopeId,
+          strategy: documentSetting.strategy,
+        })
+        continue
+      }
+
+      const projectId = soleProjectIdsByDocumentId.get(documentId)
+      if (projectId) {
+        const projectSetting = projectSettingsById.get(projectId)
+        if (projectSetting) {
+          result.set(documentId, {
+            scopeType: 'project',
+            scopeId: projectSetting.scopeId,
+            strategy: projectSetting.strategy,
+          })
+          continue
+        }
+
+        const ownerUserId = ownerUserIdByProjectId.get(projectId)
+        if (ownerUserId) {
+          const userSetting = userSettingsById.get(ownerUserId)
+          if (userSetting) {
+            result.set(documentId, {
+              scopeType: 'user',
+              scopeId: userSetting.scopeId,
+              strategy: userSetting.strategy,
+            })
+            continue
+          }
+        }
+      }
+
+      result.set(documentId, {
+        scopeType: 'global',
+        scopeId: global.scopeId,
+        strategy: global.strategy,
+      })
+    }
+
+    return result
+  }
+
+  const resolveForProjectDocuments = async (
+    projectId: string,
+    documentIds: string[]
+  ): Promise<Map<string, ResolvedIndexingStrategy | null>> => {
+    const result = new Map<string, ResolvedIndexingStrategy | null>()
+    if (documentIds.length === 0) {
+      return result
+    }
+
+    const global = await getGlobal()
+    const uniqueDocumentIds = Array.from(new Set(documentIds))
+    const validDocumentIds = uniqueDocumentIds.filter((documentId) => isValidId(documentId))
+
+    for (const documentId of uniqueDocumentIds) {
+      if (!isValidId(documentId)) {
+        result.set(documentId, null)
+      }
+    }
+
+    if (!isValidId(projectId) || validDocumentIds.length === 0) {
+      return result
+    }
+
+    const project = await repos.projects.findById(projectId)
+    if (!project) {
+      for (const documentId of validDocumentIds) {
+        result.set(documentId, null)
+      }
+      return result
+    }
+
+    const documentSettings = await repos.indexingSettings.getMany('document', validDocumentIds)
+    const documentSettingsById = new Map(
+      documentSettings.map((setting) => [setting.scopeId, setting])
+    )
+
+    const projectSetting = await repos.indexingSettings.get('project', projectId)
+    const ownerUserId = isValidId(project.ownerUserId) ? project.ownerUserId : null
+    const userSetting = ownerUserId
+      ? await repos.indexingSettings.get('user', ownerUserId)
+      : undefined
+
+    const remainingDocumentIds = validDocumentIds.filter(
+      (documentId) => !documentSettingsById.has(documentId)
+    )
+    const soleProjectIdsByDocumentId =
+      await repos.projectDocuments.findSoleProjectIdsByDocumentIds(remainingDocumentIds)
+    const sharedAssociatedDocumentIds = await repos.projectDocuments.findAssociatedDocumentIds(
+      projectId,
+      remainingDocumentIds.filter((documentId) => !soleProjectIdsByDocumentId.has(documentId))
+    )
+
+    for (const documentId of validDocumentIds) {
+      const documentSetting = documentSettingsById.get(documentId)
+      if (documentSetting) {
+        result.set(documentId, {
+          scopeType: 'document',
+          scopeId: documentSetting.scopeId,
+          strategy: documentSetting.strategy,
+        })
+        continue
+      }
+
+      const soleProjectId = soleProjectIdsByDocumentId.get(documentId)
+      if (soleProjectId === projectId) {
+        if (projectSetting) {
+          result.set(documentId, {
+            scopeType: 'project',
+            scopeId: projectSetting.scopeId,
+            strategy: projectSetting.strategy,
+          })
+          continue
+        }
+
+        if (userSetting) {
+          result.set(documentId, {
+            scopeType: 'user',
+            scopeId: userSetting.scopeId,
+            strategy: userSetting.strategy,
+          })
+          continue
+        }
+
+        result.set(documentId, {
+          scopeType: 'global',
+          scopeId: global.scopeId,
+          strategy: global.strategy,
+        })
+        continue
+      }
+
+      if (soleProjectId && soleProjectId !== projectId) {
+        result.set(documentId, null)
+        continue
+      }
+
+      if (!sharedAssociatedDocumentIds.has(documentId)) {
+        result.set(documentId, null)
+        continue
+      }
+
+      result.set(documentId, {
+        scopeType: 'global',
+        scopeId: global.scopeId,
+        strategy: global.strategy,
+      })
+    }
+
+    return result
+  }
+
   return {
     getGlobal,
 
@@ -247,5 +460,8 @@ export function createIndexingSettingsService(repos: RepositorySet): IndexingSet
       const snapshot = await buildSnapshot({ documentId })
       return snapshot?.resolved ?? null
     },
+
+    resolveForDocuments,
+    resolveForProjectDocuments,
   }
 }

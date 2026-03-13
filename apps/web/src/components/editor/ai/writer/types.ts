@@ -37,18 +37,13 @@ export interface AIWriterController {
 
 export interface PromptStreamPayload {
   mode: 'prompt'
-  contextBefore: string
-  contextAfter?: string
   prompt: string
-  selectedText?: string
   selectionFrom: number
   selectionTo: number
 }
 
 export interface ContinuationStreamPayload {
   mode: 'continue'
-  contextBefore: string
-  contextAfter?: string
   selectionFrom: number
   selectionTo: number
 }

@@ -87,7 +87,10 @@ export function SearchResultsList({
                         data-search-result-snippet={`${result.id}:${index}`}
                         onClick={(e) => {
                           e.stopPropagation()
-                          onOpenDocument(result.id, { start: snippet.start, end: snippet.end })
+                          onOpenDocument(result.id, {
+                            start: snippet.selectionFrom,
+                            end: snippet.selectionTo,
+                          })
                         }}
                         className="w-full text-left group/snippet"
                       >

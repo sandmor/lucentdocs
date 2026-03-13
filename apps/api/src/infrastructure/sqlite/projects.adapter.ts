@@ -58,6 +58,20 @@ export class ProjectsRepository implements ProjectsRepositoryPort {
     return row ? fromRow(row) : undefined
   }
 
+  async findByIds(ids: string[]): Promise<Project[]> {
+    const uniqueIds = Array.from(new Set(ids.filter((id) => id.length > 0)))
+    if (uniqueIds.length === 0) {
+      return []
+    }
+
+    const placeholders = uniqueIds.map(() => '?').join(',')
+    const rows = this.connection.all<ProjectRow>(
+      `SELECT * FROM projects WHERE id IN (${placeholders})`,
+      uniqueIds
+    )
+    return rows.map(fromRow)
+  }
+
   async insert(project: Project): Promise<void> {
     const row = toRow(project)
     this.connection.run(

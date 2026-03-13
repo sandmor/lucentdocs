@@ -83,8 +83,8 @@ describe('InlineRuntime', () => {
       projectId: project.id,
       documentId: document.id,
       sessionId,
-      contextBefore: 'Once ',
-      contextAfter: '',
+      selectionFrom: 0,
+      selectionTo: 0,
       requesterClientName: 'test_client',
     })
 
@@ -155,8 +155,8 @@ describe('InlineRuntime', () => {
         projectId: project.id,
         documentId: document.id,
         sessionId,
-        contextBefore: 'Once ',
-        contextAfter: '',
+        selectionFrom: 0,
+        selectionTo: 0,
         requesterClientName: 'test_client',
       })
 
@@ -230,8 +230,8 @@ describe('InlineRuntime', () => {
         projectId: project.id,
         documentId: document.id,
         sessionId,
-        contextBefore: 'Once ',
-        contextAfter: '',
+        selectionFrom: 0,
+        selectionTo: 0,
         requesterClientName: 'test_client',
       })
 
@@ -262,6 +262,94 @@ describe('InlineRuntime', () => {
 
       const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
       expect(extractDocText(live)).toBe('Once ')
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS
+      } else {
+        process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS = previousDelay
+      }
+    }
+  })
+
+  test('recreates a removed continuation zone after a document replacement even when prompt context is truncated', async () => {
+    const previousDelay = process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS
+    process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS = '50'
+
+    try {
+      const project = await adapter.services.projects.create('Story', {
+        ownerUserId: 'user_1',
+      })
+      const document = await adapter.services.documents.createForProject(
+        project.id,
+        'chapter-04.md'
+      )
+
+      if (!document) {
+        throw new Error('Expected a project document to be created.')
+      }
+
+      const sessionId = 'inline_session_4'
+      const bigPrefix = `PROLOGUE ${'x'.repeat(20_000)} `
+      const beforeZoneText = `${bigPrefix}Once `
+
+      await yjsRuntime.replaceLiveDocumentContent(document.id, {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: beforeZoneText },
+              {
+                type: 'ai_zone',
+                attrs: {
+                  id: 'zone_4',
+                  streaming: true,
+                  sessionId,
+                  originalSlice: null,
+                },
+              },
+            ],
+          },
+        ],
+      } as JsonObject)
+
+      await inlineRuntime.startGeneration({
+        mode: 'continue',
+        projectId: project.id,
+        documentId: document.id,
+        sessionId,
+        selectionFrom: 0,
+        selectionTo: 0,
+        requesterClientName: 'test_client',
+      })
+
+      // Replace the document to simulate a restore/reload that removes the continuation zone.
+      // This bumps the Yjs epoch so the runtime is allowed to attempt zone recovery.
+      await yjsRuntime.replaceDocument(
+        document.id,
+        {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: beforeZoneText }],
+            },
+          ],
+        } as JsonObject,
+        { evictLive: true }
+      )
+
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (
+          !inlineRuntime.isGenerating({ projectId: project.id, documentId: document.id, sessionId })
+        ) {
+          break
+        }
+        await sleep(10)
+      }
+
+      const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+      expect(extractDocText(live).endsWith('Once spark')).toBe(true)
     } finally {
       if (previousDelay === undefined) {
         delete process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS

@@ -129,6 +129,10 @@ export const LIMIT_FIELD_ROWS = [
     keys: ['maxDocImportChars', 'maxDocExportChars'],
     columnsClassName: 'sm:grid-cols-2',
   },
+  {
+    keys: ['maxPromptExcerptChars'],
+    columnsClassName: 'sm:grid-cols-1',
+  },
 ] as const satisfies ReadonlyArray<{
   keys: ReadonlyArray<VisibleNumberFieldKey>
   columnsClassName: string
@@ -274,6 +278,12 @@ export const VISIBLE_FIELD_META: Record<
     id: 'max-doc-export',
     label: 'Doc export chars',
     description: 'Max characters for document export.',
+  },
+  maxPromptExcerptChars: {
+    id: 'max-prompt-excerpt',
+    label: 'Prompt excerpt chars',
+    description:
+      'Target characters for AI prompt context. Larger files are truncated with guidance to use search tools.',
   },
 }
 

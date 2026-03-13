@@ -93,4 +93,48 @@ describe('IndexingSettingsService', () => {
     expect(resolved?.scopeType).toBe('global')
     expect(resolved?.strategy.type).toBe('sliding_window')
   })
+
+  test('resolves indexing for many documents via batch API', async () => {
+    const adapter = createTestAdapter()
+
+    const projectA = await adapter.services.projects.create('Project A', { ownerUserId: 'user_1' })
+    const projectB = await adapter.services.projects.create('Project B', { ownerUserId: 'user_2' })
+
+    const docA = await adapter.services.documents.createForProject(projectA.id, 'a.md')
+    const docB = await adapter.services.documents.createForProject(projectA.id, 'b.md')
+    const docC = await adapter.services.documents.createForProject(projectB.id, 'c.md')
+
+    if (!docA || !docB || !docC) {
+      throw new Error('Expected project documents to be created.')
+    }
+
+    await adapter.services.indexingSettings.updateDocumentStrategy(docA.id, {
+      type: 'whole_document',
+      properties: {},
+    })
+    await adapter.services.indexingSettings.updateProjectStrategy(projectA.id, {
+      type: 'sliding_window',
+      properties: {
+        level: 'character',
+        windowSize: 320,
+        stride: 160,
+      },
+    })
+    await adapter.services.indexingSettings.updateUserStrategy('user_2', {
+      type: 'whole_document',
+      properties: {},
+    })
+
+    const resolvedByDocumentId = await adapter.services.indexingSettings.resolveForDocuments([
+      docA.id,
+      docB.id,
+      docC.id,
+      'not a valid id',
+    ])
+
+    expect(resolvedByDocumentId.get(docA.id)?.scopeType).toBe('document')
+    expect(resolvedByDocumentId.get(docB.id)?.scopeType).toBe('project')
+    expect(resolvedByDocumentId.get(docC.id)?.scopeType).toBe('user')
+    expect(resolvedByDocumentId.get('not a valid id')).toBeNull()
+  })
 })

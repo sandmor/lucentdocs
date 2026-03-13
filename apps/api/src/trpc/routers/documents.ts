@@ -16,6 +16,7 @@ import { configManager } from '../../config/runtime.js'
 import { projectSyncBus } from '../project-sync.js'
 import { YJS_RESTORE_CLOSE_CODE, YJS_RESTORE_CLOSE_REASON } from '../../yjs/runtime.js'
 import { assertProjectAccess } from '../access.js'
+import { normalizeValidatedSearchText } from '../../core/services/documentSearch.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const pathSchema = z.string().trim().min(1).max(400)
@@ -87,10 +88,12 @@ export const documentsRouter = router({
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
       const maxQueryChars = configManager.getConfig().search.maxQueryChars
-      if (input.query.length > maxQueryChars) {
+      try {
+        normalizeValidatedSearchText(input.query, maxQueryChars)
+      } catch (error) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `Query exceeds maximum length of ${maxQueryChars} characters`,
+          message: error instanceof Error ? error.message : 'Search query is invalid.',
         })
       }
       return ctx.services.documents.searchForProject(input.projectId, input.query, {

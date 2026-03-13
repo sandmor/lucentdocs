@@ -4,14 +4,13 @@ import { EditorView } from 'prosemirror-view'
 import type { UIMessage } from 'ai'
 import { toast } from 'sonner'
 import { aiWriterPluginKey, getAIZones } from './writer-plugin'
-import type { InlineToolChip, InlineZoneSession } from '@lucentdocs/shared'
+import { type InlineToolChip, type InlineZoneSession } from '@lucentdocs/shared'
 import { StuckDetector } from './stuck-detector'
 import {
   extractMessageTextFromPartsRaw,
   extractToolPartsFromParts,
   getMessageParts,
 } from './message-parts'
-import { getDocumentContext, getPromptContextForRange } from './writer/context'
 import { createInlineSessionId, createZoneId } from './writer/ids'
 import { createEmptySession } from './writer/session-state'
 import {
@@ -392,18 +391,17 @@ export function createAIWriterController(
               projectId: toolScope.projectId,
               documentId: toolScope.documentId,
               sessionId,
-              contextBefore: payload.contextBefore,
-              contextAfter: payload.contextAfter,
               prompt: payload.prompt,
-              selectedText: payload.selectedText,
+              selectionFrom: payload.selectionFrom,
+              selectionTo: payload.selectionTo,
               requesterClientName: getRequesterClientName() ?? undefined,
             })
           : await trpcClient.inline.startContinuationGeneration.mutate({
               projectId: toolScope.projectId,
               documentId: toolScope.documentId,
               sessionId,
-              contextBefore: payload.contextBefore,
-              contextAfter: payload.contextAfter,
+              selectionFrom: payload.selectionFrom,
+              selectionTo: payload.selectionTo,
               requesterClientName: getRequesterClientName() ?? undefined,
             })
       activeGenerationId = started.generationId
@@ -510,13 +508,10 @@ export function createAIWriterController(
     tr.setMeta('addToHistory', true)
     view.dispatch(tr)
 
-    const { contextBefore, contextAfter } = getDocumentContext(view, pos)
     void streamAIPrompt(
       view,
       {
         mode: 'continue',
-        contextBefore,
-        contextAfter,
         selectionFrom: pos,
         selectionTo: pos,
       },
@@ -555,11 +550,9 @@ export function createAIWriterController(
       return false
     }
 
-    const selectedText = view.state.doc.textBetween(from, to, '\n\n', '\n')
     const originalSlice = view.state.doc.slice(from, to)
     const zoneId = createZoneId()
     const sessionId = createInlineSessionId()
-    const { contextBefore, contextAfter } = getPromptContextForRange(view, from, to)
 
     const zoneSlice =
       originalSlice &&
@@ -602,10 +595,7 @@ export function createAIWriterController(
       view,
       {
         mode: 'prompt',
-        contextBefore,
-        contextAfter,
         prompt: trimmedPrompt,
-        selectedText: selectedText || undefined,
         selectionFrom: from,
         selectionTo: to,
       },
@@ -647,20 +637,11 @@ export function createAIWriterController(
       streaming: true,
       sessionId,
     })
-
-    const selectedText = view.state.doc.textBetween(zone.nodeFrom, zone.nodeTo, '\n\n', '\n')
-    const fallbackContext = getPromptContextForRange(view, zone.nodeFrom, zone.nodeTo)
-    const zoneSession = zone.sessionId ? getSessionById(zone.sessionId) : null
-    const contextBefore = zoneSession?.contextBefore ?? fallbackContext.contextBefore
-    const contextAfter = zoneSession?.contextAfter ?? fallbackContext.contextAfter ?? null
     void streamAIPrompt(
       view,
       {
         mode: 'prompt',
-        contextBefore,
-        contextAfter: contextAfter ?? undefined,
         prompt: trimmedPrompt,
-        selectedText,
         selectionFrom: zone.nodeFrom,
         selectionTo: zone.nodeTo,
       },

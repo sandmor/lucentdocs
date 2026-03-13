@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildPromptVariables,
   renderTemplate,
   validatePromptTemplatesForMode,
   validateTemplateReferencesForMode,
@@ -53,5 +54,26 @@ describe('renderTemplate', () => {
     expect(() => renderTemplate('Hello {{bad-var}}!', { 'bad-var': 'x' })).toThrow(
       'Invalid template variable "bad-var"'
     )
+  })
+})
+
+describe('buildPromptVariables', () => {
+  test('adds truncated-context guidance for selection prompts', () => {
+    const variables = buildPromptVariables(
+      {
+        before: 'before',
+        markerKind: 'selection',
+        markerContent: 'selected',
+        after: 'after',
+        truncated: true,
+        truncatedBefore: false,
+        truncatedAfter: false,
+        truncatedMarker: false,
+      },
+      'revise this',
+      ''
+    )
+
+    expect(variables.modeGuidance).toContain('story_context is a local excerpt, not the full file')
   })
 })

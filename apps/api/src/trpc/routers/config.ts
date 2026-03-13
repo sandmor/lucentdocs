@@ -262,6 +262,7 @@ export const configRouter = router({
       maxPromptUserChars: input.maxPromptUserChars,
       maxDocImportChars: input.maxDocImportChars,
       maxDocExportChars: input.maxDocExportChars,
+      maxPromptExcerptChars: input.maxPromptExcerptChars,
     }
 
     const result = configManager.updatePersistedConfig(sanitizedInput)

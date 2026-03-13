@@ -73,6 +73,14 @@ export interface SearchProjectDocumentEmbeddingsInput {
   limit: number
 }
 
+export interface SearchDocumentEmbeddingsInput {
+  documentId: string
+  baseURL: string
+  model: string
+  queryEmbedding: number[]
+  limit: number
+}
+
 export interface ProjectDocumentEmbeddingSearchMatch {
   documentId: string
   title: string
@@ -99,6 +107,9 @@ export interface DocumentEmbeddingsRepositoryPort {
     baseURL: string,
     model: string
   ): Promise<DocumentEmbeddingEntity[]>
+  searchDocument(
+    input: SearchDocumentEmbeddingsInput
+  ): Promise<ProjectDocumentEmbeddingSearchMatch[]>
   searchProjectDocuments(
     input: SearchProjectDocumentEmbeddingsInput
   ): Promise<ProjectDocumentEmbeddingSearchMatch[]>

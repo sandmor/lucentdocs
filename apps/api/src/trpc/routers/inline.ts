@@ -83,10 +83,9 @@ export const inlineRouter = router({
         projectId: idSchema,
         documentId: idSchema,
         sessionId: idSchema,
-        contextBefore: z.string(),
-        contextAfter: z.string().optional(),
         prompt: z.string(),
-        selectedText: z.string().optional(),
+        selectionFrom: z.number().int().min(0),
+        selectionTo: z.number().int().min(0),
         maxOutputTokens: z.number().int().min(1).optional(),
         requesterClientName: idSchema.optional(),
       })
@@ -94,25 +93,10 @@ export const inlineRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
       const limits = configManager.getConfig().limits
-      const totalContext = input.contextBefore.length + (input.contextAfter?.length ?? 0)
-      if (totalContext > limits.contextChars) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Combined contextBefore and contextAfter exceeds ${limits.contextChars} characters`,
-        })
-      }
-
       if (input.prompt.trim().length === 0 || input.prompt.length > limits.promptChars) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: `Prompt must be between 1 and ${limits.promptChars} characters`,
-        })
-      }
-
-      if ((input.selectedText?.length ?? 0) > limits.contextChars) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Selected text exceeds ${limits.contextChars} characters`,
         })
       }
 
@@ -132,23 +116,14 @@ export const inlineRouter = router({
         projectId: idSchema,
         documentId: idSchema,
         sessionId: idSchema,
-        contextBefore: z.string(),
-        contextAfter: z.string().optional(),
+        selectionFrom: z.number().int().min(0),
+        selectionTo: z.number().int().min(0),
         maxOutputTokens: z.number().int().min(1).optional(),
         requesterClientName: idSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
-      const limits = configManager.getConfig().limits
-      const totalContext = input.contextBefore.length + (input.contextAfter?.length ?? 0)
-      if (totalContext > limits.contextChars) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Combined contextBefore and contextAfter exceeds ${limits.contextChars} characters`,
-        })
-      }
-
       try {
         return await ctx.inlineRuntime.startGeneration({
           ...input,

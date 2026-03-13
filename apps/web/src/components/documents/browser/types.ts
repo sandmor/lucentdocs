@@ -15,8 +15,8 @@ export type DocumentSearchResultItem = {
   snippets: Array<{
     text: string
     score: number
-    start: number
-    end: number
+    selectionFrom: number
+    selectionTo: number
   }>
 }
 
@@ -42,8 +42,8 @@ export type BrowserRow =
       snippets: Array<{
         text: string
         score: number
-        start: number
-        end: number
+        selectionFrom: number
+        selectionTo: number
       }>
     }
   | {

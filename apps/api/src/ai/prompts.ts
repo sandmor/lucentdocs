@@ -5,7 +5,9 @@ import type {
   PromptSystemSlot,
   SelectionEditProtocol,
   ResponseProtocol,
+  ContextParts,
 } from '@lucentdocs/shared'
+import { renderContextParts } from '@lucentdocs/shared'
 
 export const SYSTEM_CONTINUE_PROMPT_ID = 'system.continue.default'
 export const SYSTEM_SELECTION_PROMPT_ID = 'system.selection-edit.default'
@@ -39,6 +41,11 @@ OUTPUT RULES:
 - Output ONLY the new text to insert at the <lucentdocs_writing_gap_v1 /> marker
 - NEVER repeat or include any text from before or after the gap
 - NEVER include the <lucentdocs_writing_gap_v1 /> marker itself in your output
+
+CONTEXT MARKERS:
+- <truncation_notice>...</truncation_notice> and <omitted content="..."/> are excerpt-control artifacts, not story text.
+- Never continue those marker strings or treat them as narrative events.
+- If these markers appear, infer that surrounding context may be incomplete and continue from the visible prose around the gap.
 
 Example:
 Context: "John walked into the room. <lucentdocs_writing_gap_v1 /> The door slammed behind him."
@@ -90,7 +97,10 @@ When tool output is incomplete, state what is missing and what to inspect next.
 CONTEXT MARKERS:
 The active document content may contain special markers indicating the user's cursor context:
 - <selection>text</selection> — the text currently selected by the user
-- <caret /> — the cursor position when no text is selected`
+- <caret /> — the cursor position when no text is selected
+- <omitted content="earlier"/> — text before the visible excerpt was truncated
+- <omitted content="later"/> — text after the visible excerpt was truncated
+- <truncation_notice> — indicates the excerpt is incomplete and search tools should be used for more context.`
 
 const CONTINUE_USER_TEMPLATE = `Story context:
 
@@ -103,6 +113,10 @@ const CONTINUE_USER_TEMPLATE = `Story context:
 <context_after>
 {{contextAfter}}
 </context_after>
+
+Marker guide:
+- <truncation_notice>...</truncation_notice> and <omitted content="..."/> are non-story excerpt markers.
+- <lucentdocs_writing_gap_v1 /> is the insertion location.
 
 Task:
 {{instruction}}`
@@ -126,7 +140,7 @@ Prefer a direct tool action in your first assistant turn except if stated otherw
 const CHAT_USER_TEMPLATE = `Active file path:
 {{currentFilePath}}
 
-Active file content:
+Active file excerpt:
 {{currentFileContent}}
 
 Conversation so far:
@@ -302,34 +316,56 @@ export function buildContinueVariables(
 }
 
 export function buildPromptVariables(
-  contextBefore: string,
-  contextAfter: string | null,
+  contextParts: ContextParts,
   prompt: string,
-  selectedText: string | null = null,
   conversation = ''
 ): Record<string, string> {
-  const safeContextBefore = sanitizeContext(contextBefore)
-  const safeContextAfter = sanitizeContext(contextAfter ?? '')
-  const safeSelectedText = selectedText ?? ''
-  const wrappedContext = safeSelectedText
-    ? `${safeContextBefore}<selection>${safeSelectedText}</selection>${safeContextAfter}`
-    : `${safeContextBefore}<caret />${safeContextAfter}`
-  const modeGuidance = selectedText
-    ? `MODE GUIDANCE:
-  - The selected text (between <selection> tags) is the only writable area.
-  - write_zone offsets are relative to the <selection> content only.
-  - For a full rewrite, replace the entire selected range.
-  - For alternatives, use write_zone_choices.
-  - If asked to change surrounding context outside the selection, ask the user to expand the selection first.`
-    : `MODE GUIDANCE:
-   - The AI zone text follows the <caret /> marker in story_context.
-   - Use write_zone for direct insertion or replacement.
-   - Use write_zone_choices when the user asks for alternatives.
-   - You cannot edit text outside the AI zone.`
+  const safeParts: ContextParts = {
+    ...contextParts,
+    before: sanitizeContext(contextParts.before),
+    markerContent: sanitizeContext(contextParts.markerContent),
+    after:
+      contextParts.after !== undefined
+        ? sanitizeContext(contextParts.after) || undefined
+        : undefined,
+  }
+
+  const wrappedContext = renderContextParts(safeParts)
+  const hasSelection = contextParts.markerKind === 'selection'
+  const modeGuidanceLines: string[] = []
+
+  if (hasSelection) {
+    modeGuidanceLines.push('MODE GUIDANCE:')
+    modeGuidanceLines.push(
+      '- The selected text (between <selection> tags) is the only writable area.'
+    )
+    if (contextParts.truncated) {
+      modeGuidanceLines.push(
+        '- story_context is a local excerpt, not the full file. Use search_project to find relevant documents, then read_file and search_file if you need more context.'
+      )
+    }
+    modeGuidanceLines.push('- write_zone offsets are relative to the <selection> content only.')
+    modeGuidanceLines.push('- For a full rewrite, replace the entire selected range.')
+    modeGuidanceLines.push('- For alternatives, use write_zone_choices.')
+    modeGuidanceLines.push(
+      '- If asked to change surrounding context outside the selection, ask the user to expand the selection first.'
+    )
+  } else {
+    modeGuidanceLines.push('MODE GUIDANCE:')
+    if (contextParts.truncated) {
+      modeGuidanceLines.push(
+        '- story_context is a local excerpt, not the full file. Use search_project to find relevant documents, then read_file and search_file if you need more context.'
+      )
+    }
+    modeGuidanceLines.push('- The AI zone text follows the <caret /> marker in story_context.')
+    modeGuidanceLines.push('- Use write_zone for direct insertion or replacement.')
+    modeGuidanceLines.push('- Use write_zone_choices when the user asks for alternatives.')
+    modeGuidanceLines.push('- You cannot edit text outside the AI zone.')
+  }
 
   return {
     wrappedContext,
-    modeGuidance,
+    modeGuidance: modeGuidanceLines.join('\n'),
     prompt,
     conversation: conversation.trim() || '(no prior inline conversation)',
   }
@@ -337,14 +373,17 @@ export function buildPromptVariables(
 
 export function buildChatVariables(
   currentFilePath: string,
-  currentFileContent: string,
+  contextParts: ContextParts,
   conversation: string
 ): Record<string, string> {
+  const chatInstruction = contextParts.truncated
+    ? 'The active file excerpt is incomplete. Use search_project to locate relevant documents, then use search_file and read_file for exact passages.'
+    : 'Use search_project, search_file, or read_file if you need to inspect other documents or find specific content.'
+
   return {
     currentFilePath: currentFilePath.trim() || '(untitled)',
-    currentFileContent: sanitizeContext(currentFileContent),
-    chatInstruction:
-      'Use project tools when you need to inspect files. Keep answers grounded in available project documents.',
+    currentFileContent: sanitizeContext(renderContextParts(contextParts)),
+    chatInstruction,
     conversation: conversation.trim() || '(no prior messages)',
   }
 }

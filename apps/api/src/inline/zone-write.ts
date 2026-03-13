@@ -139,6 +139,32 @@ export function getInlineZoneTextFromDoc(
   }
 }
 
+export interface InlineZoneSnapshot {
+  zoneFound: boolean
+  nodeFrom: number
+  nodeTo: number
+}
+
+export function getInlineZoneSnapshotFromDoc(
+  doc: ProseMirrorNode,
+  sessionId: string
+): InlineZoneSnapshot {
+  const zone = resolveSessionZone(doc, sessionId)
+  if (!zone) {
+    return {
+      zoneFound: false,
+      nodeFrom: 0,
+      nodeTo: 0,
+    }
+  }
+
+  return {
+    zoneFound: true,
+    nodeFrom: zone.nodeFrom,
+    nodeTo: zone.nodeTo,
+  }
+}
+
 export function applyInlineZoneWriteActionToDoc(
   doc: ProseMirrorNode,
   sessionId: string,
@@ -250,7 +276,7 @@ export function setInlineZoneStreamingInDoc(
 export function ensureInlineContinuationZoneAtDocumentEnd(
   doc: ProseMirrorNode,
   sessionId: string,
-  expectedContextBefore: string
+  expectedTailAnchor: string
 ): { changed: boolean; nextDoc: ProseMirrorNode; zoneFound: boolean } {
   // Only recreate terminal continuation zones when the document still ends at
   // the same textual anchor the generation started from.
@@ -263,8 +289,21 @@ export function ensureInlineContinuationZoneAtDocumentEnd(
     }
   }
 
-  const documentText = doc.textBetween(0, doc.content.size, '\n\n', '\n')
-  if (!documentText.endsWith(expectedContextBefore)) {
+  const expected = expectedTailAnchor
+  if (expected.length > 0) {
+    const docEnd = doc.content.size
+    // Avoid materializing full document text; only read a large tail window.
+    // ProseMirror positions roughly correlate with characters in typical docs.
+    const tailWindow = Math.min(docEnd, Math.max(2048, expected.length * 8))
+    const tailText = doc.textBetween(Math.max(0, docEnd - tailWindow), docEnd, '\n\n', '\n')
+    if (!tailText.endsWith(expected)) {
+      return {
+        changed: false,
+        nextDoc: doc,
+        zoneFound: false,
+      }
+    }
+  } else {
     return {
       changed: false,
       nextDoc: doc,
