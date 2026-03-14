@@ -17,10 +17,10 @@ import { projectSyncBus } from '../project-sync.js'
 import { YJS_RESTORE_CLOSE_CODE, YJS_RESTORE_CLOSE_REASON } from '../../yjs/runtime.js'
 import { assertProjectAccess } from '../access.js'
 import { normalizeValidatedSearchText } from '../../core/services/documentSearch.js'
-import {
-  planMarkdownImport,
-  type MarkdownImportHtmlMode,
-} from '../../core/services/markdown-import.js'
+import { planMarkdownImport, type MarkdownRawHtmlMode } from '../../core/markdown/native.js'
+import { API_JSON_BODY_LIMIT_BYTES } from '../../http/body-limits.js'
+
+const IMPORT_TRANSFER_MAX_BYTES = API_JSON_BODY_LIMIT_BYTES
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const pathSchema = z.string().trim().min(1).max(1000)
@@ -77,6 +77,22 @@ function slugifyImportPart(input: string): string {
     .replace(/^-|-$/g, '')
 }
 
+function estimateJsonPayloadBytes(payload: unknown): number {
+  return Buffer.byteLength(JSON.stringify(payload), 'utf8')
+}
+
+function assertImportPayloadWithinLimit(payload: unknown): void {
+  const bytes = estimateJsonPayloadBytes(payload)
+  if (bytes > IMPORT_TRANSFER_MAX_BYTES) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        `Import payload exceeds transfer limit of ${IMPORT_TRANSFER_MAX_BYTES.toLocaleString()} bytes. ` +
+        'Split the import into smaller chunks and try again.',
+    })
+  }
+}
+
 function buildSplitImportDocuments(params: {
   fileName: string
   markdown: string
@@ -85,7 +101,7 @@ function buildSplitImportDocuments(params: {
   split: 'heading' | 'size'
   headingLevel: 1 | 2 | 3
   targetDocChars: number
-  htmlMode: MarkdownImportHtmlMode
+  rawHtmlMode: MarkdownRawHtmlMode
   includeContents: boolean
 }): Array<{ title: string; markdown: string }> {
   const baseName = params.fileName.replace(/\.md$/i, '')
@@ -100,17 +116,26 @@ function buildSplitImportDocuments(params: {
     })
   }
 
-  const plan = planMarkdownImport(params.markdown, {
+  const planResult = planMarkdownImport(params.markdown, {
     maxDocChars: params.limits.docImportChars,
     targetDocChars: Math.min(params.targetDocChars, params.limits.docImportChars),
     split:
       params.split === 'heading'
         ? { type: 'heading', level: params.headingLevel }
         : { type: 'size' },
-    htmlMode: params.htmlMode,
+    rawHtmlMode: params.rawHtmlMode,
   })
+  if (!planResult.ok) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        planResult.error.kind === 'parse_failed'
+          ? 'Failed to parse markdown while planning import.'
+          : 'Failed to plan markdown import.',
+    })
+  }
 
-  const parts = plan.parts
+  const parts = planResult.value.parts
   if (parts.length === 0) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
@@ -158,7 +183,7 @@ export const documentsRouter = router({
     return {
       docImportChars: limits.docImportChars,
       docImportBatchDocs: limits.docImportBatchDocs,
-      docImportBatchChars: limits.docImportBatchChars,
+      transferMaxBytes: IMPORT_TRANSFER_MAX_BYTES,
     }
   }),
 
@@ -783,9 +808,7 @@ export const documentsRouter = router({
         })
       }
 
-      let totalChars = 0
       for (const doc of input.documents) {
-        totalChars += doc.markdown.length
         if (doc.markdown.length > limits.docImportChars) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -794,12 +817,11 @@ export const documentsRouter = router({
         }
       }
 
-      if (totalChars > limits.docImportBatchChars) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Batch import exceeds limit of ${limits.docImportBatchChars} total characters`,
-        })
-      }
+      assertImportPayloadWithinLimit({
+        projectId: input.projectId,
+        documents: input.documents,
+        parseFailureMode: input.parseFailureMode,
+      })
 
       const result = await ctx.services.documents.importManyForProject(
         input.projectId,
@@ -832,7 +854,7 @@ export const documentsRouter = router({
         split: z.enum(['heading', 'size']),
         headingLevel: z.union([z.literal(1), z.literal(2), z.literal(3)]),
         targetDocChars: z.number().int().min(1),
-        htmlMode: z.enum(['keep', 'convert_basic', 'preserve_blocks']),
+        rawHtmlMode: z.enum(['drop', 'code_block']).optional().default('code_block'),
         includeContents: z.boolean(),
       })
     )
@@ -840,12 +862,18 @@ export const documentsRouter = router({
       await assertProjectAccess(ctx, input.projectId)
 
       const limits = configManager.getConfig().limits
-      if (input.markdown.length > limits.docImportBatchChars) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Markdown upload exceeds transfer limit of ${limits.docImportBatchChars} characters`,
-        })
-      }
+
+      assertImportPayloadWithinLimit({
+        projectId: input.projectId,
+        fileName: input.fileName,
+        markdown: input.markdown,
+        destinationDirectory: input.destinationDirectory,
+        split: input.split,
+        headingLevel: input.headingLevel,
+        targetDocChars: input.targetDocChars,
+        rawHtmlMode: input.rawHtmlMode,
+        includeContents: input.includeContents,
+      })
 
       const destinationDirectory = input.destinationDirectory
         ? normalizeAndValidatePath(input.destinationDirectory, 'Destination directory path')
@@ -859,30 +887,13 @@ export const documentsRouter = router({
         split: input.split,
         headingLevel: input.headingLevel,
         targetDocChars: input.targetDocChars,
-        htmlMode: input.htmlMode,
+        rawHtmlMode: input.rawHtmlMode,
         includeContents: input.includeContents,
       })
 
       const batches: Array<Array<{ title: string; markdown: string }>> = []
-      let currentBatch: Array<{ title: string; markdown: string }> = []
-      let currentChars = 0
-
-      for (const doc of plannedDocuments) {
-        const nextChars = currentChars + doc.markdown.length
-        const wouldExceedDocs = currentBatch.length >= limits.docImportBatchDocs
-        const wouldExceedChars = nextChars > limits.docImportBatchChars
-
-        if (currentBatch.length > 0 && (wouldExceedDocs || wouldExceedChars)) {
-          batches.push(currentBatch)
-          currentBatch = []
-          currentChars = 0
-        }
-
-        currentBatch.push(doc)
-        currentChars += doc.markdown.length
-      }
-      if (currentBatch.length > 0) {
-        batches.push(currentBatch)
+      for (let i = 0; i < plannedDocuments.length; i += limits.docImportBatchDocs) {
+        batches.push(plannedDocuments.slice(i, i + limits.docImportBatchDocs))
       }
 
       const importedIds: string[] = []
@@ -891,6 +902,7 @@ export const documentsRouter = router({
       for (const batch of batches) {
         const result = await ctx.services.documents.importManyForProject(input.projectId, batch, {
           parseFailureMode: 'code_block',
+          rawHtmlMode: input.rawHtmlMode,
         })
         importedIds.push(...result.imported.map((doc) => doc.id))
         failed += result.failed.length

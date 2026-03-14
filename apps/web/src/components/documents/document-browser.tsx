@@ -70,8 +70,8 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
           onImportHeadingLevelChange={browser.setImportHeadingLevel}
           importTargetChars={browser.importTargetChars}
           onImportTargetCharsChange={browser.setImportTargetChars}
-          importHtmlMode={browser.importHtmlMode}
-          onImportHtmlModeChange={browser.setImportHtmlMode}
+          importRawHtmlMode={browser.importRawHtmlMode}
+          onImportRawHtmlModeChange={browser.setImportRawHtmlMode}
           importIncludeContents={browser.importIncludeContents}
           onImportIncludeContentsChange={browser.setImportIncludeContents}
           importProgress={browser.importProgress}

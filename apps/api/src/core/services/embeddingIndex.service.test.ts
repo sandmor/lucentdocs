@@ -604,7 +604,7 @@ describe('EmbeddingIndexService', () => {
     } as unknown as { flushDueQueue: () => Promise<unknown> }
 
     const runtime = new EmbeddingRuntime(
-      service as any,
+      service as unknown as import('../../core/services/embeddingIndex.service.js').EmbeddingIndexService,
       { debounceMs: 0, batchMaxWaitMs: 0 },
       { errorBackoffBaseMs: 10, errorBackoffMaxMs: 10 }
     )

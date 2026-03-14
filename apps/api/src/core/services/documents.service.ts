@@ -6,7 +6,6 @@ import {
   type JsonObject,
   createDefaultContent,
   parseContent,
-  markdownToProseMirrorDoc,
   normalizeDocumentPath,
   isDirectorySentinelPath,
   pathHasSentinelSegment,
@@ -15,6 +14,7 @@ import {
   toDirectorySentinelPath,
   isJsonObject,
 } from '@lucentdocs/shared'
+import { markdownToProseMirrorDoc, type MarkdownRawHtmlMode } from '../markdown/native.js'
 import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
@@ -184,7 +184,10 @@ export interface DocumentsService {
   importManyForProject(
     projectId: string,
     documents: ImportManyDocumentInput[],
-    options?: { parseFailureMode?: ImportDocumentParseFailureMode }
+    options?: {
+      parseFailureMode?: ImportDocumentParseFailureMode
+      rawHtmlMode?: MarkdownRawHtmlMode
+    }
   ): Promise<ImportManyDocumentsResult>
 
   getVersionHistory(id: string): Promise<VersionSnapshot[]>
@@ -1109,7 +1112,10 @@ export function createDocumentsService(
     async importManyForProject(
       projectId: string,
       documents: ImportManyDocumentInput[],
-      options: { parseFailureMode?: ImportDocumentParseFailureMode } = {}
+      options: {
+        parseFailureMode?: ImportDocumentParseFailureMode
+        rawHtmlMode?: MarkdownRawHtmlMode
+      } = {}
     ): Promise<ImportManyDocumentsResult> {
       const parseFailureMode = options.parseFailureMode ?? 'fail'
 
@@ -1142,7 +1148,9 @@ export function createDocumentsService(
           continue
         }
 
-        const parseResult = markdownToProseMirrorDoc(item.markdown)
+        const parseResult = markdownToProseMirrorDoc(item.markdown, {
+          rawHtmlMode: options.rawHtmlMode,
+        })
         if (!parseResult.ok) {
           if (parseFailureMode === 'code_block') {
             const docJson = buildCodeBlockDoc(item.markdown)

@@ -5,6 +5,8 @@ node_modules
 out
 dist
 *.tgz
+target
+Cargo.lock
 
 # code coverage
 coverage

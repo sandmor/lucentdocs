@@ -7,14 +7,22 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun run --env-file=.env --filter './apps/api' dev",
+    "dev": "bun run --filter './packages/core' build && bun run --env-file=.env --filter './apps/api' dev",
     "build": "bun run --filter './apps/web' build",
     "serve": "NODE_ENV=production bun run --env-file=.env --filter './apps/api' start",
-    "lint": "eslint .",
+    "lint": "bun run lint:js && bun run lint:rust",
+    "lint:js": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "typecheck": "bun run --filter './apps/api' typecheck && bun run --filter './apps/web' typecheck && bun run --filter './packages/shared' typecheck",
+    "lint:rust": "cargo clippy --workspace --all-targets",
+    "format": "bun run format:js && bun run format:rust",
+    "format:js": "prettier --write .",
+    "format:rust": "cargo fmt --all",
+    "format:check": "bun run format:check:js && bun run format:check:rust",
+    "format:check:js": "prettier --check .",
+    "format:check:rust": "cargo fmt --all -- --check",
+    "typecheck": "bun run typecheck:js && bun run typecheck:rust",
+    "typecheck:js": "bun run --filter './apps/api' typecheck && bun run --filter './apps/web' typecheck && bun run --filter './packages/shared' typecheck",
+    "typecheck:rust": "cargo check --workspace",
     "test": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun run --filter './apps/api' --filter './packages/shared' test && LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun run --cwd apps/web test"
   },
   "devDependencies": {

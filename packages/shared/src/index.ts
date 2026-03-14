@@ -6,7 +6,6 @@ export { isValidId, authPasswordSchema } from './validators.js'
 export { schema } from './schema.js'
 export { parseContent, createDefaultContent } from './content.js'
 export {
-  markdownToProseMirrorDoc,
   proseMirrorDocToMarkdown,
   type MarkdownParseError,
   type MarkdownResult,

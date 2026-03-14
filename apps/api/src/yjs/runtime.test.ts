@@ -5,10 +5,7 @@ import { prosemirrorJSONToYDoc } from 'y-prosemirror'
 import { schema } from '@lucentdocs/shared'
 import { createYjsRuntime, type YjsRuntime } from './runtime.js'
 import { createSqliteAdapter, type SqliteAdapter } from '../infrastructure/sqlite/factory.js'
-import {
-  createDocumentsService,
-  type DocumentsService,
-} from '../core/services/documents.service.js'
+import type { DocumentsService } from '../core/services/documents.service.js'
 
 const makeDoc = (text: string) => ({
   type: 'doc',
@@ -35,7 +32,7 @@ describe('YjsRuntime', () => {
       { persistenceFlushIntervalMs: 1000, versionSnapshotIntervalMs: 0 }
     )
     yjsRuntime.initialize()
-    documentsService = createDocumentsService(adapter.repositories, adapter.transaction)
+    documentsService = adapter.services.documents
   })
 
   afterEach(() => {
@@ -121,7 +118,7 @@ describe('DocumentsService YJS operations', () => {
       { persistenceFlushIntervalMs: 1000, versionSnapshotIntervalMs: 0 }
     )
     yjsRuntime.initialize()
-    documentsService = createDocumentsService(adapter.repositories, adapter.transaction)
+    documentsService = adapter.services.documents
   })
 
   afterEach(() => {

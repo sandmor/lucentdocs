@@ -253,7 +253,7 @@ async function createProvider(): Promise<EmbeddingProvider> {
       let payload: unknown
       try {
         payload = JSON.parse(raw) as unknown
-      } catch (error) {
+      } catch {
         const contentType = response.headers.get('content-type') ?? 'unknown'
         throw new Error(
           `Embedding response was not valid JSON (content-type: ${contentType}): ${raw.slice(0, 400)}`

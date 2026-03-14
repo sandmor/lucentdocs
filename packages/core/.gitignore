@@ -1,0 +1,15 @@
+node_modules/
+npm/
+
+/target
+Cargo.lock
+*.node
+
+dist
+
+logs/
+*.log
+
+.env
+.env.test
+.DS_Store

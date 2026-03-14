@@ -31,7 +31,7 @@ import {
 import type { IndexingStrategy, IndexingStrategyScopeType } from '@lucentdocs/shared'
 import { Loader2 } from 'lucide-react'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
-import type { DeleteTarget, MarkdownImportHtmlMode, MoveTarget, RenameTarget } from './types'
+import type { DeleteTarget, MarkdownRawHtmlMode, MoveTarget, RenameTarget } from './types'
 
 interface BrowserDialogsProps {
   currentPath: string
@@ -85,8 +85,8 @@ interface BrowserDialogsProps {
   onImportHeadingLevelChange: (value: 1 | 2 | 3) => void
   importTargetChars: number
   onImportTargetCharsChange: (value: number) => void
-  importHtmlMode: MarkdownImportHtmlMode
-  onImportHtmlModeChange: (value: MarkdownImportHtmlMode) => void
+  importRawHtmlMode: MarkdownRawHtmlMode
+  onImportRawHtmlModeChange: (value: MarkdownRawHtmlMode) => void
   importIncludeContents: boolean
   onImportIncludeContentsChange: (value: boolean) => void
   importProgress: { total: number; imported: number; failed: number; isRunning: boolean }
@@ -146,8 +146,8 @@ export function BrowserDialogs({
   onImportHeadingLevelChange,
   importTargetChars,
   onImportTargetCharsChange,
-  importHtmlMode,
-  onImportHtmlModeChange,
+  importRawHtmlMode,
+  onImportRawHtmlModeChange,
   importIncludeContents,
   onImportIncludeContentsChange,
   importProgress,
@@ -207,8 +207,8 @@ export function BrowserDialogs({
             </div>
 
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Max characters</Label>
-              <div className="col-span-3">
+              <Label className="text-right">Target characters</Label>
+              <div className="col-span-3 space-y-1">
                 <Input
                   className="w-full"
                   inputMode="numeric"
@@ -219,37 +219,11 @@ export function BrowserDialogs({
                     onImportTargetCharsChange(Math.max(1, Math.floor(next)))
                   }}
                 />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">HTML tags</Label>
-              <div className="col-span-3">
-                <Select
-                  value={importHtmlMode}
-                  items={{
-                    convert_basic: 'Convert basic tags',
-                    preserve_blocks: 'Preserve structure',
-                    keep: 'Keep as raw HTML',
-                  }}
-                  onValueChange={(value: string | null) => {
-                    if (!value) return
-                    onImportHtmlModeChange(value as MarkdownImportHtmlMode)
-                  }}
-                >
-                  <SelectTrigger
-                    className="w-full"
-                    onClick={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  >
-                    <SelectValue placeholder="HTML handling" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="convert_basic">Convert basic tags</SelectItem>
-                    <SelectItem value="preserve_blocks">Preserve structure</SelectItem>
-                    <SelectItem value="keep">Keep as raw HTML</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="text-muted-foreground text-xs">
+                  {importSplitMode === 'size'
+                    ? "Used when splitting by file size; parts may exceed this target if a clean split point isn't available."
+                    : 'Used only as a fallback if a single heading section exceeds the per-document limit.'}
+                </div>
               </div>
             </div>
 
@@ -262,6 +236,24 @@ export function BrowserDialogs({
                   />
                   <span>Create table of contents doc</span>
                 </Label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4 mt-2">
+              <div className="col-start-2 col-span-3 space-y-1">
+                <Label className="flex items-center gap-3 font-normal cursor-pointer text-sm">
+                  <Switch
+                    checked={importRawHtmlMode === 'code_block'}
+                    onCheckedChange={(checked: boolean) =>
+                      onImportRawHtmlModeChange(checked ? 'code_block' : 'drop')
+                    }
+                  />
+                  <span>Preserve raw HTML as code</span>
+                </Label>
+                <div className="text-muted-foreground text-xs">
+                  When disabled, raw HTML tags are stripped and unsupported structure is not
+                  preserved.
+                </div>
               </div>
             </div>
 

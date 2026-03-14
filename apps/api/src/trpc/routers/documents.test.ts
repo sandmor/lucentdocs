@@ -290,7 +290,8 @@ describe('documentsRouter', () => {
 
     expect(typeof limits.docImportChars).toBe('number')
     expect(typeof limits.docImportBatchDocs).toBe('number')
-    expect(typeof limits.docImportBatchChars).toBe('number')
+    expect(typeof limits.transferMaxBytes).toBe('number')
+    expect(limits.transferMaxBytes).toBeGreaterThan(0)
   })
 
   test('importMany imports multiple docs and reports per-item failures', async () => {
@@ -387,7 +388,6 @@ describe('documentsRouter', () => {
       split: 'heading',
       headingLevel: 1,
       targetDocChars: 100,
-      htmlMode: 'convert_basic',
       includeContents: true,
     })
 

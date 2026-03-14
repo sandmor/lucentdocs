@@ -34,7 +34,7 @@ import type {
   DocumentSearchResultItem,
   DocumentBrowserProps,
   DocumentItem,
-  MarkdownImportHtmlMode,
+  MarkdownRawHtmlMode,
   DragData,
   DropData,
   MoveTarget,
@@ -44,13 +44,11 @@ import type {
 type ImportLimits = {
   docImportChars: number
   docImportBatchDocs: number
-  docImportBatchChars: number
+  transferMaxBytes: number
 }
 
-const DEFAULT_IMPORT_LIMITS: ImportLimits = {
-  docImportChars: 500_000,
-  docImportBatchDocs: 50,
-  docImportBatchChars: 5_000_000,
+function estimatePayloadBytes(payload: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(payload)).length
 }
 
 export function useDocumentBrowser({
@@ -80,7 +78,7 @@ export function useDocumentBrowser({
   const [importSplitMode, setImportSplitMode] = useState<'heading' | 'size'>('heading')
   const [importHeadingLevel, setImportHeadingLevel] = useState<1 | 2 | 3>(1)
   const [importTargetChars, setImportTargetChars] = useState<number>(150_000)
-  const [importHtmlMode, setImportHtmlMode] = useState<MarkdownImportHtmlMode>('convert_basic')
+  const [importRawHtmlMode, setImportRawHtmlMode] = useState<MarkdownRawHtmlMode>('code_block')
   const [importIncludeContents, setImportIncludeContents] = useState(true)
   const [importProgress, setImportProgress] = useState<{
     total: number
@@ -103,12 +101,11 @@ export function useDocumentBrowser({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
   const loadImportLimits = useCallback(async (): Promise<ImportLimits> => {
-    try {
-      const limits = await utils.documents.importLimits.fetch()
-      return limits ?? DEFAULT_IMPORT_LIMITS
-    } catch {
-      return DEFAULT_IMPORT_LIMITS
+    const limits = await utils.documents.importLimits.fetch()
+    if (!limits) {
+      throw new Error('Server did not return import limits.')
     }
+    return limits
   }, [utils.documents.importLimits])
 
   const { setNodeRef: setRootDropRef, isOver: isOverRoot } = useDroppable({
@@ -684,7 +681,16 @@ export function useDocumentBrowser({
 
       try {
         const content = await file.text()
-        const limits = await loadImportLimits()
+        let limits: ImportLimits
+        try {
+          limits = await loadImportLimits()
+        } catch (error) {
+          toast.error('Failed to load import limits', {
+            description: error instanceof Error ? error.message : 'Unknown error',
+          })
+          return
+        }
+
         const hardLimit = limits.docImportChars
         if (content.length <= hardLimit) {
           importMutation.mutate({ projectId, title: targetPath, markdown: content })
@@ -708,16 +714,17 @@ export function useDocumentBrowser({
       return
     }
     setImportDialogOpen(false)
-  }, [])
+  }, [importSplitMutation.isPending])
 
   const handleConfirmImportDraft = useCallback(async () => {
     if (!importDraft) return
 
-    const limits = await loadImportLimits()
-
-    if (importDraft.markdown.length > limits.docImportBatchChars) {
-      toast.error('Markdown file is too large to transfer in a single upload', {
-        description: `Current limit is ${limits.docImportBatchChars.toLocaleString()} characters`,
+    let limits: ImportLimits
+    try {
+      limits = await loadImportLimits()
+    } catch (error) {
+      toast.error('Failed to load import limits', {
+        description: error instanceof Error ? error.message : 'Unknown error',
       })
       return
     }
@@ -725,6 +732,28 @@ export function useDocumentBrowser({
     setImportProgress({ total: 0, imported: 0, failed: 0, isRunning: true })
 
     try {
+      const estimatedPayloadBytes = estimatePayloadBytes({
+        projectId,
+        fileName: importDraft.fileName,
+        markdown: importDraft.markdown,
+        destinationDirectory: currentPath,
+        split: importSplitMode,
+        headingLevel: importHeadingLevel,
+        targetDocChars: Math.min(importTargetChars, limits.docImportChars),
+        rawHtmlMode: importRawHtmlMode,
+        includeContents: importIncludeContents,
+      })
+      if (estimatedPayloadBytes > limits.transferMaxBytes) {
+        toast.error('Import payload is too large for a single request', {
+          description:
+            `Estimated payload is ${estimatedPayloadBytes.toLocaleString()} bytes, ` +
+            `limit is ${limits.transferMaxBytes.toLocaleString()} bytes. ` +
+            'Use a smaller file or split the import into smaller chunks.',
+        })
+        setImportProgress({ total: 0, imported: 0, failed: 0, isRunning: false })
+        return
+      }
+
       const result = await importSplitMutation.mutateAsync({
         projectId,
         fileName: importDraft.fileName,
@@ -733,7 +762,7 @@ export function useDocumentBrowser({
         split: importSplitMode,
         headingLevel: importHeadingLevel,
         targetDocChars: Math.min(importTargetChars, limits.docImportChars),
-        htmlMode: importHtmlMode,
+        rawHtmlMode: importRawHtmlMode,
         includeContents: importIncludeContents,
       })
 
@@ -772,11 +801,11 @@ export function useDocumentBrowser({
     currentPath,
     importDraft,
     importHeadingLevel,
-    importHtmlMode,
     importIncludeContents,
     importSplitMutation,
     importSplitMode,
     importTargetChars,
+    importRawHtmlMode,
     invalidateBrowserQueries,
     loadImportLimits,
     onOpenDocument,
@@ -970,8 +999,8 @@ export function useDocumentBrowser({
     setImportHeadingLevel,
     importTargetChars,
     setImportTargetChars,
-    importHtmlMode,
-    setImportHtmlMode,
+    importRawHtmlMode,
+    setImportRawHtmlMode,
     importIncludeContents,
     setImportIncludeContents,
     importProgress,

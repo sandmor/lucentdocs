@@ -16,6 +16,7 @@ import { setupYjsWebSocket } from './yjs/websocket-handler.js'
 import { setupTrpcWebSocket, type TrpcWebSocketRuntime } from './trpc/websocket.js'
 import { createContainer } from './app/container.js'
 import { requireSafeFetch } from './http/security.js'
+import { API_JSON_BODY_LIMIT } from './http/body-limits.js'
 import { injectUserMiddleware, readSessionTokenFromCookieHeader } from './http/auth.js'
 import type { Request } from 'express'
 import type { User } from './core/models/user.js'
@@ -302,9 +303,8 @@ function registerProcessHandlers(
 async function startServer() {
   const app = express()
   app.set('trust proxy', 1)
-  // Note: this JSON body limit caps bulk import throughput regardless of configured
-  // `LIMITS_DOC_IMPORT_BATCH_CHARS`. Keep those limits aligned.
-  app.use(express.json({ limit: '10mb' }))
+  // Note: this JSON body limit caps bulk import throughput.
+  app.use(express.json({ limit: API_JSON_BODY_LIMIT }))
   app.use(cookieParser())
 
   // Apply SSRF/CSRF Protection globally

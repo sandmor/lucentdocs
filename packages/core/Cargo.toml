@@ -1,0 +1,21 @@
+
+[package]
+edition = "2021"
+name = "core"
+publish = false
+version = "0.1.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ego-tree = "0.10"
+napi = "3"
+napi-derive = "3"
+pulldown-cmark = "0.13"
+scraper = "0.25"
+serde = "1"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"

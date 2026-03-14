@@ -114,4 +114,4 @@ export interface DocumentBrowserProps {
   onOpenDocument: (documentId: string, range?: { start: number; end: number }) => void
 }
 
-export type MarkdownImportHtmlMode = 'keep' | 'convert_basic' | 'preserve_blocks'
+export type MarkdownRawHtmlMode = 'drop' | 'code_block'

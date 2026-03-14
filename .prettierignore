@@ -1,5 +1,8 @@
 dist
 node_modules
+target
 *.lock
 *.lance
 data
+packages/core/index.js
+packages/core/index.d.ts
