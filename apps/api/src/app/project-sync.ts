@@ -1,5 +1,23 @@
 import { nanoid } from 'nanoid'
 
+export const DOCUMENTS_CHANGED_REASONS = [
+  'documents.create',
+  'documents.update',
+  'documents.move',
+  'documents.delete',
+  'documents.import-many',
+  'documents.import-split',
+  'documents.create-directory',
+  'documents.move-directory',
+  'documents.delete-directory',
+  'documents.set-default',
+] as const
+
+export type DocumentsChangedReason = (typeof DOCUMENTS_CHANGED_REASONS)[number]
+
+export const CHATS_CHANGED_REASONS = ['chats.create', 'chats.update', 'chats.delete'] as const
+export type ChatsChangedReason = (typeof CHATS_CHANGED_REASONS)[number]
+
 export type ProjectSyncPayload =
   | {
       audienceUserIds: string[]
@@ -25,15 +43,7 @@ export type ProjectSyncPayload =
       changedDocumentIds: string[]
       deletedDocumentIds: string[]
       defaultDocumentId: string | null
-      reason:
-        | 'documents.create'
-        | 'documents.update'
-        | 'documents.move'
-        | 'documents.delete'
-        | 'documents.create-directory'
-        | 'documents.move-directory'
-        | 'documents.delete-directory'
-        | 'documents.set-default'
+      reason: DocumentsChangedReason
     }
   | {
       projectId: string
@@ -41,7 +51,7 @@ export type ProjectSyncPayload =
       documentId: string
       changedChatIds: string[]
       deletedChatIds: string[]
-      reason: 'chats.create' | 'chats.update' | 'chats.delete'
+      reason: ChatsChangedReason
     }
 
 export type ProjectSyncEvent =
@@ -77,15 +87,7 @@ export type ProjectSyncEvent =
       changedDocumentIds: string[]
       deletedDocumentIds: string[]
       defaultDocumentId: string | null
-      reason:
-        | 'documents.create'
-        | 'documents.update'
-        | 'documents.move'
-        | 'documents.delete'
-        | 'documents.create-directory'
-        | 'documents.move-directory'
-        | 'documents.delete-directory'
-        | 'documents.set-default'
+      reason: DocumentsChangedReason
     }
   | {
       id: string
@@ -95,7 +97,7 @@ export type ProjectSyncEvent =
       documentId: string
       changedChatIds: string[]
       deletedChatIds: string[]
-      reason: 'chats.create' | 'chats.update' | 'chats.delete'
+      reason: ChatsChangedReason
     }
 
 type ProjectSyncListener = (event: ProjectSyncEvent) => void

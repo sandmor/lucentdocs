@@ -46,7 +46,7 @@ export function RowActionsMenu({
           </Button>
         }
       />
-      <DropdownMenuContent align="end" className="w-auto">
+      <DropdownMenuContent onClick={(e) => e.stopPropagation()} align="end" className="w-auto">
         {item.type === 'document' ? (
           <>
             <DropdownMenuItem onClick={() => onRenameDocument(item.id)}>

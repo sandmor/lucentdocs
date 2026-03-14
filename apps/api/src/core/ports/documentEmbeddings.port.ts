@@ -98,6 +98,7 @@ export interface ProjectDocumentEmbeddingSearchMatch {
 
 export interface DocumentEmbeddingsRepositoryPort {
   enqueueDocument(documentId: string, queuedAt: number, debounceUntil: number): Promise<void>
+  enqueueDocuments(documentIds: string[], queuedAt: number, debounceUntil: number): Promise<void>
   listQueuedDocuments(): Promise<DocumentEmbeddingJobEntity[]>
   getQueuedDocument(documentId: string): Promise<DocumentEmbeddingJobEntity | undefined>
   clearQueuedDocuments(documentIds: string[]): Promise<void>

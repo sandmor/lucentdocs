@@ -302,6 +302,8 @@ function registerProcessHandlers(
 async function startServer() {
   const app = express()
   app.set('trust proxy', 1)
+  // Note: this JSON body limit caps bulk import throughput regardless of configured
+  // `LIMITS_DOC_IMPORT_BATCH_CHARS`. Keep those limits aligned.
   app.use(express.json({ limit: '10mb' }))
   app.use(cookieParser())
 

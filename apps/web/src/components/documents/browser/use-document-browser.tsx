@@ -34,11 +34,24 @@ import type {
   DocumentSearchResultItem,
   DocumentBrowserProps,
   DocumentItem,
+  MarkdownImportHtmlMode,
   DragData,
   DropData,
   MoveTarget,
   RenameTarget,
 } from './types'
+
+type ImportLimits = {
+  docImportChars: number
+  docImportBatchDocs: number
+  docImportBatchChars: number
+}
+
+const DEFAULT_IMPORT_LIMITS: ImportLimits = {
+  docImportChars: 500_000,
+  docImportBatchDocs: 50,
+  docImportBatchChars: 5_000_000,
+}
 
 export function useDocumentBrowser({
   projectId,
@@ -60,7 +73,21 @@ export function useDocumentBrowser({
   const [moveDestination, setMoveDestination] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [settingsDocumentId, setSettingsDocumentId] = useState<string | null>(null)
-
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importDraft, setImportDraft] = useState<{ fileName: string; markdown: string } | null>(
+    null
+  )
+  const [importSplitMode, setImportSplitMode] = useState<'heading' | 'size'>('heading')
+  const [importHeadingLevel, setImportHeadingLevel] = useState<1 | 2 | 3>(1)
+  const [importTargetChars, setImportTargetChars] = useState<number>(150_000)
+  const [importHtmlMode, setImportHtmlMode] = useState<MarkdownImportHtmlMode>('convert_basic')
+  const [importIncludeContents, setImportIncludeContents] = useState(true)
+  const [importProgress, setImportProgress] = useState<{
+    total: number
+    imported: number
+    failed: number
+    isRunning: boolean
+  }>({ total: 0, imported: 0, failed: 0, isRunning: false })
   const prevSignatureRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -74,6 +101,15 @@ export function useDocumentBrowser({
 
   const utils = trpc.useUtils()
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+
+  const loadImportLimits = useCallback(async (): Promise<ImportLimits> => {
+    try {
+      const limits = await utils.documents.importLimits.fetch()
+      return limits ?? DEFAULT_IMPORT_LIMITS
+    } catch {
+      return DEFAULT_IMPORT_LIMITS
+    }
+  }, [utils.documents.importLimits])
 
   const { setNodeRef: setRootDropRef, isOver: isOverRoot } = useDroppable({
     id: 'drop:root',
@@ -290,6 +326,8 @@ export function useDocumentBrowser({
       toast.error('Failed to import document', { description: error.message })
     },
   })
+
+  const importSplitMutation = trpc.documents.importSplit.useMutation()
 
   const documentSettingsQuery = trpc.indexing.getDocument.useQuery(
     {
@@ -646,15 +684,104 @@ export function useDocumentBrowser({
 
       try {
         const content = await file.text()
-        importMutation.mutate({ projectId, title: targetPath, markdown: content })
+        const limits = await loadImportLimits()
+        const hardLimit = limits.docImportChars
+        if (content.length <= hardLimit) {
+          importMutation.mutate({ projectId, title: targetPath, markdown: content })
+          return
+        }
+
+        setImportDraft({ fileName, markdown: content })
+        setImportDialogOpen(true)
       } catch (error) {
         toast.error('Failed to read file', {
           description: error instanceof Error ? error.message : 'Unknown error',
         })
       }
     },
-    [currentPath, importMutation, projectId]
+    [currentPath, importMutation, loadImportLimits, projectId]
   )
+
+  const handleCancelImport = useCallback(() => {
+    if (importSplitMutation.isPending) {
+      toast.message('Import is running on the server and cannot be cancelled from the browser.')
+      return
+    }
+    setImportDialogOpen(false)
+  }, [])
+
+  const handleConfirmImportDraft = useCallback(async () => {
+    if (!importDraft) return
+
+    const limits = await loadImportLimits()
+
+    if (importDraft.markdown.length > limits.docImportBatchChars) {
+      toast.error('Markdown file is too large to transfer in a single upload', {
+        description: `Current limit is ${limits.docImportBatchChars.toLocaleString()} characters`,
+      })
+      return
+    }
+
+    setImportProgress({ total: 0, imported: 0, failed: 0, isRunning: true })
+
+    try {
+      const result = await importSplitMutation.mutateAsync({
+        projectId,
+        fileName: importDraft.fileName,
+        markdown: importDraft.markdown,
+        destinationDirectory: currentPath,
+        split: importSplitMode,
+        headingLevel: importHeadingLevel,
+        targetDocChars: Math.min(importTargetChars, limits.docImportChars),
+        htmlMode: importHtmlMode,
+        includeContents: importIncludeContents,
+      })
+
+      setImportProgress({
+        total: result.total,
+        imported: result.imported,
+        failed: result.failed,
+        isRunning: false,
+      })
+
+      if (result.firstImportedDocumentId) {
+        onOpenDocument(result.firstImportedDocumentId)
+      }
+
+      if (result.imported > 0) {
+        toast.success('Import complete', {
+          description:
+            result.failed > 0
+              ? `${result.imported} imported, ${result.failed} failed`
+              : `${result.imported} imported`,
+        })
+        invalidateBrowserQueries()
+        setImportDialogOpen(false)
+        setImportDraft(null)
+      } else {
+        toast.error('Import failed')
+      }
+    } catch (error) {
+      toast.error('Import failed', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      })
+    } finally {
+      setImportProgress((prev) => ({ ...prev, isRunning: false }))
+    }
+  }, [
+    currentPath,
+    importDraft,
+    importHeadingLevel,
+    importHtmlMode,
+    importIncludeContents,
+    importSplitMutation,
+    importSplitMode,
+    importTargetChars,
+    invalidateBrowserQueries,
+    loadImportLimits,
+    onOpenDocument,
+    projectId,
+  ])
 
   const handleRenameDirectory = useCallback((path: string) => {
     setRenameTarget({ type: 'directory', path })
@@ -834,6 +961,22 @@ export function useDocumentBrowser({
     goToCrumb,
     isBusy,
     handleImportDocument,
+    importDialogOpen,
+    setImportDialogOpen,
+    importDraftFileName: importDraft?.fileName ?? null,
+    importSplitMode,
+    setImportSplitMode,
+    importHeadingLevel,
+    setImportHeadingLevel,
+    importTargetChars,
+    setImportTargetChars,
+    importHtmlMode,
+    setImportHtmlMode,
+    importIncludeContents,
+    setImportIncludeContents,
+    importProgress,
+    confirmImportDraft: handleConfirmImportDraft,
+    cancelImportDraft: handleCancelImport,
     settingsDocumentId,
     settingsDocumentTitle,
     setSettingsDocumentId,
@@ -841,7 +984,8 @@ export function useDocumentBrowser({
     isLoadingDocumentSettings: documentSettingsQuery.isLoading,
     saveDocumentSettings: handleSaveDocumentSettings,
     isSavingDocumentSettings: updateDocumentSettingsMutation.isPending,
-    isImporting: importMutation.isPending,
+    isImporting:
+      importMutation.isPending || importSplitMutation.isPending || importProgress.isRunning,
     isCreatingDocument: createMutation.isPending,
     isCreatingDirectory: createDirectoryMutation.isPending,
     isRenaming: renameMutation.isPending || moveDirectoryMutation.isPending,

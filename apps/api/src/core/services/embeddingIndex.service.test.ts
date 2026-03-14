@@ -543,4 +543,88 @@ describe('EmbeddingIndexService', () => {
 
     adapter.connection.close()
   })
+
+  test('surfaces errors when the embedding provider returns non-JSON and keeps jobs queued', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-non-json')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
+
+    await adapter.services.aiSettings.initializeDefaults({
+      env: {
+        AI_BASE_URL: OPENROUTER_BASE_URL,
+        AI_MODEL: 'gpt-5',
+        AI_API_KEY: 'test-key',
+      },
+    })
+    configureEmbeddingProvider(adapter.services.aiSettings)
+
+    globalThis.fetch = (async (input) => {
+      const url = readFetchUrl(input)
+      if (url === `${OPENROUTER_BASE_URL}/embeddings`) {
+        return new Response('not json', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        })
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    }) as typeof fetch
+
+    const doc = await adapter.services.documents.create(
+      'notes.md',
+      JSON.stringify({
+        doc: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello embeddings' }] }],
+        },
+        aiDraft: null,
+      })
+    )
+
+    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
+
+    await expect(
+      adapter.services.embeddingIndex.flushDueQueue({ debounceMs: 0, batchMaxWaitMs: 5000 }, 1000)
+    ).rejects.toThrow('Embedding response was not valid JSON')
+
+    const job = await adapter.repositories.documentEmbeddings.getQueuedDocument(doc.id)
+    expect(job).toBeTruthy()
+    expect(job!.debounceUntil).toBe(1000)
+
+    adapter.connection.close()
+  })
+
+  test('EmbeddingRuntime backs off after repeated flush failures', async () => {
+    const { EmbeddingRuntime } = await import('../../embeddings/runtime.js')
+
+    const service = {
+      flushDueQueue: async () => {
+        throw new SyntaxError('Failed to parse JSON')
+      },
+    } as unknown as { flushDueQueue: () => Promise<unknown> }
+
+    const runtime = new EmbeddingRuntime(
+      service as any,
+      { debounceMs: 0, batchMaxWaitMs: 0 },
+      { errorBackoffBaseMs: 10, errorBackoffMaxMs: 10 }
+    )
+
+    const originalError = console.error
+    let errorCalls = 0
+    console.error = () => {
+      errorCalls += 1
+    }
+
+    try {
+      await runtime.tickOnce(0)
+      await runtime.tickOnce(1)
+      await runtime.tickOnce(9)
+      expect(errorCalls).toBe(1)
+
+      await runtime.tickOnce(10)
+      expect(errorCalls).toBe(2)
+    } finally {
+      console.error = originalError
+    }
+  })
 })

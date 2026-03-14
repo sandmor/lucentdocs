@@ -40,6 +40,10 @@ export interface EmbeddingIndexService {
     documentId: string,
     options?: { queuedAt?: number; debounceMs?: number }
   ): Promise<void>
+  enqueueDocuments(
+    documentIds: string[],
+    options?: { queuedAt?: number; debounceMs?: number }
+  ): Promise<void>
   deleteDocument(documentId: string): Promise<void>
   flushDueQueue(config: EmbeddingIndexRuntimeConfig, now?: number): Promise<EmbeddingFlushResult>
   getQueueStats(): Promise<DocumentEmbeddingQueueStats>
@@ -105,14 +109,38 @@ export function createEmbeddingIndexService(
 ): EmbeddingIndexService {
   let activeFlush: Promise<EmbeddingFlushResult> | null = null
 
+  const EMBED_BATCH_MAX_INPUTS = 128
+
+  const embedInBatches = async (
+    provider: { embed: (inputs: string[]) => Promise<Array<{ embedding: number[] }>> },
+    inputs: string[]
+  ): Promise<Array<{ embedding: number[] }>> => {
+    if (inputs.length === 0) return []
+    const result: Array<{ embedding: number[] }> = []
+    for (let i = 0; i < inputs.length; i += EMBED_BATCH_MAX_INPUTS) {
+      const chunk = inputs.slice(i, i + EMBED_BATCH_MAX_INPUTS)
+      const embeddings = await provider.embed(chunk)
+      result.push(...embeddings)
+    }
+    return result
+  }
+
   return {
     async enqueueDocument(documentId, options = {}): Promise<void> {
-      const document = await repos.documents.findById(documentId)
-      if (!document) return
+      await this.enqueueDocuments([documentId], options)
+    },
 
+    async enqueueDocuments(documentIds, options = {}): Promise<void> {
+      const uniqueIds = [...new Set(documentIds)].filter((id) => typeof id === 'string' && id)
+      if (uniqueIds.length === 0) return
+
+      const documents = await repos.documents.findByIds(uniqueIds)
+      if (documents.length === 0) return
+
+      const existingIds = documents.map((doc) => doc.id)
       const queuedAt = options.queuedAt ?? Date.now()
       const debounceMs = options.debounceMs ?? configOptions.getRuntimeConfig?.().debounceMs ?? 0
-      await repos.documentEmbeddings.enqueueDocument(documentId, queuedAt, queuedAt + debounceMs)
+      await repos.documentEmbeddings.enqueueDocuments(existingIds, queuedAt, queuedAt + debounceMs)
     },
 
     async deleteDocument(documentId: string): Promise<void> {
@@ -233,7 +261,7 @@ export function createEmbeddingIndexService(
           const chunkTexts = documentsToEmbed.flatMap((item) =>
             item.chunks.map((chunk) => chunk.text)
           )
-          const embeddings = chunkTexts.length > 0 ? await provider.embed(chunkTexts) : []
+          const embeddings = chunkTexts.length > 0 ? await embedInBatches(provider, chunkTexts) : []
 
           await transaction.run(async () => {
             let embeddingOffset = 0

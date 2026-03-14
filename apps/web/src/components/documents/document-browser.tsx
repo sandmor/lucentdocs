@@ -61,6 +61,22 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
         <BrowserDialogs
           currentPath={browser.currentPath}
           isBusy={browser.isBusy}
+          importDialogOpen={browser.importDialogOpen}
+          onImportDialogOpenChange={browser.setImportDialogOpen}
+          importDraftFileName={browser.importDraftFileName}
+          importSplitMode={browser.importSplitMode}
+          onImportSplitModeChange={browser.setImportSplitMode}
+          importHeadingLevel={browser.importHeadingLevel}
+          onImportHeadingLevelChange={browser.setImportHeadingLevel}
+          importTargetChars={browser.importTargetChars}
+          onImportTargetCharsChange={browser.setImportTargetChars}
+          importHtmlMode={browser.importHtmlMode}
+          onImportHtmlModeChange={browser.setImportHtmlMode}
+          importIncludeContents={browser.importIncludeContents}
+          onImportIncludeContentsChange={browser.setImportIncludeContents}
+          importProgress={browser.importProgress}
+          onConfirmImportDraft={browser.confirmImportDraft}
+          onCancelImportDraft={browser.cancelImportDraft}
           createDocumentOpen={browser.createDocumentOpen}
           onCreateDocumentOpenChange={browser.setCreateDocumentOpen}
           newDocumentName={browser.newDocumentName}

@@ -35,6 +35,8 @@ export interface PersistedAppConfig {
   maxPromptSystemChars: number
   maxPromptUserChars: number
   maxDocImportChars: number
+  maxDocImportBatchDocs: number
+  maxDocImportBatchChars: number
   maxDocExportChars: number
   maxPromptExcerptChars: number
 }
@@ -284,6 +286,22 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     min: 1,
   },
   {
+    key: 'maxDocImportBatchDocs',
+    envVar: 'LIMITS_DOC_IMPORT_BATCH_DOCS',
+    kind: 'int',
+    defaultValue: 50,
+    allowEmptyString: false,
+    min: 1,
+  },
+  {
+    key: 'maxDocImportBatchChars',
+    envVar: 'LIMITS_DOC_IMPORT_BATCH_CHARS',
+    kind: 'int',
+    defaultValue: 5_000_000,
+    allowEmptyString: false,
+    min: 1,
+  },
+  {
     key: 'maxDocExportChars',
     envVar: 'LIMITS_DOC_EXPORT_CHARS',
     kind: 'int',
@@ -344,6 +362,8 @@ export const EDITABLE_CONFIG_KEYS = [
   'maxPromptSystemChars',
   'maxPromptUserChars',
   'maxDocImportChars',
+  'maxDocImportBatchDocs',
+  'maxDocImportBatchChars',
   'maxDocExportChars',
   'maxPromptExcerptChars',
 ] as const satisfies ReadonlyArray<PersistedConfigKey>
@@ -360,6 +380,8 @@ export const LIMITS_CONFIG_KEYS = [
   'maxPromptSystemChars',
   'maxPromptUserChars',
   'maxDocImportChars',
+  'maxDocImportBatchDocs',
+  'maxDocImportBatchChars',
   'maxDocExportChars',
   'maxPromptExcerptChars',
 ] as const satisfies ReadonlyArray<PersistedConfigKey>
@@ -385,6 +407,8 @@ export interface LimitsConfig {
   promptSystemChars: number
   promptUserChars: number
   docImportChars: number
+  docImportBatchDocs: number
+  docImportBatchChars: number
   docExportChars: number
   promptExcerptChars: number
 }
@@ -417,6 +441,8 @@ const limitsPromptDescCharsField = CONFIG_FIELD_BY_KEY.maxPromptDescChars
 const limitsPromptSystemCharsField = CONFIG_FIELD_BY_KEY.maxPromptSystemChars
 const limitsPromptUserCharsField = CONFIG_FIELD_BY_KEY.maxPromptUserChars
 const limitsDocImportCharsField = CONFIG_FIELD_BY_KEY.maxDocImportChars
+const limitsDocImportBatchDocsField = CONFIG_FIELD_BY_KEY.maxDocImportBatchDocs
+const limitsDocImportBatchCharsField = CONFIG_FIELD_BY_KEY.maxDocImportBatchChars
 const limitsDocExportCharsField = CONFIG_FIELD_BY_KEY.maxDocExportChars
 const limitsPromptExcerptCharsField = CONFIG_FIELD_BY_KEY.maxPromptExcerptChars
 
@@ -530,6 +556,14 @@ export const editableConfigSchema = z
       .number()
       .int()
       .min(limitsDocImportCharsField.min ?? 1),
+    maxDocImportBatchDocs: z
+      .number()
+      .int()
+      .min(limitsDocImportBatchDocsField.min ?? 1),
+    maxDocImportBatchChars: z
+      .number()
+      .int()
+      .min(limitsDocImportBatchCharsField.min ?? 1),
     maxDocExportChars: z
       .number()
       .int()

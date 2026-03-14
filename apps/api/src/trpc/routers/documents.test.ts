@@ -4,6 +4,8 @@ import type { AppContext } from '../index.js'
 import { documentsRouter } from './documents.js'
 import { createTestAdapter, type TestAdapter } from '../../testing/factory.js'
 import { configureEmbeddingProvider, resetEmbeddingClient } from '../../embeddings/provider.js'
+import { projectSyncBus } from '../project-sync.js'
+import { projectSyncEventSchema } from './sync.js'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 
@@ -279,5 +281,125 @@ describe('documentsRouter', () => {
 
     expect(result.id).toBe(document.id)
     expect(result.title).toBe('shared.md')
+  })
+
+  test('importLimits exposes document import limits to authenticated users', async () => {
+    const adapter = createTestAdapter()
+    const caller = documentsRouter.createCaller(createCallerContext({ adapter }))
+    const limits = await caller.importLimits()
+
+    expect(typeof limits.docImportChars).toBe('number')
+    expect(typeof limits.docImportBatchDocs).toBe('number')
+    expect(typeof limits.docImportBatchChars).toBe('number')
+  })
+
+  test('importMany imports multiple docs and reports per-item failures', async () => {
+    const adapter = createTestAdapter()
+    const user = LOCAL_DEFAULT_USER
+    const project = await adapter.services.projects.create('Import', { ownerUserId: user.id })
+
+    const caller = documentsRouter.createCaller(createCallerContext({ user, adapter }))
+    const result = await caller.importMany({
+      projectId: project.id,
+      documents: [
+        { title: 'good.md', markdown: '# Good\\n\\nHello' },
+        { title: 'bad/__dir__/nope.md', markdown: '# Bad\\n\\nNope' },
+      ],
+      parseFailureMode: 'fail',
+    })
+
+    expect(result.imported).toHaveLength(1)
+    expect(result.failed).toHaveLength(1)
+
+    const listed = await adapter.services.documents.listForProject(project.id)
+    const titles = listed.map((d) => d.title)
+    expect(titles).toContain('good.md')
+  })
+
+  test('importMany resolves title collisions within the same batch', async () => {
+    const adapter = createTestAdapter()
+    const user = LOCAL_DEFAULT_USER
+    const project = await adapter.services.projects.create('Import', { ownerUserId: user.id })
+
+    const caller = documentsRouter.createCaller(createCallerContext({ user, adapter }))
+    const result = await caller.importMany({
+      projectId: project.id,
+      documents: [
+        { title: 'same.md', markdown: '# One' },
+        { title: 'same.md', markdown: '# Two' },
+      ],
+      parseFailureMode: 'fail',
+    })
+
+    expect(result.imported).toHaveLength(2)
+    const importedTitles = result.imported.map((d) => d.title).sort()
+    expect(importedTitles[0]).toBe('same-1.md')
+    expect(importedTitles[1]).toBe('same.md')
+  })
+
+  test('importMany publishes sync event parseable by sync router', async () => {
+    const adapter = createTestAdapter()
+    const user = LOCAL_DEFAULT_USER
+    const project = await adapter.services.projects.create('Import', { ownerUserId: user.id })
+
+    const events: unknown[] = []
+    const unsubscribe = projectSyncBus.subscribe((event) => {
+      events.push(event)
+    })
+
+    try {
+      const caller = documentsRouter.createCaller(createCallerContext({ user, adapter }))
+      const result = await caller.importMany({
+        projectId: project.id,
+        documents: [{ title: 'good.md', markdown: '# Good\\n\\nHello' }],
+        parseFailureMode: 'fail',
+      })
+
+      expect(result.imported).toHaveLength(1)
+    } finally {
+      unsubscribe()
+    }
+
+    const docChanged = events.find(
+      (e) => (e as { type?: string }).type === 'documents.changed'
+    ) as unknown
+    expect(docChanged).toBeTruthy()
+    const parsed = projectSyncEventSchema.parse(docChanged)
+    expect(parsed.type).toBe('documents.changed')
+    if (parsed.type === 'documents.changed') {
+      expect(parsed.reason).toBe('documents.import-many')
+    }
+  })
+
+  test('importSplit plans and imports multiple parts on the server', async () => {
+    const adapter = createTestAdapter()
+    const user = LOCAL_DEFAULT_USER
+    const project = await adapter.services.projects.create('Split Import', { ownerUserId: user.id })
+
+    const caller = documentsRouter.createCaller(createCallerContext({ user, adapter }))
+    const markdown = ['# Part One', '', 'Body one', '', '# Part Two', '', 'Body two'].join('\n')
+
+    const result = await caller.importSplit({
+      projectId: project.id,
+      fileName: 'book.md',
+      markdown,
+      destinationDirectory: '',
+      split: 'heading',
+      headingLevel: 1,
+      targetDocChars: 100,
+      htmlMode: 'convert_basic',
+      includeContents: true,
+    })
+
+    expect(result.total).toBe(3)
+    expect(result.imported).toBe(3)
+    expect(result.failed).toBe(0)
+    expect(result.firstImportedDocumentId).toBeTruthy()
+
+    const docs = await adapter.services.documents.listForProject(project.id)
+    const titles = docs.map((doc) => doc.title)
+    expect(titles.some((title) => title.endsWith('/00-contents.md'))).toBe(true)
+    expect(titles.some((title) => title.endsWith('/1-part-one.md'))).toBe(true)
+    expect(titles.some((title) => title.endsWith('/2-part-two.md'))).toBe(true)
   })
 })

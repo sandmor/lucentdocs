@@ -19,10 +19,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type { IndexingStrategy, IndexingStrategyScopeType } from '@lucentdocs/shared'
 import { Loader2 } from 'lucide-react'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
-import type { DeleteTarget, MoveTarget, RenameTarget } from './types'
+import type { DeleteTarget, MarkdownImportHtmlMode, MoveTarget, RenameTarget } from './types'
 
 interface BrowserDialogsProps {
   currentPath: string
@@ -66,6 +75,23 @@ interface BrowserDialogsProps {
   onSaveDocumentSettings: (strategy: IndexingStrategy | null) => void
   isLoadingDocumentSettings: boolean
   isSavingDocumentSettings: boolean
+
+  importDialogOpen: boolean
+  onImportDialogOpenChange: (open: boolean) => void
+  importDraftFileName: string | null
+  importSplitMode: 'heading' | 'size'
+  onImportSplitModeChange: (value: 'heading' | 'size') => void
+  importHeadingLevel: 1 | 2 | 3
+  onImportHeadingLevelChange: (value: 1 | 2 | 3) => void
+  importTargetChars: number
+  onImportTargetCharsChange: (value: number) => void
+  importHtmlMode: MarkdownImportHtmlMode
+  onImportHtmlModeChange: (value: MarkdownImportHtmlMode) => void
+  importIncludeContents: boolean
+  onImportIncludeContentsChange: (value: boolean) => void
+  importProgress: { total: number; imported: number; failed: number; isRunning: boolean }
+  onConfirmImportDraft: () => void
+  onCancelImportDraft: () => void
 }
 
 export function BrowserDialogs({
@@ -110,9 +136,173 @@ export function BrowserDialogs({
   onSaveDocumentSettings,
   isLoadingDocumentSettings,
   isSavingDocumentSettings,
+
+  importDialogOpen,
+  onImportDialogOpenChange,
+  importDraftFileName,
+  importSplitMode,
+  onImportSplitModeChange,
+  importHeadingLevel,
+  onImportHeadingLevelChange,
+  importTargetChars,
+  onImportTargetCharsChange,
+  importHtmlMode,
+  onImportHtmlModeChange,
+  importIncludeContents,
+  onImportIncludeContentsChange,
+  importProgress,
+  onConfirmImportDraft,
+  onCancelImportDraft,
 }: BrowserDialogsProps) {
   return (
     <>
+      <Dialog open={importDialogOpen} onOpenChange={onImportDialogOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import large markdown file</DialogTitle>
+            <DialogDescription>
+              {importDraftFileName
+                ? `${importDraftFileName} will be split into multiple documents.`
+                : 'This file will be split into multiple documents.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4 px-1">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Split mode</Label>
+              <div className="col-span-3">
+                <Select
+                  value={importSplitMode === 'size' ? 'size' : String(importHeadingLevel)}
+                  items={{
+                    '1': 'By H1 (#)',
+                    '2': 'By H2 (##)',
+                    '3': 'By H3 (###)',
+                    size: 'By File Size',
+                  }}
+                  onValueChange={(value: string | null) => {
+                    if (!value) return
+                    if (value === 'size') {
+                      onImportSplitModeChange('size')
+                      return
+                    }
+                    onImportSplitModeChange('heading')
+                    onImportHeadingLevelChange(Number(value) as 1 | 2 | 3)
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-full"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <SelectValue placeholder="Split mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">By H1 (#)</SelectItem>
+                    <SelectItem value="2">By H2 (##)</SelectItem>
+                    <SelectItem value="3">By H3 (###)</SelectItem>
+                    <SelectItem value="size">By File Size</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Max characters</Label>
+              <div className="col-span-3">
+                <Input
+                  className="w-full"
+                  inputMode="numeric"
+                  value={String(importTargetChars)}
+                  onChange={(event) => {
+                    const next = Number(event.target.value)
+                    if (!Number.isFinite(next)) return
+                    onImportTargetCharsChange(Math.max(1, Math.floor(next)))
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">HTML tags</Label>
+              <div className="col-span-3">
+                <Select
+                  value={importHtmlMode}
+                  items={{
+                    convert_basic: 'Convert basic tags',
+                    preserve_blocks: 'Preserve structure',
+                    keep: 'Keep as raw HTML',
+                  }}
+                  onValueChange={(value: string | null) => {
+                    if (!value) return
+                    onImportHtmlModeChange(value as MarkdownImportHtmlMode)
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-full"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <SelectValue placeholder="HTML handling" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="convert_basic">Convert basic tags</SelectItem>
+                    <SelectItem value="preserve_blocks">Preserve structure</SelectItem>
+                    <SelectItem value="keep">Keep as raw HTML</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4 mt-2">
+              <div className="col-start-2 col-span-3">
+                <Label className="flex items-center gap-3 font-normal cursor-pointer text-sm">
+                  <Switch
+                    checked={importIncludeContents}
+                    onCheckedChange={(checked: boolean) => onImportIncludeContentsChange(checked)}
+                  />
+                  <span>Create table of contents doc</span>
+                </Label>
+              </div>
+            </div>
+
+            {importProgress.total > 0 ? (
+              <div className="text-muted-foreground text-sm">
+                {importProgress.isRunning ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="size-4 animate-spin" />
+                    Importing {importProgress.imported}/{importProgress.total}
+                    {importProgress.failed > 0 ? ` (${importProgress.failed} failed)` : ''}
+                  </span>
+                ) : (
+                  <span>
+                    Imported {importProgress.imported}/{importProgress.total}
+                    {importProgress.failed > 0 ? ` (${importProgress.failed} failed)` : ''}
+                  </span>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (importProgress.isRunning) {
+                  onCancelImportDraft()
+                } else {
+                  onImportDialogOpenChange(false)
+                }
+              }}
+            >
+              {importProgress.isRunning ? 'Stop' : 'Cancel'}
+            </Button>
+            <Button onClick={onConfirmImportDraft} disabled={isBusy || importProgress.isRunning}>
+              Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={createDocumentOpen} onOpenChange={onCreateDocumentOpenChange}>
         <DialogContent>
           <DialogHeader>

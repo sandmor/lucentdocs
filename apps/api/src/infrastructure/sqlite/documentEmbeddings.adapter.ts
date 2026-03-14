@@ -290,6 +290,37 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
     )
   }
 
+  async enqueueDocuments(
+    documentIds: string[],
+    queuedAt: number,
+    debounceUntil: number
+  ): Promise<void> {
+    if (documentIds.length === 0) return
+
+    const values = documentIds.map(() => '(?, ?, ?, ?)').join(', ')
+    const args: Array<string | number> = []
+    for (const documentId of documentIds) {
+      args.push(documentId, queuedAt, queuedAt, debounceUntil)
+    }
+
+    this.connection.run(
+      `INSERT INTO document_embedding_jobs (documentId, firstQueuedAt, lastQueuedAt, debounceUntil)
+       VALUES ${values}
+       ON CONFLICT(documentId) DO UPDATE SET
+         lastQueuedAt = CASE
+           WHEN excluded.lastQueuedAt > document_embedding_jobs.lastQueuedAt
+             THEN excluded.lastQueuedAt
+           ELSE document_embedding_jobs.lastQueuedAt + 1
+         END,
+         debounceUntil = CASE
+           WHEN excluded.lastQueuedAt > document_embedding_jobs.lastQueuedAt
+             THEN excluded.debounceUntil
+           ELSE (document_embedding_jobs.lastQueuedAt + 1) + (excluded.debounceUntil - excluded.lastQueuedAt)
+         END`,
+      args
+    )
+  }
+
   async listQueuedDocuments(): Promise<DocumentEmbeddingJobEntity[]> {
     return this.connection.all<EmbeddingJobRow>(
       `SELECT documentId, firstQueuedAt, lastQueuedAt, debounceUntil

@@ -12,16 +12,12 @@ const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invali
 
 async function enqueueProjectDocuments(ctx: AppContext, projectId: string): Promise<void> {
   const documents = await ctx.services.documents.listForProject(projectId)
-  await Promise.all(
-    documents.map((document) => ctx.services.embeddingIndex.enqueueDocument(document.id))
-  )
+  await ctx.services.embeddingIndex.enqueueDocuments(documents.map((document) => document.id))
 }
 
 async function enqueueAllDocuments(ctx: AppContext): Promise<void> {
   const documentIds = await ctx.services.documents.listAllIds()
-  await Promise.all(
-    documentIds.map((documentId) => ctx.services.embeddingIndex.enqueueDocument(documentId))
-  )
+  await ctx.services.embeddingIndex.enqueueDocuments(documentIds)
 }
 
 async function enqueueProjectsOwnedByUser(ctx: AppContext, userId: string): Promise<void> {

@@ -62,6 +62,7 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
     projects: createProjectsService(repositories, transaction),
     documents: createDocumentsService(repositories, transaction, aiSettings, {
       onDocumentContentStored: (documentId) => embeddingIndex.enqueueDocument(documentId),
+      onDocumentsContentStored: (documentIds) => embeddingIndex.enqueueDocuments(documentIds),
       onDocumentDeleted: (documentId) => embeddingIndex.deleteDocument(documentId),
     }),
     chats: createChatsService(repositories),

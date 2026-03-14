@@ -126,7 +126,12 @@ export const LIMIT_FIELD_ROWS = [
     columnsClassName: 'sm:grid-cols-2',
   },
   {
-    keys: ['maxDocImportChars', 'maxDocExportChars'],
+    keys: [
+      'maxDocImportChars',
+      'maxDocImportBatchDocs',
+      'maxDocImportBatchChars',
+      'maxDocExportChars',
+    ],
     columnsClassName: 'sm:grid-cols-2',
   },
   {
@@ -273,6 +278,17 @@ export const VISIBLE_FIELD_META: Record<
     id: 'max-doc-import',
     label: 'Doc import chars',
     description: 'Max characters for document import.',
+  },
+  maxDocImportBatchDocs: {
+    id: 'max-doc-import-batch-docs',
+    label: 'Doc import batch docs',
+    description: 'Max documents per batch import request.',
+  },
+  maxDocImportBatchChars: {
+    id: 'max-doc-import-batch-chars',
+    label: 'Doc import batch chars',
+    description:
+      'Max total characters per batch import request. Keep this below the API JSON body size limit (10mb by default).',
   },
   maxDocExportChars: {
     id: 'max-doc-export',

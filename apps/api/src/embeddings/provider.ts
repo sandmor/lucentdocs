@@ -245,7 +245,20 @@ async function createProvider(): Promise<EmbeddingProvider> {
         )
       }
 
-      const payload = (await response.json()) as unknown
+      const raw = await response.text().catch(() => '')
+      if (!raw) {
+        throw new Error('Embedding response body was empty.')
+      }
+
+      let payload: unknown
+      try {
+        payload = JSON.parse(raw) as unknown
+      } catch (error) {
+        const contentType = response.headers.get('content-type') ?? 'unknown'
+        throw new Error(
+          `Embedding response was not valid JSON (content-type: ${contentType}): ${raw.slice(0, 400)}`
+        )
+      }
       const embeddings = extractEmbeddingArray(payload)
       if (embeddings.length !== inputs.length) {
         throw new Error(

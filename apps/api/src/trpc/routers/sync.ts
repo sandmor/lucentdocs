@@ -3,6 +3,7 @@ import { isValidId } from '@lucentdocs/shared'
 import { protectedProcedure, router } from '../index.js'
 import { projectSyncBus } from '../project-sync.js'
 import type { ProjectSyncEvent } from '../project-sync.js'
+import { CHATS_CHANGED_REASONS, DOCUMENTS_CHANGED_REASONS } from '../project-sync.js'
 import { observable } from '@trpc/server/observable'
 import { assertProjectAccess, subscribeToProjectAccessRevocation } from '../access.js'
 
@@ -42,16 +43,7 @@ const documentsChangedEventSchema = eventBaseSchema.extend({
   changedDocumentIds: z.array(idSchema),
   deletedDocumentIds: z.array(idSchema),
   defaultDocumentId: idSchema.nullable(),
-  reason: z.enum([
-    'documents.create',
-    'documents.update',
-    'documents.move',
-    'documents.delete',
-    'documents.create-directory',
-    'documents.move-directory',
-    'documents.delete-directory',
-    'documents.set-default',
-  ]),
+  reason: z.enum(DOCUMENTS_CHANGED_REASONS),
 })
 
 const chatsChangedEventSchema = eventBaseSchema.extend({
@@ -59,10 +51,10 @@ const chatsChangedEventSchema = eventBaseSchema.extend({
   documentId: idSchema,
   changedChatIds: z.array(idSchema),
   deletedChatIds: z.array(idSchema),
-  reason: z.enum(['chats.create', 'chats.update', 'chats.delete']),
+  reason: z.enum(CHATS_CHANGED_REASONS),
 })
 
-const projectSyncEventSchema = z.discriminatedUnion('type', [
+export const projectSyncEventSchema = z.discriminatedUnion('type', [
   projectCreatedEventSchema,
   projectUpdatedEventSchema,
   projectDeletedEventSchema,
