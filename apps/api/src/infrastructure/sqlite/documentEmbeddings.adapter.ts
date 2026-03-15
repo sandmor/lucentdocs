@@ -13,10 +13,12 @@ import { indexingStrategySchema } from '@lucentdocs/shared'
 import { normalizeModelSourceType, normalizeBaseURL } from '../../core/ai/provider-types.js'
 import type { SqliteConnection } from './connection.js'
 import { fromJsonField, toJsonField } from './utils.js'
+import type { JobQueuePort } from '../../core/ports/jobQueue.port.js'
+import { EMBEDDING_REINDEX_JOB_TYPE } from '../../core/jobs/job-types.js'
 
 const MAX_EMBEDDING_DIMENSIONS = 8192
 
-interface EmbeddingJobRow {
+interface EmbeddingQueuePayload {
   documentId: string
   firstQueuedAt: number
   lastQueuedAt: number
@@ -44,12 +46,6 @@ interface EmbeddingRow {
   contentHash: string
   createdAt: number
   updatedAt: number
-}
-
-interface QueueStatsRow {
-  totalJobs: number
-  oldestQueuedAt: number | null
-  nextDebounceUntil: number | null
 }
 
 interface SearchMatchRow {
@@ -196,7 +192,10 @@ function toEmbeddingEntity(row: EmbeddingRow): DocumentEmbeddingEntity {
 }
 
 export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositoryPort {
-  constructor(private connection: SqliteConnection) {}
+  constructor(
+    private connection: SqliteConnection,
+    private queue: JobQueuePort
+  ) {}
 
   /**
    * Executes a vector search against stored document embedding rows after the
@@ -272,22 +271,35 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
     queuedAt: number,
     debounceUntil: number
   ): Promise<void> {
-    this.connection.run(
-      `INSERT INTO document_embedding_jobs (documentId, firstQueuedAt, lastQueuedAt, debounceUntil)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(documentId) DO UPDATE SET
-         lastQueuedAt = CASE
-           WHEN excluded.lastQueuedAt > document_embedding_jobs.lastQueuedAt
-             THEN excluded.lastQueuedAt
-           ELSE document_embedding_jobs.lastQueuedAt + 1
-         END,
-         debounceUntil = CASE
-           WHEN excluded.lastQueuedAt > document_embedding_jobs.lastQueuedAt
-             THEN excluded.debounceUntil
-           ELSE (document_embedding_jobs.lastQueuedAt + 1) + (excluded.debounceUntil - excluded.lastQueuedAt)
-         END`,
-      [documentId, queuedAt, queuedAt, debounceUntil]
+    const existing = await this.queue.getByTypeAndDedupeKey<EmbeddingQueuePayload>(
+      EMBEDDING_REINDEX_JOB_TYPE,
+      documentId
     )
+
+    const nextPayload: EmbeddingQueuePayload = existing
+      ? {
+          documentId,
+          firstQueuedAt: existing.payload.firstQueuedAt,
+          lastQueuedAt:
+            queuedAt > existing.payload.lastQueuedAt ? queuedAt : existing.payload.lastQueuedAt + 1,
+          debounceUntil:
+            queuedAt > existing.payload.lastQueuedAt
+              ? debounceUntil
+              : existing.payload.lastQueuedAt + 1 + (debounceUntil - queuedAt),
+        }
+      : {
+          documentId,
+          firstQueuedAt: queuedAt,
+          lastQueuedAt: queuedAt,
+          debounceUntil,
+        }
+
+    await this.queue.upsertUnique({
+      type: EMBEDDING_REINDEX_JOB_TYPE,
+      dedupeKey: documentId,
+      payload: nextPayload,
+      runAt: nextPayload.debounceUntil,
+    })
   }
 
   async enqueueDocuments(
@@ -297,71 +309,73 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
   ): Promise<void> {
     if (documentIds.length === 0) return
 
-    const values = documentIds.map(() => '(?, ?, ?, ?)').join(', ')
-    const args: Array<string | number> = []
-    for (const documentId of documentIds) {
-      args.push(documentId, queuedAt, queuedAt, debounceUntil)
-    }
-
-    this.connection.run(
-      `INSERT INTO document_embedding_jobs (documentId, firstQueuedAt, lastQueuedAt, debounceUntil)
-       VALUES ${values}
-       ON CONFLICT(documentId) DO UPDATE SET
-         lastQueuedAt = CASE
-           WHEN excluded.lastQueuedAt > document_embedding_jobs.lastQueuedAt
-             THEN excluded.lastQueuedAt
-           ELSE document_embedding_jobs.lastQueuedAt + 1
-         END,
-         debounceUntil = CASE
-           WHEN excluded.lastQueuedAt > document_embedding_jobs.lastQueuedAt
-             THEN excluded.debounceUntil
-           ELSE (document_embedding_jobs.lastQueuedAt + 1) + (excluded.debounceUntil - excluded.lastQueuedAt)
-         END`,
-      args
+    const existingJobs = await this.queue.getByTypeAndDedupeKeys<EmbeddingQueuePayload>(
+      EMBEDDING_REINDEX_JOB_TYPE,
+      documentIds
     )
+    const existingById = new Map(existingJobs.map((job) => [job.payload.documentId, job.payload]))
+
+    for (const documentId of documentIds) {
+      const existing = existingById.get(documentId)
+
+      const nextPayload: EmbeddingQueuePayload = existing
+        ? {
+            documentId,
+            firstQueuedAt: existing.firstQueuedAt,
+            lastQueuedAt: queuedAt > existing.lastQueuedAt ? queuedAt : existing.lastQueuedAt + 1,
+            debounceUntil:
+              queuedAt > existing.lastQueuedAt
+                ? debounceUntil
+                : existing.lastQueuedAt + 1 + (debounceUntil - queuedAt),
+          }
+        : {
+            documentId,
+            firstQueuedAt: queuedAt,
+            lastQueuedAt: queuedAt,
+            debounceUntil,
+          }
+
+      await this.queue.upsertUnique({
+        type: EMBEDDING_REINDEX_JOB_TYPE,
+        dedupeKey: documentId,
+        payload: nextPayload,
+        runAt: nextPayload.debounceUntil,
+      })
+    }
   }
 
   async listQueuedDocuments(): Promise<DocumentEmbeddingJobEntity[]> {
-    return this.connection.all<EmbeddingJobRow>(
-      `SELECT documentId, firstQueuedAt, lastQueuedAt, debounceUntil
-       FROM document_embedding_jobs
-       ORDER BY firstQueuedAt ASC, debounceUntil ASC`,
-      []
+    const jobs = await this.queue.listQueuedByType<EmbeddingQueuePayload>(
+      EMBEDDING_REINDEX_JOB_TYPE
     )
+    return jobs
+      .map((job) => job.payload)
+      .sort((left, right) =>
+        left.firstQueuedAt === right.firstQueuedAt
+          ? left.debounceUntil - right.debounceUntil
+          : left.firstQueuedAt - right.firstQueuedAt
+      )
   }
 
   async getQueuedDocument(documentId: string): Promise<DocumentEmbeddingJobEntity | undefined> {
-    return this.connection.get<EmbeddingJobRow>(
-      `SELECT documentId, firstQueuedAt, lastQueuedAt, debounceUntil
-       FROM document_embedding_jobs
-       WHERE documentId = ?`,
-      [documentId]
+    const job = await this.queue.getByTypeAndDedupeKey<EmbeddingQueuePayload>(
+      EMBEDDING_REINDEX_JOB_TYPE,
+      documentId
     )
+    return job?.payload
   }
 
   async clearQueuedDocuments(documentIds: string[]): Promise<void> {
-    if (documentIds.length === 0) return
-    const placeholders = documentIds.map(() => '?').join(', ')
-    this.connection.run(
-      `DELETE FROM document_embedding_jobs WHERE documentId IN (${placeholders})`,
-      documentIds
-    )
+    await this.queue.deleteQueuedByTypeAndDedupeKeys(EMBEDDING_REINDEX_JOB_TYPE, documentIds)
   }
 
   async getQueueStats(): Promise<DocumentEmbeddingQueueStats> {
-    const row = this.connection.get<QueueStatsRow>(
-      `SELECT
-         COUNT(*) AS totalJobs,
-         MIN(firstQueuedAt) AS oldestQueuedAt,
-         MIN(debounceUntil) AS nextDebounceUntil
-       FROM document_embedding_jobs`,
-      []
-    )
+    const stats = await this.queue.getTypeStats(EMBEDDING_REINDEX_JOB_TYPE)
 
     return {
-      totalJobs: row?.totalJobs ?? 0,
-      oldestQueuedAt: row?.oldestQueuedAt ?? null,
-      nextDebounceUntil: row?.nextDebounceUntil ?? null,
+      totalJobs: stats.totalQueued,
+      oldestQueuedAt: stats.oldestQueuedAt,
+      nextDebounceUntil: stats.nextAvailableAt,
     }
   }
 
@@ -578,8 +592,9 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
         ])
       }
       this.connection.run('DELETE FROM document_embeddings WHERE documentId = ?', [documentId])
-      this.connection.run('DELETE FROM document_embedding_jobs WHERE documentId = ?', [documentId])
     })
+
+    await this.queue.deleteQueuedByTypeAndDedupeKeys(EMBEDDING_REINDEX_JOB_TYPE, [documentId])
 
     const uniqueDimensions = Array.from(new Set(rows.map((row) => row.dimensions)))
     for (const dimensions of uniqueDimensions) {

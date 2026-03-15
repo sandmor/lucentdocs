@@ -10,26 +10,36 @@ import { configureEmbeddingProvider, resetEmbeddingClient } from '../../embeddin
 import { projectSyncBus } from '../project-sync.js'
 import { projectSyncEventSchema } from './sync.js'
 import {
+  createDocumentImportJobHandler,
   createDocumentImportRuntime,
-  type DocumentImportJob,
 } from '../../app/document-import-runtime.js'
-import { InMemoryJobQueue } from '../../infrastructure/queue/in-memory-job-queue.adapter.js'
+import { createJobWorkerRuntime } from '../../app/job-worker-runtime.js'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
+const activeWorkers: Array<ReturnType<typeof createJobWorkerRuntime>> = []
 
 function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): AppContext {
   const adapter = options?.adapter ?? createFileBackedAdapter()
   const currentUser = options?.user ?? LOCAL_DEFAULT_USER
   const documentImportRuntime = createDocumentImportRuntime({
-    dbPath: adapter.dbPath,
-    services: adapter.services,
-    repositories: adapter.repositories,
-    transaction: adapter.transaction,
-    queue: new InMemoryJobQueue<DocumentImportJob>(),
-    hooks: {
-      afterExternalWriteCommit: adapter.afterExternalWriteCommit,
+    queue: adapter.jobQueue,
+  })
+  const worker = createJobWorkerRuntime({
+    queue: adapter.jobQueue,
+    handlers: {
+      'documents.import': createDocumentImportJobHandler({
+        dbPath: adapter.dbPath,
+        services: adapter.services,
+        repositories: adapter.repositories,
+        transaction: adapter.transaction,
+        hooks: {
+          afterExternalWriteCommit: adapter.afterExternalWriteCommit,
+        },
+      }),
     },
   })
+  worker.start()
+  activeWorkers.push(worker)
 
   return {
     user: currentUser,
@@ -44,8 +54,9 @@ function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): 
       logout: async () => ({ success: true }),
       signup: async () => ({ success: false, error: 'not implemented' }),
     },
-    yjsRuntime: {} as AppContext['yjsRuntime'],
-    embeddingRuntime: {} as AppContext['embeddingRuntime'],
+    yjsRuntime: {
+      evictLiveDocument: () => {},
+    } as unknown as AppContext['yjsRuntime'],
     chatRuntime: {} as AppContext['chatRuntime'],
     inlineRuntime: {} as AppContext['inlineRuntime'],
     documentImportRuntime,
@@ -53,7 +64,7 @@ function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): 
 }
 
 function createFileBackedAdapter(): TestAdapter {
-  const dir = mkdtempSync(join(tmpdir(), 'plotline-doc-import-test-'))
+  const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-doc-import-test-'))
   return createTestAdapter({ dbPath: join(dir, 'sqlite.db') })
 }
 
@@ -97,7 +108,12 @@ describe('documentsRouter', () => {
     }) as unknown as typeof fetch
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    while (activeWorkers.length > 0) {
+      const worker = activeWorkers.pop()
+      if (!worker) continue
+      await worker.stop()
+    }
     globalThis.fetch = originalFetch
     resetEmbeddingClient()
   })

@@ -45,6 +45,10 @@ export interface EmbeddingIndexService {
     options?: { queuedAt?: number; debounceMs?: number }
   ): Promise<void>
   deleteDocument(documentId: string): Promise<void>
+  processQueuedDocuments(
+    requests: Array<{ documentId: string; expectedLastQueuedAt?: number }>,
+    now?: number
+  ): Promise<EmbeddingFlushResult>
   flushDueQueue(config: EmbeddingIndexRuntimeConfig, now?: number): Promise<EmbeddingFlushResult>
   getQueueStats(): Promise<DocumentEmbeddingQueueStats>
 }
@@ -98,6 +102,15 @@ function isStoredEmbeddingSetCurrent(
   })
 }
 
+function isDocumentDeletedDuringFlush(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const maybe = error as Error & { code?: string }
+  if (maybe.code && maybe.code !== 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+    return false
+  }
+  return /FOREIGN KEY constraint failed/i.test(error.message)
+}
+
 export function createEmbeddingIndexService(
   repos: RepositorySet,
   transaction: TransactionPort,
@@ -108,6 +121,7 @@ export function createEmbeddingIndexService(
   } = {}
 ): EmbeddingIndexService {
   let activeFlush: Promise<EmbeddingFlushResult> | null = null
+  let activeTargetedFlush: Promise<EmbeddingFlushResult> | null = null
 
   const EMBED_BATCH_MAX_INPUTS = 128
 
@@ -123,6 +137,218 @@ export function createEmbeddingIndexService(
       result.push(...embeddings)
     }
     return result
+  }
+
+  const processJobs = async (
+    jobsToProcess: DocumentEmbeddingJobEntity[],
+    queuedCount: number,
+    now: number
+  ): Promise<EmbeddingFlushResult> => {
+    if (jobsToProcess.length === 0) {
+      return { queued: queuedCount, processed: 0, skipped: 0 }
+    }
+
+    const selection = await aiSettingsService.resolveRuntimeSelection('embedding')
+    const provider = await getEmbeddingProvider()
+    const documents = await repos.documents.findByIds(jobsToProcess.map((job) => job.documentId))
+    const documentsById = new Map(documents.map((document) => [document.id, document]))
+
+    const documentsToEmbed: Array<{
+      documentId: string
+      contentHash: string
+      documentTimestamp: number
+      expectedLastQueuedAt: number
+      chunks: PreparedEmbeddingChunk[]
+      strategy: IndexingStrategy
+    }> = []
+    const candidatesToClear: Array<{ documentId: string; expectedLastQueuedAt: number }> = []
+    let skipped = 0
+
+    for (const job of jobsToProcess) {
+      const document = documentsById.get(job.documentId)
+      if (!document) {
+        candidatesToClear.push({
+          documentId: job.documentId,
+          expectedLastQueuedAt: job.lastQueuedAt,
+        })
+        continue
+      }
+
+      const projection = await buildDocumentEmbeddingProjectionSnapshot(repos, document)
+      const documentTimestamp = now
+      const resolvedStrategy = await indexingSettingsService.resolveForDocument(document.id)
+      if (!resolvedStrategy) {
+        candidatesToClear.push({
+          documentId: document.id,
+          expectedLastQueuedAt: job.lastQueuedAt,
+        })
+        continue
+      }
+
+      const chunks = buildEmbeddingChunks(projection.text, resolvedStrategy.strategy).map(
+        (chunk) => {
+          const selectionRange =
+            resolvedStrategy.strategy.type === 'whole_document'
+              ? null
+              : mapProjectionGraphemeRangeToSelection(projection, chunk.start, chunk.end)
+
+          return {
+            ordinal: chunk.ordinal,
+            start: chunk.start,
+            end: chunk.end,
+            selectionFrom: selectionRange?.from ?? null,
+            selectionTo: selectionRange?.to ?? null,
+            text: chunk.text,
+          }
+        }
+      )
+
+      const contentHash = hashEmbeddingText(
+        JSON.stringify({
+          strategy: resolvedStrategy.strategy,
+          text: projection.text,
+        })
+      )
+      const existing = await repos.documentEmbeddings.findEmbeddings(
+        document.id,
+        selection.baseURL,
+        selection.model
+      )
+
+      if (isStoredEmbeddingSetCurrent(existing, selection.baseURL, contentHash, chunks)) {
+        candidatesToClear.push({
+          documentId: document.id,
+          expectedLastQueuedAt: job.lastQueuedAt,
+        })
+        if (chunks.length > 0) {
+          skipped += 1
+        }
+        continue
+      }
+
+      documentsToEmbed.push({
+        documentId: document.id,
+        contentHash,
+        documentTimestamp,
+        expectedLastQueuedAt: job.lastQueuedAt,
+        chunks,
+        strategy: resolvedStrategy.strategy,
+      })
+    }
+
+    let processed = 0
+    const queueIdsToClear = new Set<string>()
+
+    if (documentsToEmbed.length > 0) {
+      const chunkTexts = documentsToEmbed.flatMap((item) => item.chunks.map((chunk) => chunk.text))
+      const embeddings = chunkTexts.length > 0 ? await embedInBatches(provider, chunkTexts) : []
+
+      await transaction.run(async () => {
+        let embeddingOffset = 0
+
+        for (const item of documentsToEmbed) {
+          const currentJob = await repos.documentEmbeddings.getQueuedDocument(item.documentId)
+          if (!currentJob || currentJob.lastQueuedAt !== item.expectedLastQueuedAt) {
+            embeddingOffset += item.chunks.length
+            continue
+          }
+
+          const nextChunks = item.chunks.map((chunk, chunkIndex) => {
+            const embedding = embeddings[embeddingOffset + chunkIndex]?.embedding
+            if (!embedding) {
+              throw new Error(
+                `Missing embedding vector for document ${item.documentId} chunk ${chunk.ordinal}.`
+              )
+            }
+
+            return {
+              ordinal: chunk.ordinal,
+              start: chunk.start,
+              end: chunk.end,
+              selectionFrom: chunk.selectionFrom,
+              selectionTo: chunk.selectionTo,
+              text: chunk.text,
+              embedding,
+            }
+          })
+
+          embeddingOffset += item.chunks.length
+
+          let replacement
+          try {
+            replacement = await repos.documentEmbeddings.replaceEmbeddings({
+              documentId: item.documentId,
+              providerConfigId: selection.providerConfigId,
+              providerId: selection.providerId,
+              type: selection.type,
+              baseURL: selection.baseURL,
+              model: selection.model,
+              strategy: item.strategy,
+              documentTimestamp: item.documentTimestamp,
+              contentHash: item.contentHash,
+              chunks: nextChunks,
+              createdAt: now,
+              updatedAt: now,
+            })
+          } catch (error) {
+            if (isDocumentDeletedDuringFlush(error)) {
+              const stillExists = await repos.documents.findById(item.documentId)
+              if (stillExists) {
+                throw error
+              }
+              queueIdsToClear.add(item.documentId)
+              skipped += 1
+              continue
+            }
+
+            throw error
+          }
+
+          if (replacement.status === 'stale') {
+            queueIdsToClear.add(item.documentId)
+            skipped += 1
+            continue
+          }
+
+          queueIdsToClear.add(item.documentId)
+          if (item.chunks.length > 0) {
+            processed += 1
+          }
+        }
+
+        for (const candidate of candidatesToClear) {
+          const currentJob = await repos.documentEmbeddings.getQueuedDocument(candidate.documentId)
+          if (!currentJob || currentJob.lastQueuedAt !== candidate.expectedLastQueuedAt) {
+            continue
+          }
+          queueIdsToClear.add(candidate.documentId)
+        }
+
+        if (queueIdsToClear.size > 0) {
+          await repos.documentEmbeddings.clearQueuedDocuments([...queueIdsToClear])
+        }
+      })
+    } else if (candidatesToClear.length > 0) {
+      await transaction.run(async () => {
+        for (const candidate of candidatesToClear) {
+          const currentJob = await repos.documentEmbeddings.getQueuedDocument(candidate.documentId)
+          if (!currentJob || currentJob.lastQueuedAt !== candidate.expectedLastQueuedAt) {
+            continue
+          }
+          queueIdsToClear.add(candidate.documentId)
+        }
+
+        if (queueIdsToClear.size > 0) {
+          await repos.documentEmbeddings.clearQueuedDocuments([...queueIdsToClear])
+        }
+      })
+    }
+
+    return {
+      queued: queuedCount,
+      processed,
+      skipped,
+    }
   }
 
   return {
@@ -147,6 +373,41 @@ export function createEmbeddingIndexService(
       await repos.documentEmbeddings.deleteEmbeddingsByDocumentId(documentId)
     },
 
+    async processQueuedDocuments(requests, now = Date.now()): Promise<EmbeddingFlushResult> {
+      if (activeTargetedFlush) {
+        return activeTargetedFlush
+      }
+
+      activeTargetedFlush = (async (): Promise<EmbeddingFlushResult> => {
+        if (requests.length === 0) {
+          return { queued: 0, processed: 0, skipped: 0 }
+        }
+
+        const uniqueRequests = [
+          ...new Map(requests.map((item) => [item.documentId, item])).values(),
+        ]
+        const selectedJobs: DocumentEmbeddingJobEntity[] = []
+
+        for (const request of uniqueRequests) {
+          const queuedJob = await repos.documentEmbeddings.getQueuedDocument(request.documentId)
+          if (!queuedJob) continue
+          if (
+            request.expectedLastQueuedAt !== undefined &&
+            queuedJob.lastQueuedAt !== request.expectedLastQueuedAt
+          ) {
+            continue
+          }
+          selectedJobs.push(queuedJob)
+        }
+
+        return processJobs(selectedJobs, uniqueRequests.length, now)
+      })().finally(() => {
+        activeTargetedFlush = null
+      })
+
+      return activeTargetedFlush
+    },
+
     async flushDueQueue(
       config: EmbeddingIndexRuntimeConfig,
       now = Date.now()
@@ -165,199 +426,7 @@ export function createEmbeddingIndexService(
         if (dueJobs.length === 0) {
           return { queued: jobs.length, processed: 0, skipped: 0 }
         }
-
-        const selection = await aiSettingsService.resolveRuntimeSelection('embedding')
-        const provider = await getEmbeddingProvider()
-        const documents = await repos.documents.findByIds(dueJobs.map((job) => job.documentId))
-        const documentsById = new Map(documents.map((document) => [document.id, document]))
-
-        const documentsToEmbed: Array<{
-          documentId: string
-          contentHash: string
-          documentTimestamp: number
-          expectedLastQueuedAt: number
-          chunks: PreparedEmbeddingChunk[]
-          strategy: IndexingStrategy
-        }> = []
-        const candidatesToClear: Array<{ documentId: string; expectedLastQueuedAt: number }> = []
-        let skipped = 0
-
-        for (const job of dueJobs) {
-          const document = documentsById.get(job.documentId)
-          if (!document) {
-            candidatesToClear.push({
-              documentId: job.documentId,
-              expectedLastQueuedAt: job.lastQueuedAt,
-            })
-            continue
-          }
-
-          const projection = await buildDocumentEmbeddingProjectionSnapshot(repos, document)
-          const documentTimestamp = now
-          const resolvedStrategy = await indexingSettingsService.resolveForDocument(document.id)
-          if (!resolvedStrategy) {
-            candidatesToClear.push({
-              documentId: document.id,
-              expectedLastQueuedAt: job.lastQueuedAt,
-            })
-            continue
-          }
-
-          const chunks = buildEmbeddingChunks(projection.text, resolvedStrategy.strategy).map(
-            (chunk) => {
-              const selectionRange =
-                resolvedStrategy.strategy.type === 'whole_document'
-                  ? null
-                  : mapProjectionGraphemeRangeToSelection(projection, chunk.start, chunk.end)
-
-              return {
-                ordinal: chunk.ordinal,
-                start: chunk.start,
-                end: chunk.end,
-                selectionFrom: selectionRange?.from ?? null,
-                selectionTo: selectionRange?.to ?? null,
-                text: chunk.text,
-              }
-            }
-          )
-
-          const contentHash = hashEmbeddingText(
-            JSON.stringify({
-              strategy: resolvedStrategy.strategy,
-              text: projection.text,
-            })
-          )
-          const existing = await repos.documentEmbeddings.findEmbeddings(
-            document.id,
-            selection.baseURL,
-            selection.model
-          )
-
-          if (isStoredEmbeddingSetCurrent(existing, selection.baseURL, contentHash, chunks)) {
-            candidatesToClear.push({
-              documentId: document.id,
-              expectedLastQueuedAt: job.lastQueuedAt,
-            })
-            if (chunks.length > 0) {
-              skipped += 1
-            }
-            continue
-          }
-
-          documentsToEmbed.push({
-            documentId: document.id,
-            contentHash,
-            documentTimestamp,
-            expectedLastQueuedAt: job.lastQueuedAt,
-            chunks,
-            strategy: resolvedStrategy.strategy,
-          })
-        }
-
-        let processed = 0
-        const queueIdsToClear = new Set<string>()
-
-        if (documentsToEmbed.length > 0) {
-          const chunkTexts = documentsToEmbed.flatMap((item) =>
-            item.chunks.map((chunk) => chunk.text)
-          )
-          const embeddings = chunkTexts.length > 0 ? await embedInBatches(provider, chunkTexts) : []
-
-          await transaction.run(async () => {
-            let embeddingOffset = 0
-
-            for (const item of documentsToEmbed) {
-              const currentJob = await repos.documentEmbeddings.getQueuedDocument(item.documentId)
-              if (!currentJob || currentJob.lastQueuedAt !== item.expectedLastQueuedAt) {
-                embeddingOffset += item.chunks.length
-                continue
-              }
-
-              const nextChunks = item.chunks.map((chunk, chunkIndex) => {
-                const embedding = embeddings[embeddingOffset + chunkIndex]?.embedding
-                if (!embedding) {
-                  throw new Error(
-                    `Missing embedding vector for document ${item.documentId} chunk ${chunk.ordinal}.`
-                  )
-                }
-
-                return {
-                  ordinal: chunk.ordinal,
-                  start: chunk.start,
-                  end: chunk.end,
-                  selectionFrom: chunk.selectionFrom,
-                  selectionTo: chunk.selectionTo,
-                  text: chunk.text,
-                  embedding,
-                }
-              })
-
-              embeddingOffset += item.chunks.length
-
-              const replacement = await repos.documentEmbeddings.replaceEmbeddings({
-                documentId: item.documentId,
-                providerConfigId: selection.providerConfigId,
-                providerId: selection.providerId,
-                type: selection.type,
-                baseURL: selection.baseURL,
-                model: selection.model,
-                strategy: item.strategy,
-                documentTimestamp: item.documentTimestamp,
-                contentHash: item.contentHash,
-                chunks: nextChunks,
-                createdAt: now,
-                updatedAt: now,
-              })
-
-              if (replacement.status === 'stale') {
-                queueIdsToClear.add(item.documentId)
-                skipped += 1
-                continue
-              }
-
-              queueIdsToClear.add(item.documentId)
-              if (item.chunks.length > 0) {
-                processed += 1
-              }
-            }
-
-            for (const candidate of candidatesToClear) {
-              const currentJob = await repos.documentEmbeddings.getQueuedDocument(
-                candidate.documentId
-              )
-              if (!currentJob || currentJob.lastQueuedAt !== candidate.expectedLastQueuedAt) {
-                continue
-              }
-              queueIdsToClear.add(candidate.documentId)
-            }
-
-            if (queueIdsToClear.size > 0) {
-              await repos.documentEmbeddings.clearQueuedDocuments([...queueIdsToClear])
-            }
-          })
-        } else if (candidatesToClear.length > 0) {
-          await transaction.run(async () => {
-            for (const candidate of candidatesToClear) {
-              const currentJob = await repos.documentEmbeddings.getQueuedDocument(
-                candidate.documentId
-              )
-              if (!currentJob || currentJob.lastQueuedAt !== candidate.expectedLastQueuedAt) {
-                continue
-              }
-              queueIdsToClear.add(candidate.documentId)
-            }
-
-            if (queueIdsToClear.size > 0) {
-              await repos.documentEmbeddings.clearQueuedDocuments([...queueIdsToClear])
-            }
-          })
-        }
-
-        return {
-          queued: jobs.length,
-          processed,
-          skipped,
-        }
+        return processJobs(dueJobs, jobs.length, now)
       })().finally(() => {
         activeFlush = null
       })

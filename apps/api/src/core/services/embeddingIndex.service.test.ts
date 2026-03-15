@@ -594,37 +594,146 @@ describe('EmbeddingIndexService', () => {
     adapter.connection.close()
   })
 
-  test('EmbeddingRuntime backs off after repeated flush failures', async () => {
-    const { EmbeddingRuntime } = await import('../../embeddings/runtime.js')
+  test('deleteDocument clears queued embedding jobs safely', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-delete-queued-job')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
 
-    const service = {
-      flushDueQueue: async () => {
-        throw new SyntaxError('Failed to parse JSON')
+    await adapter.services.aiSettings.initializeDefaults({
+      env: {
+        AI_BASE_URL: OPENROUTER_BASE_URL,
+        AI_MODEL: 'gpt-5',
+        AI_API_KEY: 'test-key',
       },
-    } as unknown as { flushDueQueue: () => Promise<unknown> }
+    })
+    configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const runtime = new EmbeddingRuntime(
-      service as unknown as import('../../core/services/embeddingIndex.service.js').EmbeddingIndexService,
-      { debounceMs: 0, batchMaxWaitMs: 0 },
-      { errorBackoffBaseMs: 10, errorBackoffMaxMs: 10 }
+    const doc = await adapter.services.documents.create('delete-queued.md')
+    await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
+
+    const queuedBefore = await adapter.repositories.documentEmbeddings.getQueuedDocument(doc.id)
+    expect(queuedBefore).toBeTruthy()
+
+    await adapter.services.embeddingIndex.deleteDocument(doc.id)
+
+    const queuedAfter = await adapter.repositories.documentEmbeddings.getQueuedDocument(doc.id)
+    expect(queuedAfter).toBeUndefined()
+
+    adapter.connection.close()
+  })
+
+  test('flush handles document deletion races at embedding write time', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-delete-during-flush')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
+
+    await adapter.services.aiSettings.initializeDefaults({
+      env: {
+        AI_BASE_URL: OPENROUTER_BASE_URL,
+        AI_MODEL: 'gpt-5',
+        AI_API_KEY: 'test-key',
+      },
+    })
+    configureEmbeddingProvider(adapter.services.aiSettings)
+
+    const doc = await adapter.services.documents.create(
+      'delete-during-flush.md',
+      JSON.stringify({
+        doc: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'This document will be deleted during flush.' }],
+            },
+          ],
+        },
+        aiDraft: null,
+      })
     )
 
-    const originalError = console.error
-    let errorCalls = 0
-    console.error = () => {
-      errorCalls += 1
+    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
+
+    const originalReplace = adapter.repositories.documentEmbeddings.replaceEmbeddings.bind(
+      adapter.repositories.documentEmbeddings
+    )
+    adapter.repositories.documentEmbeddings.replaceEmbeddings = async (input) => {
+      if (input.documentId === doc.id) {
+        await adapter.repositories.documents.deleteById(doc.id)
+        throw new Error('FOREIGN KEY constraint failed')
+      }
+      return originalReplace(input)
     }
 
-    try {
-      await runtime.tickOnce(0)
-      await runtime.tickOnce(1)
-      await runtime.tickOnce(9)
-      expect(errorCalls).toBe(1)
+    const result = await adapter.services.embeddingIndex.flushDueQueue(
+      { debounceMs: 0, batchMaxWaitMs: 5000 },
+      1000
+    )
+    expect(result.processed).toBe(0)
 
-      await runtime.tickOnce(10)
-      expect(errorCalls).toBe(2)
-    } finally {
-      console.error = originalError
-    }
+    const queued = await adapter.repositories.documentEmbeddings.getQueuedDocument(doc.id)
+    expect(queued).toBeUndefined()
+
+    adapter.connection.close()
+  })
+
+  test('processQueuedDocuments only processes targeted queued documents', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-targeted-batch')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
+
+    await adapter.services.aiSettings.initializeDefaults({
+      env: {
+        AI_BASE_URL: OPENROUTER_BASE_URL,
+        AI_MODEL: 'gpt-5',
+        AI_API_KEY: 'test-key',
+      },
+    })
+    configureEmbeddingProvider(adapter.services.aiSettings)
+
+    const docA = await adapter.services.documents.create(
+      'target-a.md',
+      JSON.stringify({
+        doc: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'doc a embeddings' }] }],
+        },
+        aiDraft: null,
+      })
+    )
+    const docB = await adapter.services.documents.create(
+      'target-b.md',
+      JSON.stringify({
+        doc: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'doc b embeddings' }] }],
+        },
+        aiDraft: null,
+      })
+    )
+
+    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([docA.id, docB.id])
+    await adapter.services.embeddingIndex.enqueueDocuments([docA.id, docB.id], {
+      queuedAt: 1_000,
+      debounceMs: 0,
+    })
+
+    const queuedA = await adapter.repositories.documentEmbeddings.getQueuedDocument(docA.id)
+    const queuedB = await adapter.repositories.documentEmbeddings.getQueuedDocument(docB.id)
+    expect(queuedA).toBeTruthy()
+    expect(queuedB).toBeTruthy()
+
+    const result = await adapter.services.embeddingIndex.processQueuedDocuments([
+      { documentId: docA.id, expectedLastQueuedAt: queuedA?.lastQueuedAt },
+    ])
+    expect(result.processed).toBe(1)
+
+    const afterA = await adapter.repositories.documentEmbeddings.getQueuedDocument(docA.id)
+    const afterB = await adapter.repositories.documentEmbeddings.getQueuedDocument(docB.id)
+    expect(afterA).toBeUndefined()
+    expect(afterB).toBeTruthy()
+
+    adapter.connection.close()
   })
 })

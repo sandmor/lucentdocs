@@ -21,10 +21,13 @@ import { createIndexingSettingsService } from '../../core/services/indexingSetti
 import { createEmbeddingIndexService } from '../../core/services/embeddingIndex.service.js'
 import { createAuthService } from '../../core/services/auth.service.js'
 import { configManager } from '../../config/runtime.js'
+import { SqliteJobQueueAdapter } from '../queue/sqlite-job-queue.adapter.js'
+import type { JobQueuePort } from '../../core/ports/jobQueue.port.js'
 
 export interface SqliteAdapter {
   connection: SqliteConnection
   transaction: TransactionPort
+  jobQueue: JobQueuePort
   repositories: RepositorySet
   services: ServiceSet
 }
@@ -32,6 +35,7 @@ export interface SqliteAdapter {
 export function createSqliteAdapter(dbPath: string): SqliteAdapter {
   const connection = createConnection(dbPath)
   const transaction = createTransaction(connection)
+  const jobQueue = new SqliteJobQueueAdapter(connection, transaction)
 
   const repositories: RepositorySet = {
     projects: new ProjectsRepository(connection),
@@ -42,7 +46,7 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
     yjsDocuments: new YjsDocumentsRepository(connection),
     aiSettings: new AiSettingsRepository(connection),
     indexingSettings: new IndexingSettingsRepository(connection),
-    documentEmbeddings: new DocumentEmbeddingsRepository(connection),
+    documentEmbeddings: new DocumentEmbeddingsRepository(connection, jobQueue),
     authData: new AuthDataRepository(connection),
   }
 
@@ -72,5 +76,5 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
     auth: createAuthService(repositories, transaction),
   }
 
-  return { connection, transaction, repositories, services }
+  return { connection, transaction, jobQueue, repositories, services }
 }

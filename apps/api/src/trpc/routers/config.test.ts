@@ -23,13 +23,10 @@ function createCallerContext(): AppContext {
     yjsRuntime: {
       reloadRuntimeConfig: () => {},
     } as unknown as AppContext['yjsRuntime'],
-    embeddingRuntime: {
-      reloadConfig: () => {},
-    } as unknown as AppContext['embeddingRuntime'],
     chatRuntime: {} as AppContext['chatRuntime'],
     inlineRuntime: {} as AppContext['inlineRuntime'],
     documentImportRuntime: {
-      enqueueImport: () => ({ jobId: 'test-job', queued: 0, queuedJobs: 0 }),
+      enqueueImport: async () => ({ jobId: 'test-job', queued: 0, queuedJobs: 0 }),
     },
   }
 }

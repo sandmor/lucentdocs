@@ -4,7 +4,6 @@ import type { ServiceSet } from '../core/services/types.js'
 import type { YjsRuntime } from '../yjs/runtime.js'
 import type { ChatRuntime } from '../chat/runtime.js'
 import type { InlineRuntime } from '../inline/runtime.js'
-import type { EmbeddingRuntime } from '../embeddings/runtime.js'
 import type { User } from '../core/models/user.js'
 import type { AuthPort } from '../core/ports/auth.port.js'
 import type { Request } from 'express'
@@ -16,7 +15,6 @@ export interface AppContext {
   services: ServiceSet
   authPort: AuthPort
   yjsRuntime: YjsRuntime
-  embeddingRuntime: EmbeddingRuntime
   chatRuntime: ChatRuntime
   inlineRuntime: InlineRuntime
   documentImportRuntime: DocumentImportRuntime

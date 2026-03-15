@@ -124,16 +124,40 @@ const SCHEMA = `
     FOREIGN KEY (activeEmbeddingProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL
   );
 
-  CREATE TABLE IF NOT EXISTS document_embedding_jobs (
-    documentId TEXT PRIMARY KEY,
-    firstQueuedAt INTEGER NOT NULL,
-    lastQueuedAt INTEGER NOT NULL,
-    debounceUntil INTEGER NOT NULL,
-    FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+  CREATE TABLE IF NOT EXISTS job_queue (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    dedupeKey TEXT,
+    payloadJson TEXT NOT NULL,
+    availableAt INTEGER NOT NULL,
+    leaseOwner TEXT,
+    leaseUntil INTEGER,
+    attempt INTEGER NOT NULL CHECK (attempt >= 0),
+    maxAttempts INTEGER NOT NULL CHECK (maxAttempts > 0),
+    priority INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    lastError TEXT,
+    UNIQUE (type, dedupeKey)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_document_embedding_jobs_schedule
-    ON document_embedding_jobs(debounceUntil ASC, firstQueuedAt ASC);
+  CREATE INDEX IF NOT EXISTS idx_job_queue_leaseable
+    ON job_queue(availableAt ASC, leaseUntil ASC, priority DESC, createdAt ASC);
+
+  CREATE INDEX IF NOT EXISTS idx_job_queue_type_created
+    ON job_queue(type ASC, createdAt ASC);
+
+  CREATE TABLE IF NOT EXISTS job_queue_dead_letters (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    dedupeKey TEXT,
+    payloadJson TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    maxAttempts INTEGER NOT NULL,
+    lastError TEXT NOT NULL,
+    failedAt INTEGER NOT NULL,
+    createdAt INTEGER NOT NULL
+  );
 
   CREATE TABLE IF NOT EXISTS indexing_strategy_settings (
     scopeType TEXT NOT NULL CHECK (scopeType IN ('global', 'user', 'project', 'document')),
@@ -379,7 +403,7 @@ export class SqliteConnection implements ConnectionPort {
     }
 
     const coreTableMissingPattern =
-      /no such table:\s*(projects|documents|project_documents|yjs_documents|version_snapshots|document_embedding_jobs|document_embeddings)/i
+      /no such table:\s*(projects|documents|project_documents|yjs_documents|version_snapshots|job_queue|document_embeddings)/i
     return coreTableMissingPattern.test(message)
   }
 }

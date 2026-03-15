@@ -275,11 +275,6 @@ export const configRouter = router({
 
     if (EMBEDDING_RUNTIME_KEYS.some((key) => changedEffectiveSet.has(key))) {
       resetEmbeddingClient()
-      const config = configManager.getConfig()
-      ctx.embeddingRuntime.reloadConfig({
-        debounceMs: config.embeddings.debounceMs,
-        batchMaxWaitMs: config.embeddings.batchMaxWaitMs,
-      })
     }
 
     if (YJS_RUNTIME_KEYS.some((key) => changedEffectiveSet.has(key))) {

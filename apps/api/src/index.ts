@@ -26,16 +26,13 @@ const appConfig = configManager.getConfig()
 const isProd = appConfig.runtime.isProduction
 const isTestRuntime =
   appConfig.runtime.nodeEnv === 'test' || process.env.LUCENTDOCS_TEST_MODE === '1'
-const allowTestEmbeddingRuntime = process.env.LUCENTDOCS_TEST_FAKE_EMBEDDINGS === '1'
 const container = await createContainer(appConfig.paths.dbFile, {
   persistenceFlushIntervalMs: appConfig.yjs.persistenceFlushIntervalMs,
   versionSnapshotIntervalMs: appConfig.yjs.versionSnapshotIntervalMs,
 })
 
 container.yjsRuntime.initialize()
-if (!isTestRuntime || allowTestEmbeddingRuntime) {
-  container.embeddingRuntime.start()
-}
+container.jobWorkerRuntime.start()
 
 function createTrpcContext({ req, user }: { req?: Request; user: User | null }): AppContext {
   return {
@@ -44,7 +41,6 @@ function createTrpcContext({ req, user }: { req?: Request; user: User | null }):
     services: container.services,
     authPort: container.authPort,
     yjsRuntime: container.yjsRuntime,
-    embeddingRuntime: container.embeddingRuntime,
     chatRuntime: container.chatRuntime,
     inlineRuntime: container.inlineRuntime,
     documentImportRuntime: container.documentImportRuntime,
@@ -243,11 +239,20 @@ function registerProcessHandlers(
         console.error('Failed to flush Yjs documents on shutdown:', error)
       })
       .then(async () => {
+        await container.jobWorkerRuntime.stop().catch((error) => {
+          console.error('Failed to stop job worker runtime on shutdown:', error)
+        })
+
         if (!isTestRuntime) {
-          container.embeddingRuntime.stop()
-          await container.embeddingRuntime.flushNow().catch((error) => {
-            console.error('Failed to flush embedding queue on shutdown:', error)
-          })
+          const runtimeConfig = configManager.getConfig().embeddings
+          await container.services.embeddingIndex
+            .flushDueQueue({
+              debounceMs: runtimeConfig.debounceMs,
+              batchMaxWaitMs: runtimeConfig.batchMaxWaitMs,
+            })
+            .catch((error) => {
+              console.error('Failed to flush embedding queue on shutdown:', error)
+            })
         }
 
         options.trpcWs.handler.broadcastReconnectNotification()

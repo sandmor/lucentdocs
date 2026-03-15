@@ -7,17 +7,21 @@ import { createChatRuntime, type ChatRuntime } from '../chat/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
 import { configureAiProvider } from '../ai/index.js'
 import { configureEmbeddingProvider } from '../embeddings/provider.js'
-import { createEmbeddingRuntime, type EmbeddingRuntime } from '../embeddings/runtime.js'
 import {
+  createDocumentImportJobHandler,
   createDocumentImportRuntime,
-  type DocumentImportJob,
   type DocumentImportRuntime,
 } from './document-import-runtime.js'
-import { InMemoryJobQueue } from '../infrastructure/queue/in-memory-job-queue.adapter.js'
 import type { AuthPort } from '../core/ports/auth.port.js'
 import { LocalAuthAdapter } from '../infrastructure/auth/local-auth.adapter.js'
 import { SqliteAuthAdapter } from '../infrastructure/auth/sqlite-auth.adapter.js'
 import { configManager } from '../config/runtime.js'
+import { createJobWorkerRuntime, type JobWorkerRuntime } from './job-worker-runtime.js'
+import { DOCUMENT_IMPORT_JOB_TYPE } from '../core/jobs/job-types.js'
+import {
+  createEmbeddingReindexBatchHandler,
+  EMBEDDING_REINDEX_JOB_TYPE,
+} from './embedding-reindex-runtime.js'
 
 export interface AppContainer {
   services: ServiceSet
@@ -25,10 +29,10 @@ export interface AppContainer {
   transaction: TransactionPort
   authPort: AuthPort
   yjsRuntime: YjsRuntime
-  embeddingRuntime: EmbeddingRuntime
   chatRuntime: ChatRuntime
   inlineRuntime: InlineRuntime
   documentImportRuntime: DocumentImportRuntime
+  jobWorkerRuntime: JobWorkerRuntime
 }
 
 /**
@@ -56,11 +60,6 @@ export async function createContainer(
     authPort = new LocalAuthAdapter()
   }
 
-  const embeddingRuntime = createEmbeddingRuntime(adapter.services.embeddingIndex, {
-    debounceMs: appConfig.embeddings.debounceMs,
-    batchMaxWaitMs: appConfig.embeddings.batchMaxWaitMs,
-  })
-
   const yjsRuntime = createYjsRuntime(
     {
       yjsDocuments: adapter.repositories.yjsDocuments,
@@ -74,18 +73,28 @@ export async function createContainer(
   )
 
   const chatRuntime = createChatRuntime(adapter.services)
-  const documentImportQueue = new InMemoryJobQueue<DocumentImportJob>()
   const documentImportRuntime = createDocumentImportRuntime({
+    queue: adapter.jobQueue,
+  })
+  const documentImportJobHandler = createDocumentImportJobHandler({
     dbPath,
     services: adapter.services,
     repositories: adapter.repositories,
     transaction: adapter.transaction,
-    queue: documentImportQueue,
     hooks: {
       // SQLite/Bun-specific bridge: native import writes through a different
       // SQLite stack than Bun's in-process handle, so we refresh Bun's handle
       // after native commits. Postgres adapters should use a no-op hook.
       afterExternalWriteCommit: () => adapter.connection.refreshPrimaryConnection(),
+    },
+  })
+  const jobWorkerRuntime = createJobWorkerRuntime({
+    queue: adapter.jobQueue,
+    handlers: {
+      [DOCUMENT_IMPORT_JOB_TYPE]: documentImportJobHandler,
+      [EMBEDDING_REINDEX_JOB_TYPE]: createEmbeddingReindexBatchHandler(
+        adapter.services.embeddingIndex
+      ),
     },
   })
   const inlineRuntime = createInlineRuntime(
@@ -104,9 +113,9 @@ export async function createContainer(
     transaction: adapter.transaction,
     authPort,
     yjsRuntime,
-    embeddingRuntime,
     chatRuntime,
     inlineRuntime,
     documentImportRuntime,
+    jobWorkerRuntime,
   }
 }

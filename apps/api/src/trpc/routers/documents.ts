@@ -822,7 +822,7 @@ export const documentsRouter = router({
         parseFailureMode: input.parseFailureMode,
       })
 
-      const enqueueResult = ctx.documentImportRuntime.enqueueImport({
+      const enqueueResult = await ctx.documentImportRuntime.enqueueImport({
         projectId: input.projectId,
         documents: input.documents,
         parseFailureMode: input.parseFailureMode,
@@ -884,7 +884,7 @@ export const documentsRouter = router({
         includeContents: input.includeContents,
       })
 
-      const enqueueResult = ctx.documentImportRuntime.enqueueImport({
+      const enqueueResult = await ctx.documentImportRuntime.enqueueImport({
         projectId: input.projectId,
         documents: plannedDocuments,
         parseFailureMode: 'code_block',

@@ -20,7 +20,7 @@ interface YSyncBindingPatchTarget {
   _isLocalCursorInView: () => boolean
   type: unknown
   mapping: unknown
-  __plotlineSelectionPatchApplied?: boolean
+  __lucentdocsSelectionPatchApplied?: boolean
 }
 
 function getRelativeSelectionFromDOM(
@@ -84,9 +84,9 @@ export function installYjsSelectionPatch(state: EditorState): void {
     | { binding?: YSyncBindingPatchTarget }
     | undefined
   const binding = syncState?.binding
-  if (!binding || binding.__plotlineSelectionPatchApplied) return
+  if (!binding || binding.__lucentdocsSelectionPatchApplied) return
 
-  binding.__plotlineSelectionPatchApplied = true
+  binding.__lucentdocsSelectionPatchApplied = true
   binding.beforeAllTransactions = () => {
     if (binding.beforeTransactionSelection !== null || binding.prosemirrorView == null) {
       return

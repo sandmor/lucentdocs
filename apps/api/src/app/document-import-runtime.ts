@@ -1,11 +1,14 @@
-import { nanoid } from 'nanoid'
 import { parseContent, type JsonObject } from '@lucentdocs/shared'
 import * as Y from 'yjs'
 import { prosemirrorJSONToYDoc } from 'y-prosemirror'
+import { z } from 'zod/v4'
 import type { RepositorySet } from '../core/ports/types.js'
 import type { TransactionPort } from '../core/ports/transaction.port.js'
-import type { JobQueuePort } from '../core/ports/jobQueue.port.js'
+import type { JobQueuePort, QueueJobEnvelope } from '../core/ports/jobQueue.port.js'
 import type { ServiceSet } from '../core/services/types.js'
+import { DOCUMENT_IMPORT_JOB_TYPE } from '../core/jobs/job-types.js'
+
+export { DOCUMENT_IMPORT_JOB_TYPE }
 import {
   runNativeMassImportSqlite,
   type MarkdownRawHtmlMode,
@@ -13,9 +16,9 @@ import {
   type NativeMassImportFailure,
 } from '../core/markdown/native.js'
 import { projectSyncBus, type DocumentsChangedReason } from '../trpc/project-sync.js'
+import { DOCUMENTS_CHANGED_REASONS } from './project-sync.js'
 
 export interface DocumentImportJob {
-  id: string
   projectId: string
   documents: NativeMassImportDocumentInput[]
   parseFailureMode?: 'fail' | 'code_block'
@@ -38,8 +41,21 @@ export interface EnqueueImportResult {
 }
 
 export interface DocumentImportRuntime {
-  enqueueImport(request: EnqueueImportRequest): EnqueueImportResult
+  enqueueImport(request: EnqueueImportRequest): Promise<EnqueueImportResult>
 }
+
+const documentImportJobSchema = z.object({
+  projectId: z.string().min(1),
+  documents: z.array(
+    z.object({
+      title: z.string(),
+      markdown: z.string(),
+    })
+  ),
+  parseFailureMode: z.enum(['fail', 'code_block']).optional(),
+  rawHtmlMode: z.enum(['drop', 'code_block']).optional(),
+  reason: z.enum(DOCUMENTS_CHANGED_REASONS),
+})
 
 /**
  * Optional hook for adapters that need to synchronize their read/write handles
@@ -53,13 +69,37 @@ export interface ExternalWriteSynchronizationHooks {
 }
 
 export function createDocumentImportRuntime(options: {
+  queue: JobQueuePort
+}): DocumentImportRuntime {
+  return {
+    async enqueueImport(request: EnqueueImportRequest): Promise<EnqueueImportResult> {
+      const queuedJob = await options.queue.enqueue<DocumentImportJob>({
+        type: DOCUMENT_IMPORT_JOB_TYPE,
+        payload: {
+          projectId: request.projectId,
+          documents: request.documents,
+          parseFailureMode: request.parseFailureMode,
+          rawHtmlMode: request.rawHtmlMode,
+          reason: request.reason,
+        },
+      })
+
+      return {
+        jobId: queuedJob.id,
+        queued: request.documents.length,
+        queuedJobs: 1,
+      }
+    },
+  }
+}
+
+export function createDocumentImportJobHandler(options: {
   dbPath: string
   services: ServiceSet
   repositories: RepositorySet
   transaction: TransactionPort
-  queue: JobQueuePort<DocumentImportJob>
   hooks?: ExternalWriteSynchronizationHooks
-}): DocumentImportRuntime {
+}): (job: QueueJobEnvelope<unknown>) => Promise<void> {
   async function settleImportedDocumentIds(importedIds: string[]): Promise<string[]> {
     if (importedIds.length === 0) return []
 
@@ -121,7 +161,7 @@ export function createDocumentImportRuntime(options: {
     return validUpdates.map((item) => item.documentId)
   }
 
-  async function runJob(job: DocumentImportJob): Promise<void> {
+  async function runJob(jobId: string, job: DocumentImportJob): Promise<void> {
     const importResult = await runNativeMassImportSqlite(options.dbPath, {
       projectId: job.projectId,
       documents: job.documents,
@@ -138,7 +178,7 @@ export function createDocumentImportRuntime(options: {
       ).length
       if (markdownFailureCount > 0) {
         console.warn(
-          `Import job ${job.id} completed with ${markdownFailureCount} markdown parse failures.`
+          `Import job ${jobId} completed with ${markdownFailureCount} markdown parse failures.`
         )
       }
     }
@@ -183,36 +223,22 @@ export function createDocumentImportRuntime(options: {
     })
   }
 
-  options.queue.start(async (job) => {
+  return async (envelope: QueueJobEnvelope<unknown>) => {
+    const parsedJob = documentImportJobSchema.safeParse(envelope.payload)
+    if (!parsedJob.success) {
+      throw new Error(`Invalid payload for job ${envelope.id} (${envelope.type}).`)
+    }
+    const job: DocumentImportJob = parsedJob.data
+
     try {
-      await runJob(job)
+      await runJob(envelope.id, job)
     } catch (error) {
       console.error('Background import job failed', {
-        jobId: job.id,
+        jobId: envelope.id,
         projectId: job.projectId,
         error,
       })
+      throw error
     }
-  })
-
-  return {
-    enqueueImport(request: EnqueueImportRequest): EnqueueImportResult {
-      const job: DocumentImportJob = {
-        id: nanoid(),
-        projectId: request.projectId,
-        documents: request.documents,
-        parseFailureMode: request.parseFailureMode,
-        rawHtmlMode: request.rawHtmlMode,
-        reason: request.reason,
-      }
-
-      void options.queue.enqueue(job)
-
-      return {
-        jobId: job.id,
-        queued: request.documents.length,
-        queuedJobs: 1,
-      }
-    },
   }
 }
