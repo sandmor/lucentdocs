@@ -50,14 +50,14 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Build native core addon
+        run: bun run --filter './packages/core' build
+
       - name: Lint
         run: bun run lint
 
       - name: Test
         run: bun run test
-
-      - name: Build native core addon
-        run: bun run --filter './packages/core' build
 
       - name: Build web app
         run: bun run build
