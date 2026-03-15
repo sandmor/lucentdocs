@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { LOCAL_DEFAULT_USER, type User } from '../../core/models/user.js'
 import type { AppContext } from '../index.js'
 import { documentsRouter } from './documents.js'
@@ -6,12 +9,27 @@ import { createTestAdapter, type TestAdapter } from '../../testing/factory.js'
 import { configureEmbeddingProvider, resetEmbeddingClient } from '../../embeddings/provider.js'
 import { projectSyncBus } from '../project-sync.js'
 import { projectSyncEventSchema } from './sync.js'
+import {
+  createDocumentImportRuntime,
+  type DocumentImportJob,
+} from '../../app/document-import-runtime.js'
+import { InMemoryJobQueue } from '../../infrastructure/queue/in-memory-job-queue.adapter.js'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 
 function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): AppContext {
-  const adapter = options?.adapter ?? createTestAdapter()
+  const adapter = options?.adapter ?? createFileBackedAdapter()
   const currentUser = options?.user ?? LOCAL_DEFAULT_USER
+  const documentImportRuntime = createDocumentImportRuntime({
+    dbPath: adapter.dbPath,
+    services: adapter.services,
+    repositories: adapter.repositories,
+    transaction: adapter.transaction,
+    queue: new InMemoryJobQueue<DocumentImportJob>(),
+    hooks: {
+      afterExternalWriteCommit: adapter.afterExternalWriteCommit,
+    },
+  })
 
   return {
     user: currentUser,
@@ -30,7 +48,24 @@ function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): 
     embeddingRuntime: {} as AppContext['embeddingRuntime'],
     chatRuntime: {} as AppContext['chatRuntime'],
     inlineRuntime: {} as AppContext['inlineRuntime'],
+    documentImportRuntime,
   }
+}
+
+function createFileBackedAdapter(): TestAdapter {
+  const dir = mkdtempSync(join(tmpdir(), 'plotline-doc-import-test-'))
+  return createTestAdapter({ dbPath: join(dir, 'sqlite.db') })
+}
+
+async function waitFor<T>(fn: () => Promise<T>, predicate: (value: T) => boolean): Promise<T> {
+  const maxAttempts = 100
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const value = await fn()
+    if (predicate(value)) return value
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+
+  throw new Error('Timed out waiting for background import to complete')
 }
 
 async function initializeEmbeddingSelection(adapter: TestAdapter): Promise<void> {
@@ -295,7 +330,7 @@ describe('documentsRouter', () => {
   })
 
   test('importMany imports multiple docs and reports per-item failures', async () => {
-    const adapter = createTestAdapter()
+    const adapter = createFileBackedAdapter()
     const user = LOCAL_DEFAULT_USER
     const project = await adapter.services.projects.create('Import', { ownerUserId: user.id })
 
@@ -309,16 +344,19 @@ describe('documentsRouter', () => {
       parseFailureMode: 'fail',
     })
 
-    expect(result.imported).toHaveLength(1)
-    expect(result.failed).toHaveLength(1)
+    expect(result.status).toBe('queued')
+    expect(result.queued).toBe(2)
 
-    const listed = await adapter.services.documents.listForProject(project.id)
+    const listed = await waitFor(
+      () => adapter.services.documents.listForProject(project.id),
+      (docs) => docs.length === 1
+    )
     const titles = listed.map((d) => d.title)
     expect(titles).toContain('good.md')
   })
 
   test('importMany resolves title collisions within the same batch', async () => {
-    const adapter = createTestAdapter()
+    const adapter = createFileBackedAdapter()
     const user = LOCAL_DEFAULT_USER
     const project = await adapter.services.projects.create('Import', { ownerUserId: user.id })
 
@@ -332,14 +370,18 @@ describe('documentsRouter', () => {
       parseFailureMode: 'fail',
     })
 
-    expect(result.imported).toHaveLength(2)
-    const importedTitles = result.imported.map((d) => d.title).sort()
+    expect(result.status).toBe('queued')
+    const docs = await waitFor(
+      () => adapter.services.documents.listForProject(project.id),
+      (items) => items.length === 2
+    )
+    const importedTitles = docs.map((d) => d.title).sort()
     expect(importedTitles[0]).toBe('same-1.md')
     expect(importedTitles[1]).toBe('same.md')
   })
 
   test('importMany publishes sync event parseable by sync router', async () => {
-    const adapter = createTestAdapter()
+    const adapter = createFileBackedAdapter()
     const user = LOCAL_DEFAULT_USER
     const project = await adapter.services.projects.create('Import', { ownerUserId: user.id })
 
@@ -356,7 +398,12 @@ describe('documentsRouter', () => {
         parseFailureMode: 'fail',
       })
 
-      expect(result.imported).toHaveLength(1)
+      expect(result.status).toBe('queued')
+      await waitFor(
+        async () =>
+          events.find((e) => (e as { type?: string }).type === 'documents.changed') ?? null,
+        (event) => Boolean(event)
+      )
     } finally {
       unsubscribe()
     }
@@ -373,7 +420,7 @@ describe('documentsRouter', () => {
   })
 
   test('importSplit plans and imports multiple parts on the server', async () => {
-    const adapter = createTestAdapter()
+    const adapter = createFileBackedAdapter()
     const user = LOCAL_DEFAULT_USER
     const project = await adapter.services.projects.create('Split Import', { ownerUserId: user.id })
 
@@ -391,12 +438,13 @@ describe('documentsRouter', () => {
       includeContents: true,
     })
 
+    expect(result.status).toBe('queued')
     expect(result.total).toBe(3)
-    expect(result.imported).toBe(3)
-    expect(result.failed).toBe(0)
-    expect(result.firstImportedDocumentId).toBeTruthy()
 
-    const docs = await adapter.services.documents.listForProject(project.id)
+    const docs = await waitFor(
+      () => adapter.services.documents.listForProject(project.id),
+      (items) => items.length === 3
+    )
     const titles = docs.map((doc) => doc.title)
     expect(titles.some((title) => title.endsWith('/00-contents.md'))).toBe(true)
     expect(titles.some((title) => title.endsWith('/1-part-one.md'))).toBe(true)

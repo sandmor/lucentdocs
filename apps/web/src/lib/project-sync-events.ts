@@ -36,6 +36,8 @@ const documentsChangedEventSchema = eventBaseSchema.extend({
     'documents.update',
     'documents.move',
     'documents.delete',
+    'documents.import-many',
+    'documents.import-split',
     'documents.create-directory',
     'documents.move-directory',
     'documents.delete-directory',

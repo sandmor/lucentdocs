@@ -8,6 +8,7 @@ import type { EmbeddingRuntime } from '../embeddings/runtime.js'
 import type { User } from '../core/models/user.js'
 import type { AuthPort } from '../core/ports/auth.port.js'
 import type { Request } from 'express'
+import type { DocumentImportRuntime } from '../app/document-import-runtime.js'
 
 export interface AppContext {
   req?: Request
@@ -18,6 +19,7 @@ export interface AppContext {
   embeddingRuntime: EmbeddingRuntime
   chatRuntime: ChatRuntime
   inlineRuntime: InlineRuntime
+  documentImportRuntime: DocumentImportRuntime
 }
 
 const t = initTRPC.context<AppContext>().create({

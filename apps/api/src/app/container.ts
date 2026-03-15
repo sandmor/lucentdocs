@@ -8,6 +8,12 @@ import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
 import { configureAiProvider } from '../ai/index.js'
 import { configureEmbeddingProvider } from '../embeddings/provider.js'
 import { createEmbeddingRuntime, type EmbeddingRuntime } from '../embeddings/runtime.js'
+import {
+  createDocumentImportRuntime,
+  type DocumentImportJob,
+  type DocumentImportRuntime,
+} from './document-import-runtime.js'
+import { InMemoryJobQueue } from '../infrastructure/queue/in-memory-job-queue.adapter.js'
 import type { AuthPort } from '../core/ports/auth.port.js'
 import { LocalAuthAdapter } from '../infrastructure/auth/local-auth.adapter.js'
 import { SqliteAuthAdapter } from '../infrastructure/auth/sqlite-auth.adapter.js'
@@ -22,6 +28,7 @@ export interface AppContainer {
   embeddingRuntime: EmbeddingRuntime
   chatRuntime: ChatRuntime
   inlineRuntime: InlineRuntime
+  documentImportRuntime: DocumentImportRuntime
 }
 
 /**
@@ -67,6 +74,20 @@ export async function createContainer(
   )
 
   const chatRuntime = createChatRuntime(adapter.services)
+  const documentImportQueue = new InMemoryJobQueue<DocumentImportJob>()
+  const documentImportRuntime = createDocumentImportRuntime({
+    dbPath,
+    services: adapter.services,
+    repositories: adapter.repositories,
+    transaction: adapter.transaction,
+    queue: documentImportQueue,
+    hooks: {
+      // SQLite/Bun-specific bridge: native import writes through a different
+      // SQLite stack than Bun's in-process handle, so we refresh Bun's handle
+      // after native commits. Postgres adapters should use a no-op hook.
+      afterExternalWriteCommit: () => adapter.connection.refreshPrimaryConnection(),
+    },
+  })
   const inlineRuntime = createInlineRuntime(
     adapter.services,
     {
@@ -86,5 +107,6 @@ export async function createContainer(
     embeddingRuntime,
     chatRuntime,
     inlineRuntime,
+    documentImportRuntime,
   }
 }

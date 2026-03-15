@@ -1,5 +1,5 @@
 use crate::import_plan::analysis::{parse_atx_heading, parse_setext_heading_underline};
-use crate::import_plan::fence::{is_fence_line, update_fence_state};
+use crate::markdown::fence::{is_fence_line, update_fence_state};
 
 pub(crate) fn utf16_len(value: &str) -> usize {
   value.encode_utf16().count()

@@ -1,6 +1,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+pub mod import;
 pub mod import_plan;
 pub mod markdown;
 

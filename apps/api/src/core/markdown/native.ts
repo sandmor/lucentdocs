@@ -1,5 +1,6 @@
 import type { JsonObject } from '@lucentdocs/shared'
 import {
+  importMarkdownDocumentsSqlite,
   parseMarkdown,
   planMarkdownImport as planMarkdownImportNative,
   type MarkdownRawHtmlMode as CoreRawHtmlMode,
@@ -42,6 +43,37 @@ export interface MarkdownImportPlanResult {
   normalizedMarkdown: string
   parts: MarkdownImportPlanPart[]
   html: MarkdownHtmlDetection
+}
+
+export interface NativeMassImportDocumentInput {
+  title: string
+  markdown: string
+}
+
+export interface NativeMassImportRequest {
+  projectId: string
+  documents: NativeMassImportDocumentInput[]
+  parseFailureMode?: 'fail' | 'code_block'
+  rawHtmlMode?: MarkdownRawHtmlMode
+}
+
+export interface NativeMassImportFailure {
+  title: string
+  error: {
+    kind: 'invalid_project_id' | 'invalid_path' | 'project_not_found' | 'markdown_parse_failed'
+    cause?: unknown
+  }
+}
+
+export interface NativeMassImportedDocument {
+  id: string
+  title: string
+  contentJson: string
+}
+
+export interface NativeMassImportResult {
+  imported: NativeMassImportedDocument[]
+  failed: NativeMassImportFailure[]
 }
 
 function toNativeRawHtmlMode(mode: MarkdownRawHtmlMode | undefined): CoreRawHtmlMode | undefined {
@@ -98,5 +130,32 @@ export function planMarkdownImport(
     }
   } catch (e) {
     return { ok: false, error: { kind: 'plan_failed', cause: e } }
+  }
+}
+
+export async function runNativeMassImportSqlite(
+  dbPath: string,
+  request: NativeMassImportRequest
+): Promise<NativeMassImportResult> {
+  const rawHtmlMode = toNativeRawHtmlMode(request.rawHtmlMode)
+  const response = await importMarkdownDocumentsSqlite(dbPath, {
+    projectId: request.projectId,
+    documents: request.documents,
+    parseFailureMode: request.parseFailureMode,
+    rawHtmlMode,
+  })
+
+  const parsed = JSON.parse(response) as {
+    imported: Array<{ id: string; title: string; content_json: string }>
+    failed: NativeMassImportFailure[]
+  }
+
+  return {
+    imported: parsed.imported.map((item) => ({
+      id: item.id,
+      title: item.title,
+      contentJson: item.content_json,
+    })),
+    failed: parsed.failed,
   }
 }

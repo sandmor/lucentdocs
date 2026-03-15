@@ -4,11 +4,8 @@ use std::collections::HashMap;
 use crate::MarkdownRawHtmlMode;
 
 mod analysis;
-mod fence;
 mod frontmatter;
-mod html;
 mod split;
-mod text;
 mod title;
 
 // ── NAPI types ──────────────────────────────────────────────────────────────
@@ -49,14 +46,6 @@ pub struct MarkdownImportPlanResult {
   pub html: MarkdownHtmlDetection,
 }
 
-pub(crate) fn normalize_markdown_for_import(
-  markdown: &str,
-  raw_html_mode: MarkdownRawHtmlMode,
-) -> String {
-  let normalized = text::normalize_newlines(markdown);
-  html::normalize_html_in_markdown(&normalized, raw_html_mode)
-}
-
 // ── Main entry point ────────────────────────────────────────────────────────
 
 #[napi]
@@ -64,12 +53,13 @@ pub fn plan_markdown_import(
   markdown: String,
   options: MarkdownImportPlanOptions,
 ) -> std::result::Result<MarkdownImportPlanResult, napi::Error> {
-  let normalized = text::normalize_newlines(&markdown);
+  let normalized = crate::markdown::text::normalize_newlines(&markdown);
   let html = analysis::detect_html_in_markdown(&normalized);
   let raw_html_mode = options
     .raw_html_mode
     .unwrap_or(MarkdownRawHtmlMode::CodeBlock);
-  let with_html_handled = html::normalize_html_in_markdown(&normalized, raw_html_mode);
+  let with_html_handled =
+    crate::markdown::html::normalize_html_in_markdown(&normalized, raw_html_mode);
 
   let (frontmatter, body) = frontmatter::extract_yaml_frontmatter(&with_html_handled);
   let hard_max = std::cmp::max(1, options.max_doc_chars);

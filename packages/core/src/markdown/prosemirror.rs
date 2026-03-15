@@ -1,11 +1,13 @@
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use serde_json::{json, Map, Value};
 
-pub fn parse_to_prosemirror(
+use crate::MarkdownRawHtmlMode;
+
+pub(crate) fn parse_to_prosemirror(
   markdown: &str,
-  raw_html_mode: crate::MarkdownRawHtmlMode,
+  raw_html_mode: MarkdownRawHtmlMode,
 ) -> Result<Value, String> {
-  let normalized = crate::import_plan::normalize_markdown_for_import(markdown, raw_html_mode);
+  let normalized = super::normalize(markdown, raw_html_mode);
   let mut opts = Options::empty();
   opts.insert(Options::ENABLE_SMART_PUNCTUATION);
   let parser = Parser::new_ext(&normalized, opts);
@@ -97,7 +99,7 @@ pub fn parse_to_prosemirror(
         }
       }
       Event::Html(html) => {
-        if raw_html_mode == crate::MarkdownRawHtmlMode::Drop {
+        if raw_html_mode == MarkdownRawHtmlMode::Drop {
           continue;
         }
         if let Some(parent) = stack.last_mut() {
@@ -115,7 +117,7 @@ pub fn parse_to_prosemirror(
         }
       }
       Event::InlineHtml(html) => {
-        if raw_html_mode == crate::MarkdownRawHtmlMode::Drop {
+        if raw_html_mode == MarkdownRawHtmlMode::Drop {
           continue;
         }
         if let Some(parent) = stack.last_mut() {

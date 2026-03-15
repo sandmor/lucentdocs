@@ -25,6 +25,9 @@ function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): 
     embeddingRuntime: {} as AppContext['embeddingRuntime'],
     chatRuntime: {} as AppContext['chatRuntime'],
     inlineRuntime: {} as AppContext['inlineRuntime'],
+    documentImportRuntime: {
+      enqueueImport: () => ({ jobId: 'test-job', queued: 0, queuedJobs: 0 }),
+    },
   }
 }
 

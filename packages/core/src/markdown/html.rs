@@ -1,5 +1,5 @@
-use crate::import_plan::fence::{is_fence_line, update_fence_state};
-use crate::import_plan::text::{
+use super::fence::{is_fence_line, update_fence_state};
+use super::text::{
   choose_backtick_fence, collapse_triple_newlines, escape_markdown_label,
   escape_markdown_link_destination, escape_markdown_title,
 };

@@ -1,6 +1,6 @@
 use crate::import_plan::analysis::{parse_atx_heading, parse_setext_heading_underline};
-use crate::import_plan::fence::update_fence_state;
-use crate::import_plan::text::strip_inline_markdown_noise;
+use crate::markdown::fence::update_fence_state;
+use crate::markdown::text::strip_inline_markdown_noise;
 
 pub(crate) fn suggested_title_from_part(markdown: &str) -> Option<String> {
   let lines: Vec<&str> = markdown.split('\n').collect();

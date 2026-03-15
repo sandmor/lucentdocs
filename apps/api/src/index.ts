@@ -47,6 +47,7 @@ function createTrpcContext({ req, user }: { req?: Request; user: User | null }):
     embeddingRuntime: container.embeddingRuntime,
     chatRuntime: container.chatRuntime,
     inlineRuntime: container.inlineRuntime,
+    documentImportRuntime: container.documentImportRuntime,
   }
 }
 

@@ -768,28 +768,17 @@ export function useDocumentBrowser({
 
       setImportProgress({
         total: result.total,
-        imported: result.imported,
-        failed: result.failed,
+        imported: 0,
+        failed: 0,
         isRunning: false,
       })
 
-      if (result.firstImportedDocumentId) {
-        onOpenDocument(result.firstImportedDocumentId)
-      }
-
-      if (result.imported > 0) {
-        toast.success('Import complete', {
-          description:
-            result.failed > 0
-              ? `${result.imported} imported, ${result.failed} failed`
-              : `${result.imported} imported`,
-        })
-        invalidateBrowserQueries()
-        setImportDialogOpen(false)
-        setImportDraft(null)
-      } else {
-        toast.error('Import failed')
-      }
+      toast.success('Import queued', {
+        description: `${result.total} documents scheduled for background import.`,
+      })
+      invalidateBrowserQueries()
+      setImportDialogOpen(false)
+      setImportDraft(null)
     } catch (error) {
       toast.error('Import failed', {
         description: error instanceof Error ? error.message : 'Unknown error',
@@ -808,7 +797,6 @@ export function useDocumentBrowser({
     importRawHtmlMode,
     invalidateBrowserQueries,
     loadImportLimits,
-    onOpenDocument,
     projectId,
   ])
 

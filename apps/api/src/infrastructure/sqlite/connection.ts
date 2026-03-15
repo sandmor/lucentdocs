@@ -242,23 +242,31 @@ export class SqliteConnection implements ConnectionPort {
   }
 
   get<T>(sql: string, params: unknown[]): T | undefined {
-    const stmt = this.#getActiveDb().query(sql)
-    return stmt.get(...(params as Parameters<typeof stmt.get>)) as T | undefined
+    return this.#runWithPrimaryRecovery((db) => {
+      const stmt = db.query(sql)
+      return stmt.get(...(params as Parameters<typeof stmt.get>)) as T | undefined
+    })
   }
 
   all<T>(sql: string, params: unknown[]): T[] {
-    const stmt = this.#getActiveDb().query(sql)
-    return stmt.all(...(params as Parameters<typeof stmt.all>)) as T[]
+    return this.#runWithPrimaryRecovery((db) => {
+      const stmt = db.query(sql)
+      return stmt.all(...(params as Parameters<typeof stmt.all>)) as T[]
+    })
   }
 
   run(sql: string, params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-    const stmt = this.#getActiveDb().query(sql)
-    const result = stmt.run(...(params as Parameters<typeof stmt.run>))
-    return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
+    return this.#runWithPrimaryRecovery((db) => {
+      const stmt = db.query(sql)
+      const result = stmt.run(...(params as Parameters<typeof stmt.run>))
+      return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
+    })
   }
 
   exec(sql: string): void {
-    this.#getActiveDb().exec(sql)
+    this.#runWithPrimaryRecovery((db) => {
+      db.exec(sql)
+    })
   }
 
   transaction<T>(fn: () => T): T {
@@ -279,8 +287,10 @@ export class SqliteConnection implements ConnectionPort {
     }
 
     const isolated = new Database(this.#dbPath)
-    this.#configureDatabase(isolated, { enableWal: true })
-    isolated.exec(SCHEMA)
+    // WAL mode is persisted at the database level and configured on startup.
+    // Re-running schema/pragma setup for each transient connection adds avoidable
+    // churn and can race with native import workloads opening their own handles.
+    this.#configureDatabase(isolated, { enableWal: false })
     return {
       db: isolated,
       close: () => {
@@ -291,6 +301,17 @@ export class SqliteConnection implements ConnectionPort {
 
   close(): void {
     this.#db.close()
+  }
+
+  /**
+   * SQLite/Bun-specific maintenance hook.
+   *
+   * Some native paths (NAPI/sqlx) can write through a separate SQLite stack.
+   * Refreshing the Bun primary handle keeps repository reads/writes coherent
+   * after those external commits.
+   */
+  refreshPrimaryConnection(): void {
+    this.#reopenPrimaryDatabase()
   }
 
   getRaw(): Database {
@@ -308,6 +329,58 @@ export class SqliteConnection implements ConnectionPort {
     db.run('PRAGMA foreign_keys = ON')
     db.run('PRAGMA busy_timeout = 5000')
     sqliteVec.load(db)
+  }
+
+  #runWithPrimaryRecovery<T>(operation: (db: Database) => T): T {
+    const activeDb = this.#getActiveDb()
+    try {
+      return operation(activeDb)
+    } catch (error) {
+      if (activeDb !== this.#db || !this.#isRecoverablePrimaryError(error)) {
+        throw error
+      }
+
+      // Recovery is intentionally scoped to the SQLite primary handle.
+      // Higher-level ports remain database-agnostic.
+      this.#reopenPrimaryDatabase()
+      return operation(this.#db)
+    }
+  }
+
+  #reopenPrimaryDatabase(): void {
+    if (this.#dbPath === ':memory:') return
+
+    try {
+      this.#db.close()
+    } catch {
+      void 0
+    }
+
+    this.#db = new Database(this.#dbPath)
+    this.#configureDatabase(this.#db, { enableWal: true })
+    this.#db.exec(SCHEMA)
+  }
+
+  #isRecoverablePrimaryError(error: unknown): boolean {
+    const maybe = error as { code?: string; message?: string }
+    const code = maybe?.code ?? ''
+    const message = maybe?.message ?? ''
+
+    if (
+      code === 'SQLITE_NOTADB' ||
+      code === 'SQLITE_IOERR_SHORT_READ' ||
+      code === 'SQLITE_CANTOPEN'
+    ) {
+      return true
+    }
+
+    if (/file is not a database/i.test(message)) {
+      return true
+    }
+
+    const coreTableMissingPattern =
+      /no such table:\s*(projects|documents|project_documents|yjs_documents|version_snapshots|document_embedding_jobs|document_embeddings)/i
+    return coreTableMissingPattern.test(message)
   }
 }
 

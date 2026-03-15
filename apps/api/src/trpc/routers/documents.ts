@@ -36,18 +36,6 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 )
 const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSchema)
 
-async function getProjectDefaultDocumentId(
-  projectId: string,
-  services: {
-    projects: { getById: (id: string) => Promise<{ metadata: JsonObject | null } | null> }
-  }
-): Promise<string | null> {
-  const project = await services.projects.getById(projectId)
-  if (!project?.metadata) return null
-  const value = project.metadata['default_document']
-  return typeof value === 'string' && isValidId(value) ? value : null
-}
-
 function normalizeAndValidatePath(inputPath: string, label: string): string {
   const normalized = normalizeDocumentPath(inputPath)
   if (!normalized) {
@@ -309,7 +297,9 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
+      const defaultDocumentId = await ctx.services.documents.getDefaultDocumentIdForProject(
+        input.projectId
+      )
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -362,7 +352,8 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(projectId, ctx.services)
+      const defaultDocumentId =
+        await ctx.services.documents.getDefaultDocumentIdForProject(projectId)
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId,
@@ -523,7 +514,9 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
+      const defaultDocumentId = await ctx.services.documents.getDefaultDocumentIdForProject(
+        input.projectId
+      )
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -557,7 +550,9 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
+      const defaultDocumentId = await ctx.services.documents.getDefaultDocumentIdForProject(
+        input.projectId
+      )
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -613,7 +608,9 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
+      const defaultDocumentId = await ctx.services.documents.getDefaultDocumentIdForProject(
+        input.projectId
+      )
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -769,7 +766,9 @@ export const documentsRouter = router({
         throw new TRPCError({ code, message })
       }
 
-      const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
+      const defaultDocumentId = await ctx.services.documents.getDefaultDocumentIdForProject(
+        input.projectId
+      )
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
@@ -823,25 +822,19 @@ export const documentsRouter = router({
         parseFailureMode: input.parseFailureMode,
       })
 
-      const result = await ctx.services.documents.importManyForProject(
-        input.projectId,
-        input.documents,
-        { parseFailureMode: input.parseFailureMode }
-      )
+      const enqueueResult = ctx.documentImportRuntime.enqueueImport({
+        projectId: input.projectId,
+        documents: input.documents,
+        parseFailureMode: input.parseFailureMode,
+        reason: 'documents.import-many',
+      })
 
-      if (result.imported.length > 0) {
-        const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
-        projectSyncBus.publish({
-          type: 'documents.changed',
-          projectId: input.projectId,
-          reason: 'documents.import-many',
-          changedDocumentIds: result.imported.map((doc) => doc.id),
-          deletedDocumentIds: [],
-          defaultDocumentId,
-        })
+      return {
+        status: 'queued' as const,
+        jobId: enqueueResult.jobId,
+        queued: enqueueResult.queued,
+        queuedJobs: enqueueResult.queuedJobs,
       }
-
-      return result
     }),
 
   importSplit: protectedProcedure
@@ -891,40 +884,19 @@ export const documentsRouter = router({
         includeContents: input.includeContents,
       })
 
-      const batches: Array<Array<{ title: string; markdown: string }>> = []
-      for (let i = 0; i < plannedDocuments.length; i += limits.docImportBatchDocs) {
-        batches.push(plannedDocuments.slice(i, i + limits.docImportBatchDocs))
-      }
-
-      const importedIds: string[] = []
-      let failed = 0
-
-      for (const batch of batches) {
-        const result = await ctx.services.documents.importManyForProject(input.projectId, batch, {
-          parseFailureMode: 'code_block',
-          rawHtmlMode: input.rawHtmlMode,
-        })
-        importedIds.push(...result.imported.map((doc) => doc.id))
-        failed += result.failed.length
-      }
-
-      if (importedIds.length > 0) {
-        const defaultDocumentId = await getProjectDefaultDocumentId(input.projectId, ctx.services)
-        projectSyncBus.publish({
-          type: 'documents.changed',
-          projectId: input.projectId,
-          reason: 'documents.import-split',
-          changedDocumentIds: importedIds,
-          deletedDocumentIds: [],
-          defaultDocumentId,
-        })
-      }
+      const enqueueResult = ctx.documentImportRuntime.enqueueImport({
+        projectId: input.projectId,
+        documents: plannedDocuments,
+        parseFailureMode: 'code_block',
+        rawHtmlMode: input.rawHtmlMode,
+        reason: 'documents.import-split',
+      })
 
       return {
+        status: 'queued' as const,
+        jobId: enqueueResult.jobId,
         total: plannedDocuments.length,
-        imported: importedIds.length,
-        failed,
-        firstImportedDocumentId: importedIds[0] ?? null,
+        queuedJobs: enqueueResult.queuedJobs,
       }
     }),
 })

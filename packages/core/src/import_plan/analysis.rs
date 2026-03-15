@@ -1,5 +1,5 @@
 use super::MarkdownHtmlDetection;
-use crate::import_plan::fence::update_fence_state;
+use crate::markdown::fence::update_fence_state;
 use std::collections::HashMap;
 
 pub(crate) fn parse_atx_heading(line: &str) -> Option<(u32, String)> {

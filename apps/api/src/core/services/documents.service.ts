@@ -14,7 +14,7 @@ import {
   toDirectorySentinelPath,
   isJsonObject,
 } from '@lucentdocs/shared'
-import { markdownToProseMirrorDoc, type MarkdownRawHtmlMode } from '../markdown/native.js'
+import { markdownToProseMirrorDoc } from '../markdown/native.js'
 import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
@@ -74,8 +74,6 @@ export type ImportDocumentErrorKind =
   | 'project_not_found'
   | 'markdown_parse_failed'
 
-export type ImportDocumentParseFailureMode = 'fail' | 'code_block'
-
 export interface ImportDocumentError {
   kind: ImportDocumentErrorKind
   cause?: unknown
@@ -84,33 +82,6 @@ export interface ImportDocumentError {
 export type ImportDocumentResult =
   | { ok: true; doc: DocumentWithContent }
   | { ok: false; error: ImportDocumentError }
-
-export interface ImportManyDocumentInput {
-  title: string
-  markdown: string
-}
-
-export interface ImportManyDocumentFailure {
-  title: string
-  error: ImportDocumentError
-}
-
-export interface ImportManyDocumentsResult {
-  imported: DocumentWithContent[]
-  failed: ImportManyDocumentFailure[]
-}
-
-function buildCodeBlockDoc(markdown: string): JsonObject {
-  return {
-    type: 'doc',
-    content: [
-      {
-        type: 'code_block',
-        content: [{ type: 'text', text: markdown.replace(/\r\n?/g, '\n') }],
-      },
-    ],
-  } as unknown as JsonObject
-}
 
 export interface DocumentsService {
   getById(id: string): Promise<Document | null>
@@ -151,6 +122,7 @@ export interface DocumentsService {
   delete(id: string): Promise<boolean>
   deleteForProject(projectId: string, documentId: string): Promise<boolean>
 
+  getDefaultDocumentIdForProject(projectId: string): Promise<string | null>
   setDefaultForProject(projectId: string, documentId: string): Promise<boolean>
   openOrCreateDefaultForProject(projectId: string): Promise<DocumentWithContent | null>
 
@@ -180,15 +152,6 @@ export interface DocumentsService {
     title: string,
     markdown: string
   ): Promise<ImportDocumentResult>
-
-  importManyForProject(
-    projectId: string,
-    documents: ImportManyDocumentInput[],
-    options?: {
-      parseFailureMode?: ImportDocumentParseFailureMode
-      rawHtmlMode?: MarkdownRawHtmlMode
-    }
-  ): Promise<ImportManyDocumentsResult>
 
   getVersionHistory(id: string): Promise<VersionSnapshot[]>
   getVersionHistoryForProject(projectId: string, documentId: string): Promise<VersionSnapshot[]>
@@ -825,6 +788,12 @@ export function createDocumentsService(
       return this.delete(documentId)
     },
 
+    async getDefaultDocumentIdForProject(projectId: string): Promise<string | null> {
+      if (!isValidId(projectId)) return null
+      const project = await repos.projects.findById(projectId)
+      return getDefaultDocumentIdFromMetadata(project?.metadata ?? null)
+    },
+
     async setDefaultForProject(projectId: string, documentId: string): Promise<boolean> {
       const doc = await getProjectScopedDocument(repos, projectId, documentId)
       if (!doc) return false
@@ -1107,125 +1076,6 @@ export function createDocumentsService(
 
         return { ok: true, doc } as const
       })
-    },
-
-    async importManyForProject(
-      projectId: string,
-      documents: ImportManyDocumentInput[],
-      options: {
-        parseFailureMode?: ImportDocumentParseFailureMode
-        rawHtmlMode?: MarkdownRawHtmlMode
-      } = {}
-    ): Promise<ImportManyDocumentsResult> {
-      const parseFailureMode = options.parseFailureMode ?? 'fail'
-
-      if (!isValidId(projectId)) {
-        return {
-          imported: [],
-          failed: documents.map((doc) => ({
-            title: doc.title,
-            error: { kind: 'invalid_project_id' },
-          })),
-        }
-      }
-
-      const candidates: Array<{
-        requestedTitle: string
-        normalizedTitle: string
-        content: string
-      }> = []
-      const failed: ImportManyDocumentFailure[] = []
-
-      for (const item of documents) {
-        const normalizedTitle = normalizeDocumentPath(item.title)
-        if (!normalizedTitle) {
-          failed.push({ title: item.title, error: { kind: 'invalid_path' } })
-          continue
-        }
-
-        if (isDirectorySentinelPath(normalizedTitle) || pathHasSentinelSegment(normalizedTitle)) {
-          failed.push({ title: item.title, error: { kind: 'invalid_path' } })
-          continue
-        }
-
-        const parseResult = markdownToProseMirrorDoc(item.markdown, {
-          rawHtmlMode: options.rawHtmlMode,
-        })
-        if (!parseResult.ok) {
-          if (parseFailureMode === 'code_block') {
-            const docJson = buildCodeBlockDoc(item.markdown)
-            candidates.push({
-              requestedTitle: item.title,
-              normalizedTitle,
-              content: JSON.stringify({ doc: docJson, aiDraft: null }),
-            })
-            continue
-          }
-
-          failed.push({
-            title: item.title,
-            error: { kind: 'markdown_parse_failed', cause: parseResult.error.cause },
-          })
-          continue
-        }
-
-        candidates.push({
-          requestedTitle: item.title,
-          normalizedTitle,
-          content: JSON.stringify({ doc: parseResult.value, aiDraft: null }),
-        })
-      }
-
-      if (candidates.length === 0) {
-        return { imported: [], failed }
-      }
-
-      const imported = await transaction.run(async () => {
-        const project = await repos.projects.findById(projectId)
-        if (!project) {
-          const projectNotFoundFailures = documents.map((doc) => ({
-            title: doc.title,
-            error: { kind: 'project_not_found' } as ImportDocumentError,
-          }))
-          failed.push(...projectNotFoundFailures)
-          return [] as DocumentWithContent[]
-        }
-
-        const docs = await listDocumentsForProject(projectId)
-        const existingPaths: string[] = docs.map((d) => normalizeDocumentPath(d.title))
-        const allocatedPaths = new Set(existingPaths.filter(Boolean))
-
-        const created: DocumentWithContent[] = []
-        for (const item of candidates) {
-          const uniquePath = resolveUniqueImportPath(item.normalizedTitle, [...allocatedPaths])
-          allocatedPaths.add(uniquePath)
-
-          const doc = await createDocument(uniquePath, item.content, 'manuscript', {
-            notifyObserver: false,
-          })
-          await repos.projectDocuments.insert({
-            projectId,
-            documentId: doc.id,
-            addedAt: Date.now(),
-          })
-          created.push(doc)
-        }
-
-        return created
-      })
-
-      if (imported.length > 0) {
-        const ids = imported.map((doc) => doc.id)
-        if (resolvedObserver.onDocumentsContentStored) {
-          await resolvedObserver.onDocumentsContentStored(ids)
-        } else {
-          for (const id of ids) {
-            await resolvedObserver.onDocumentContentStored?.(id)
-          }
-        }
-      }
-
-      return { imported, failed }
     },
 
     async getVersionHistory(id: string): Promise<VersionSnapshot[]> {
