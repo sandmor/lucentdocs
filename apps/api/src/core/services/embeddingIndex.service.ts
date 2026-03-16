@@ -9,9 +9,8 @@ import type {
   DocumentEmbeddingQueueStats,
   DocumentEmbeddingEntity,
 } from '../ports/documentEmbeddings.port.js'
-import { buildEmbeddingChunks } from '../../embeddings/chunking.js'
-import { buildDocumentEmbeddingProjectionSnapshot } from '../../embeddings/document-content.js'
-import { mapProjectionGraphemeRangeToSelection } from '../../embeddings/document-projection.js'
+import { readDocumentContentSnapshot } from '../../embeddings/document-content.js'
+import { prepareEmbeddingDocumentsNative } from '../../embeddings/native-preparation.js'
 import { getEmbeddingProvider } from '../../embeddings/provider.js'
 import { normalizeBaseURL } from '../ai/provider-types.js'
 
@@ -152,6 +151,9 @@ export function createEmbeddingIndexService(
     const provider = await getEmbeddingProvider()
     const documents = await repos.documents.findByIds(jobsToProcess.map((job) => job.documentId))
     const documentsById = new Map(documents.map((document) => [document.id, document]))
+    const resolvedStrategies = await indexingSettingsService.resolveForDocuments(
+      jobsToProcess.map((job) => job.documentId)
+    )
 
     const documentsToEmbed: Array<{
       documentId: string
@@ -164,20 +166,94 @@ export function createEmbeddingIndexService(
     const candidatesToClear: Array<{ documentId: string; expectedLastQueuedAt: number }> = []
     let skipped = 0
 
+    const nativePreparationRequests: Array<{
+      documentId: string
+      title: string
+      content: string
+      strategy: IndexingStrategy
+    }> = []
+
+    await Promise.all(
+      jobsToProcess.map(async (job) => {
+        const document = documentsById.get(job.documentId)
+        if (!document) {
+          candidatesToClear.push({
+            documentId: job.documentId,
+            expectedLastQueuedAt: job.lastQueuedAt,
+          })
+          return
+        }
+
+        const resolvedStrategy = resolvedStrategies.get(document.id)
+        if (!resolvedStrategy) {
+          candidatesToClear.push({
+            documentId: document.id,
+            expectedLastQueuedAt: job.lastQueuedAt,
+          })
+          return
+        }
+
+        const content = await readDocumentContentSnapshot(repos, document.id)
+        nativePreparationRequests.push({
+          documentId: document.id,
+          title: document.title,
+          content,
+          strategy: resolvedStrategy.strategy,
+        })
+      })
+    )
+
+    const preparationFailuresByDocumentId = new Map<string, Error>()
+    let preparedDocuments: Awaited<ReturnType<typeof prepareEmbeddingDocumentsNative>> = []
+    try {
+      preparedDocuments = await prepareEmbeddingDocumentsNative(nativePreparationRequests)
+    } catch (batchError) {
+      for (const request of nativePreparationRequests) {
+        try {
+          const prepared = await prepareEmbeddingDocumentsNative([request])
+          preparedDocuments.push(...prepared)
+        } catch (singleError) {
+          preparationFailuresByDocumentId.set(
+            request.documentId,
+            singleError instanceof Error
+              ? singleError
+              : new Error(`Unknown native preparation error: ${String(singleError)}`)
+          )
+        }
+      }
+
+      if (preparationFailuresByDocumentId.size === 0) {
+        throw batchError
+      }
+    }
+
+    const preparedByDocumentId = new Map(
+      preparedDocuments.map((prepared) => [prepared.documentId, prepared])
+    )
+
     for (const job of jobsToProcess) {
       const document = documentsById.get(job.documentId)
       if (!document) {
-        candidatesToClear.push({
-          documentId: job.documentId,
-          expectedLastQueuedAt: job.lastQueuedAt,
-        })
         continue
       }
 
-      const projection = await buildDocumentEmbeddingProjectionSnapshot(repos, document)
       const documentTimestamp = now
-      const resolvedStrategy = await indexingSettingsService.resolveForDocument(document.id)
+      const resolvedStrategy = resolvedStrategies.get(document.id)
       if (!resolvedStrategy) {
+        continue
+      }
+
+      const prepared = preparedByDocumentId.get(document.id)
+      if (!prepared) {
+        if (preparationFailuresByDocumentId.has(document.id)) {
+          candidatesToClear.push({
+            documentId: document.id,
+            expectedLastQueuedAt: job.lastQueuedAt,
+          })
+          skipped += 1
+          continue
+        }
+
         candidatesToClear.push({
           documentId: document.id,
           expectedLastQueuedAt: job.lastQueuedAt,
@@ -185,28 +261,12 @@ export function createEmbeddingIndexService(
         continue
       }
 
-      const chunks = buildEmbeddingChunks(projection.text, resolvedStrategy.strategy).map(
-        (chunk) => {
-          const selectionRange =
-            resolvedStrategy.strategy.type === 'whole_document'
-              ? null
-              : mapProjectionGraphemeRangeToSelection(projection, chunk.start, chunk.end)
-
-          return {
-            ordinal: chunk.ordinal,
-            start: chunk.start,
-            end: chunk.end,
-            selectionFrom: selectionRange?.from ?? null,
-            selectionTo: selectionRange?.to ?? null,
-            text: chunk.text,
-          }
-        }
-      )
+      const chunks = prepared.chunks
 
       const contentHash = hashEmbeddingText(
         JSON.stringify({
           strategy: resolvedStrategy.strategy,
-          text: projection.text,
+          text: prepared.projectionText,
         })
       )
       const existing = await repos.documentEmbeddings.findEmbeddings(

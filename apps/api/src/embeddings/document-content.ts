@@ -1,12 +1,11 @@
 import * as Y from 'yjs'
 import { yDocToProsemirrorJSON } from 'y-prosemirror'
-import { createDefaultContent, type Document } from '@lucentdocs/shared'
+import { createDefaultContent } from '@lucentdocs/shared'
 import type { RepositorySet } from '../core/ports/types.js'
-import {
-  buildDocumentEmbeddingProjection,
-  type DocumentEmbeddingProjection,
-} from './document-projection.js'
 
+/**
+ * Reads the latest persisted Yjs snapshot and returns ProseMirror JSON content.
+ */
 export async function readDocumentContentSnapshot(
   repos: RepositorySet,
   documentId: string
@@ -21,20 +20,4 @@ export async function readDocumentContentSnapshot(
   } finally {
     doc.destroy()
   }
-}
-
-export async function buildDocumentEmbeddingProjectionSnapshot(
-  repos: RepositorySet,
-  document: Document
-): Promise<DocumentEmbeddingProjection> {
-  const snapshot = await readDocumentContentSnapshot(repos, document.id)
-  return buildDocumentEmbeddingProjection(document, snapshot)
-}
-
-export async function buildDocumentEmbeddingText(
-  repos: RepositorySet,
-  document: Document
-): Promise<string> {
-  const projection = await buildDocumentEmbeddingProjectionSnapshot(repos, document)
-  return projection.text
 }

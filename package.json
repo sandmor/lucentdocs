@@ -23,7 +23,7 @@
     "typecheck": "bun run typecheck:js && bun run typecheck:rust",
     "typecheck:js": "bun run --filter './apps/api' typecheck && bun run --filter './apps/web' typecheck && bun run --filter './packages/shared' typecheck",
     "typecheck:rust": "cargo check --workspace",
-    "test": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun run --filter './apps/api' --filter './packages/shared' test && LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun run --cwd apps/web test"
+    "test": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun run --filter './apps/api' --filter './packages/shared' test && LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun run --cwd apps/web test && cargo test -p core"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

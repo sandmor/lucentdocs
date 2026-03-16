@@ -1,6 +1,8 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use tokio::task;
 
+mod embedding;
 pub mod import;
 pub mod import_plan;
 pub mod markdown;
@@ -29,5 +31,20 @@ pub fn parse_markdown(
   markdown::ParsedMarkdownDocument::parse(&input, raw_html_mode)
     .map(|doc| doc.to_prosemirror_json())
     .and_then(|val| serde_json::to_string(&val).map_err(|e| e.to_string()))
+    .map_err(|e| Error::new(Status::GenericFailure, e))
+}
+
+#[napi]
+pub async fn prepare_embedding_documents(
+  requests: Vec<embedding::EmbeddingDocumentRequest>,
+) -> std::result::Result<Vec<embedding::PreparedEmbeddingDocument>, Error> {
+  task::spawn_blocking(move || embedding::prepare_embedding_documents(requests))
+    .await
+    .map_err(|e| {
+      Error::new(
+        Status::GenericFailure,
+        format!("Embedding worker join error: {e}"),
+      )
+    })?
     .map_err(|e| Error::new(Status::GenericFailure, e))
 }

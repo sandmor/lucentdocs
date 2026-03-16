@@ -580,3 +580,4 @@ module.exports.importMarkdownDocumentsSqlite = nativeBinding.importMarkdownDocum
 module.exports.MarkdownRawHtmlMode = nativeBinding.MarkdownRawHtmlMode
 module.exports.parseMarkdown = nativeBinding.parseMarkdown
 module.exports.planMarkdownImport = nativeBinding.planMarkdownImport
+module.exports.prepareEmbeddingDocuments = nativeBinding.prepareEmbeddingDocuments
