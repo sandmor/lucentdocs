@@ -3,10 +3,45 @@ use serde_json::{json, Map, Value};
 
 use crate::MarkdownRawHtmlMode;
 
-pub(crate) fn parse_to_prosemirror(
+pub(crate) struct ParsedMarkdownDocument {
+  root: ContentNode,
+}
+
+impl ParsedMarkdownDocument {
+  pub(crate) fn parse(markdown: &str, raw_html_mode: MarkdownRawHtmlMode) -> Result<Self, String> {
+    let root = parse_to_content_tree(markdown, raw_html_mode)?;
+    Ok(Self { root })
+  }
+
+  pub(crate) fn code_block_fallback(markdown: &str) -> Self {
+    Self {
+      root: build_code_block_tree(markdown),
+    }
+  }
+
+  pub(crate) fn to_prosemirror_json(&self) -> Value {
+    self.root.to_json()
+  }
+
+  pub(crate) fn to_yjs_update(&self) -> Vec<u8> {
+    crate::yjs::encode_content_tree_as_update(&self.root)
+  }
+}
+
+fn build_code_block_tree(markdown: &str) -> ContentNode {
+  let mut root = ContentNode::new("doc");
+  let mut code_block = ContentNode::new("code_block");
+  code_block.push_child(ContentNode::text(
+    markdown.replace("\r\n", "\n").replace('\r', "\n"),
+  ));
+  root.push_child(code_block);
+  root
+}
+
+fn parse_to_content_tree(
   markdown: &str,
   raw_html_mode: MarkdownRawHtmlMode,
-) -> Result<Value, String> {
+) -> Result<ContentNode, String> {
   let normalized = super::normalize(markdown, raw_html_mode);
   let mut opts = Options::empty();
   opts.insert(Options::ENABLE_SMART_PUNCTUATION);
@@ -54,7 +89,10 @@ pub(crate) fn parse_to_prosemirror(
                   if current_para.is_none() {
                     current_para = Some(ContentNode::new("paragraph"));
                   }
-                  current_para.as_mut().unwrap().push_child(child);
+                  current_para
+                    .as_mut()
+                    .expect("paragraph set")
+                    .push_child(child);
                 } else {
                   if let Some(p) = current_para.take() {
                     new_children.push(p);
@@ -163,11 +201,11 @@ pub(crate) fn parse_to_prosemirror(
     final_root.push_child(ContentNode::new("paragraph"));
   }
 
-  Ok(final_root.to_json())
+  Ok(final_root)
 }
 
 #[derive(Debug, Clone)]
-struct ContentNode {
+pub(crate) struct ContentNode {
   pub type_name: String,
   pub attrs: Map<String, Value>,
   pub children: Vec<ContentNode>,
@@ -176,7 +214,7 @@ struct ContentNode {
 }
 
 impl ContentNode {
-  fn new(type_name: &str) -> Self {
+  pub(crate) fn new(type_name: &str) -> Self {
     Self {
       type_name: type_name.to_string(),
       attrs: Map::new(),
@@ -186,7 +224,7 @@ impl ContentNode {
     }
   }
 
-  fn text(text: String) -> Self {
+  pub(crate) fn text(text: String) -> Self {
     Self {
       type_name: "text".to_string(),
       attrs: Map::new(),
@@ -196,9 +234,8 @@ impl ContentNode {
     }
   }
 
-  fn push_child(&mut self, child: ContentNode) {
+  pub(crate) fn push_child(&mut self, child: ContentNode) {
     if child.type_name == "text" {
-      // merge adjacent text nodes with same marks
       if let Some(last) = self.children.last_mut() {
         if last.type_name == "text" && last.marks == child.marks {
           if let (Some(last_text), Some(child_text)) = (&mut last.text, &child.text) {
@@ -211,7 +248,7 @@ impl ContentNode {
     self.children.push(child);
   }
 
-  fn to_json(&self) -> Value {
+  pub(crate) fn to_json(&self) -> Value {
     let mut obj = Map::new();
     obj.insert("type".to_string(), json!(self.type_name));
 

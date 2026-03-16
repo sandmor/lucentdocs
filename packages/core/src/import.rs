@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde::Serialize;
-use serde_json::{json, Value};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::Row;
 use std::path::Path;
@@ -31,7 +30,6 @@ pub struct MassImportRequest {
 struct ImportedDocumentResult {
   id: String,
   title: String,
-  content_json: String,
 }
 
 #[derive(Serialize)]
@@ -150,16 +148,6 @@ fn resolve_unique_import_path(requested_path: &str, existing_paths: &[String]) -
   }
 
   "imported.md".to_string()
-}
-
-fn build_code_block_doc(markdown: &str) -> Value {
-  json!({
-    "type": "doc",
-    "content": [{
-      "type": "code_block",
-      "content": [{ "type": "text", "text": markdown.replace("\r\n", "\n").replace('\r', "\n") }]
-    }]
-  })
 }
 
 #[napi]
@@ -301,7 +289,7 @@ pub async fn import_markdown_documents_sqlite(
       continue;
     }
 
-    let parsed_doc = match markdown::parse_to_prosemirror(
+    let parsed_document = match markdown::ParsedMarkdownDocument::parse(
       &document.markdown,
       request
         .raw_html_mode
@@ -310,7 +298,7 @@ pub async fn import_markdown_documents_sqlite(
       Ok(parsed) => parsed,
       Err(error) => {
         if parse_failure_mode == "code_block" {
-          build_code_block_doc(&document.markdown)
+          markdown::ParsedMarkdownDocument::code_block_fallback(&document.markdown)
         } else {
           failed.push(ImportFailure {
             title: document.title,
@@ -324,16 +312,13 @@ pub async fn import_markdown_documents_sqlite(
       }
     };
 
+    let yjs_blob = parsed_document.to_yjs_update();
+
     let unique_path = resolve_unique_import_path(&normalized_title, &allocated_paths);
     allocated_paths.push(unique_path.clone());
 
     let now = now_millis();
     let id = nanoid::nanoid!();
-    let content_json = json!({
-      "doc": parsed_doc,
-      "aiDraft": Value::Null,
-    })
-    .to_string();
 
     sqlx::query(
       "INSERT INTO documents (id, title, type, metadata, createdAt, updatedAt)
@@ -368,10 +353,25 @@ pub async fn import_markdown_documents_sqlite(
       )
     })?;
 
+    sqlx::query(
+      "INSERT INTO yjs_documents (name, data)
+       VALUES (?, ?)
+       ON CONFLICT(name) DO UPDATE SET data = excluded.data",
+    )
+    .bind(&id)
+    .bind(&yjs_blob)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| {
+      Error::new(
+        Status::GenericFailure,
+        format!("Failed to persist imported Yjs document: {}", e),
+      )
+    })?;
+
     imported.push(ImportedDocumentResult {
       id,
       title: unique_path,
-      content_json,
     });
   }
 

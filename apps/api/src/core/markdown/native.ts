@@ -68,7 +68,6 @@ export interface NativeMassImportFailure {
 export interface NativeMassImportedDocument {
   id: string
   title: string
-  contentJson: string
 }
 
 export interface NativeMassImportResult {
@@ -146,7 +145,7 @@ export async function runNativeMassImportSqlite(
   })
 
   const parsed = JSON.parse(response) as {
-    imported: Array<{ id: string; title: string; content_json: string }>
+    imported: Array<{ id: string; title: string }>
     failed: NativeMassImportFailure[]
   }
 
@@ -154,7 +153,6 @@ export async function runNativeMassImportSqlite(
     imported: parsed.imported.map((item) => ({
       id: item.id,
       title: item.title,
-      contentJson: item.content_json,
     })),
     failed: parsed.failed,
   }

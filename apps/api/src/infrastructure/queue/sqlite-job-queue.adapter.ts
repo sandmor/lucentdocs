@@ -169,7 +169,7 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
     const maxAttempts = normalizeAttempts(input.maxAttempts)
     const priority = normalizePriority(input.priority)
 
-    await this.transaction.run(async () => {
+    const row = await this.transaction.run(async () => {
       const existing = this.connection.get<QueueRow>(
         `SELECT *
            FROM job_queue
@@ -179,6 +179,7 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
       )
 
       if (!existing) {
+        const id = nanoid()
         this.connection.run(
           `INSERT INTO job_queue (
              id, type, dedupeKey, payloadJson, availableAt,
@@ -186,7 +187,7 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
              createdAt, updatedAt, lastError
            ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL)`,
           [
-            nanoid(),
+            id,
             input.type,
             input.dedupeKey,
             JSON.stringify(input.payload),
@@ -197,7 +198,13 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
             now,
           ]
         )
-        return
+
+        const inserted = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [id])
+        if (!inserted) {
+          throw new Error(`Failed to load queued job ${id}.`)
+        }
+
+        return inserted
       }
 
       this.connection.run(
@@ -211,19 +218,16 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
           WHERE id = ?`,
         [JSON.stringify(input.payload), input.runAt, maxAttempts, priority, now, existing.id]
       )
+
+      const updated = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [
+        existing.id,
+      ])
+      if (!updated) {
+        throw new Error(`Failed to upsert queued job ${input.type}:${input.dedupeKey}.`)
+      }
+
+      return updated
     })
-
-    const row = this.connection.get<QueueRow>(
-      `SELECT *
-         FROM job_queue
-        WHERE type = ? AND dedupeKey = ?
-        LIMIT 1`,
-      [input.type, input.dedupeKey]
-    )
-
-    if (!row) {
-      throw new Error(`Failed to upsert queued job ${input.type}:${input.dedupeKey}.`)
-    }
 
     this.notifyWaiters(input.type, row.availableAt)
 

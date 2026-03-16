@@ -1,6 +1,3 @@
-import { parseContent, type JsonObject } from '@lucentdocs/shared'
-import * as Y from 'yjs'
-import { prosemirrorJSONToYDoc } from 'y-prosemirror'
 import { z } from 'zod/v4'
 import type { RepositorySet } from '../core/ports/types.js'
 import type { TransactionPort } from '../core/ports/transaction.port.js'
@@ -125,42 +122,6 @@ export function createDocumentImportJobHandler(options: {
     return visible
   }
 
-  async function persistYjsContent(
-    imported: Array<{ id: string; contentJson: string }>
-  ): Promise<string[]> {
-    if (imported.length === 0) return []
-
-    const { schema } = await import('@lucentdocs/shared')
-    const validUpdates: Array<{ documentId: string; blob: Buffer }> = []
-    const cleanupDocumentIds: string[] = []
-
-    for (const document of imported) {
-      try {
-        const parsed = parseContent(document.contentJson)
-        const ydoc = prosemirrorJSONToYDoc(schema, parsed.doc as JsonObject)
-        const blob = Y.encodeStateAsUpdate(ydoc)
-        ydoc.destroy()
-        validUpdates.push({ documentId: document.id, blob: Buffer.from(blob) })
-      } catch (error) {
-        console.error('Failed to persist imported Yjs content for document', document.id, error)
-        cleanupDocumentIds.push(document.id)
-      }
-    }
-
-    await options.transaction.run(async () => {
-      for (const update of validUpdates) {
-        await options.repositories.yjsDocuments.set(update.documentId, update.blob)
-      }
-
-      for (const documentId of cleanupDocumentIds) {
-        await options.repositories.yjsDocuments.delete(documentId)
-        await options.repositories.documents.deleteById(documentId)
-      }
-    })
-
-    return validUpdates.map((item) => item.documentId)
-  }
-
   async function runJob(jobId: string, job: DocumentImportJob): Promise<void> {
     const importResult = await runNativeMassImportSqlite(options.dbPath, {
       projectId: job.projectId,
@@ -187,12 +148,7 @@ export function createDocumentImportJobHandler(options: {
       return
     }
 
-    const importedIds = await persistYjsContent(
-      importResult.imported.map((document) => ({
-        id: document.id,
-        contentJson: document.contentJson,
-      }))
-    )
+    const importedIds = importResult.imported.map((document) => document.id)
 
     if (importedIds.length === 0) {
       return

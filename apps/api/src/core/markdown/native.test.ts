@@ -1,9 +1,51 @@
 import { describe, expect, test } from 'bun:test'
-import { planMarkdownImport } from './native.js'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as Y from 'yjs'
+import { yDocToProsemirrorJSON } from 'y-prosemirror'
+import { createSqliteAdapter } from '../../infrastructure/sqlite/factory.js'
+import {
+  markdownToProseMirrorDoc,
+  planMarkdownImport,
+  runNativeMassImportSqlite,
+} from './native.js'
 
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: unknown }): T {
   if (!result.ok) throw result.error
   return result.value
+}
+
+function normalizePmJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizePmJson(entry))
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+
+  const input = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+
+  for (const [key, child] of Object.entries(input)) {
+    const normalizedChild = normalizePmJson(child)
+
+    if (key === 'attrs') {
+      if (
+        normalizedChild &&
+        typeof normalizedChild === 'object' &&
+        !Array.isArray(normalizedChild) &&
+        Object.keys(normalizedChild as Record<string, unknown>).length === 0
+      ) {
+        continue
+      }
+    }
+
+    out[key] = normalizedChild
+  }
+
+  return out
 }
 
 describe('planMarkdownImport', () => {
@@ -132,5 +174,112 @@ describe('planMarkdownImport', () => {
     expect(out).toContain('After')
     expect(out).not.toContain('<table')
     expect(out).not.toContain('```html')
+  })
+})
+
+describe('runNativeMassImportSqlite', () => {
+  test('persists Yjs content that y-prosemirror can decode to parser-equivalent JSON', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-native-import-yjs-'))
+    const dbPath = join(dir, 'sqlite.db')
+    const adapter = createSqliteAdapter(dbPath)
+
+    try {
+      const project = await adapter.services.projects.create('Import', { ownerUserId: 'owner_1' })
+
+      const markdown = [
+        '# Heading',
+        '',
+        'A **bold** paragraph with a [link](https://example.com).',
+        '',
+        '- One',
+        '- Two',
+        '',
+        '```ts',
+        'console.log("x")',
+        '```',
+      ].join('\n')
+
+      const parsed = markdownToProseMirrorDoc(markdown, { rawHtmlMode: 'code_block' })
+      expect(parsed.ok).toBe(true)
+      if (!parsed.ok) return
+
+      const result = await runNativeMassImportSqlite(dbPath, {
+        projectId: project.id,
+        documents: [{ title: 'rich.md', markdown }],
+        parseFailureMode: 'fail',
+        rawHtmlMode: 'code_block',
+      })
+
+      expect(result.failed).toHaveLength(0)
+      expect(result.imported).toHaveLength(1)
+
+      const importedId = result.imported[0]?.id
+      expect(importedId).toBeTruthy()
+      if (!importedId) return
+
+      const persisted = await adapter.repositories.yjsDocuments.getPersisted(importedId)
+      expect(persisted).toBeTruthy()
+      expect((persisted?.length ?? 0) > 0).toBe(true)
+      if (!persisted) return
+
+      const ydoc = new Y.Doc()
+      try {
+        Y.applyUpdate(ydoc, new Uint8Array(persisted))
+        const fromYjs = yDocToProsemirrorJSON(ydoc)
+        expect(normalizePmJson(fromYjs)).toEqual(normalizePmJson(parsed.value))
+      } finally {
+        ydoc.destroy()
+      }
+    } finally {
+      adapter.connection.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('respects rawHtmlMode=drop in persisted Yjs output', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-native-import-drop-html-'))
+    const dbPath = join(dir, 'sqlite.db')
+    const adapter = createSqliteAdapter(dbPath)
+
+    try {
+      const project = await adapter.services.projects.create('Import', { ownerUserId: 'owner_1' })
+      const markdown = ['Before', '', '<table><tr><td>Cell</td></tr></table>', '', 'After'].join(
+        '\n'
+      )
+
+      const parsed = markdownToProseMirrorDoc(markdown, { rawHtmlMode: 'drop' })
+      expect(parsed.ok).toBe(true)
+      if (!parsed.ok) return
+
+      const result = await runNativeMassImportSqlite(dbPath, {
+        projectId: project.id,
+        documents: [{ title: 'drop.md', markdown }],
+        parseFailureMode: 'fail',
+        rawHtmlMode: 'drop',
+      })
+
+      expect(result.failed).toHaveLength(0)
+      expect(result.imported).toHaveLength(1)
+
+      const importedId = result.imported[0]?.id
+      expect(importedId).toBeTruthy()
+      if (!importedId) return
+
+      const persisted = await adapter.repositories.yjsDocuments.getPersisted(importedId)
+      expect(persisted).toBeTruthy()
+      if (!persisted) return
+
+      const ydoc = new Y.Doc()
+      try {
+        Y.applyUpdate(ydoc, new Uint8Array(persisted))
+        const fromYjs = yDocToProsemirrorJSON(ydoc)
+        expect(normalizePmJson(fromYjs)).toEqual(normalizePmJson(parsed.value))
+      } finally {
+        ydoc.destroy()
+      }
+    } finally {
+      adapter.connection.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

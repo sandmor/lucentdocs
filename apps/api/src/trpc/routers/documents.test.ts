@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as Y from 'yjs'
 import { LOCAL_DEFAULT_USER, type User } from '../../core/models/user.js'
 import type { AppContext } from '../index.js'
 import { documentsRouter } from './documents.js'
@@ -369,6 +370,20 @@ describe('documentsRouter', () => {
     )
     const titles = listed.map((d) => d.title)
     expect(titles).toContain('good.md')
+
+    const importedDoc = listed.find((doc) => doc.title === 'good.md')
+    expect(importedDoc).toBeTruthy()
+    if (!importedDoc) return
+
+    const persistedYjs = await adapter.repositories.yjsDocuments.getPersisted(importedDoc.id)
+    expect(persistedYjs).toBeTruthy()
+    expect((persistedYjs?.length ?? 0) > 0).toBe(true)
+
+    const ydoc = new Y.Doc()
+    Y.applyUpdate(ydoc, new Uint8Array(persistedYjs as Buffer))
+    const fragment = ydoc.getXmlFragment('prosemirror')
+    expect(fragment.length).toBeGreaterThan(0)
+    ydoc.destroy()
   })
 
   test('importMany resolves title collisions within the same batch', async () => {
