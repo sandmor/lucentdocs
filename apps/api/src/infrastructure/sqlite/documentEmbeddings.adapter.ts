@@ -65,7 +65,7 @@ interface SearchMatchRow {
 
 type EmbeddingSearchScope =
   | { kind: 'document'; documentId: string }
-  | { kind: 'project'; projectId: string }
+  | { kind: 'project'; projectId: string; directoryPath?: string; directoryExact?: boolean }
 
 interface EmbeddingSearchQueryOptions {
   input: SearchDocumentEmbeddingsInput | SearchProjectDocumentEmbeddingsInput
@@ -73,6 +73,10 @@ interface EmbeddingSearchQueryOptions {
   normalizedBaseURL: string
   model: string
   scope: EmbeddingSearchScope
+}
+
+function escapeSqlLikePattern(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
 }
 
 function vectorTableName(dimensions: number): string {
@@ -210,12 +214,51 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
       return []
     }
 
-    const scopeSql =
-      options.scope.kind === 'document'
-        ? 'candidate.documentId = ?'
-        : 'candidate.documentId IN (SELECT pd.documentId FROM project_documents AS pd WHERE pd.projectId = ?)'
-    const scopeParam =
-      options.scope.kind === 'document' ? options.scope.documentId : options.scope.projectId
+    const scopeFragments: string[] = []
+    const scopeParams: Array<string> = []
+
+    if (options.scope.kind === 'document') {
+      scopeFragments.push('candidate.documentId = ?')
+      scopeParams.push(options.scope.documentId)
+    } else {
+      scopeFragments.push(
+        `candidate.documentId IN (
+            SELECT pd.documentId
+              FROM project_documents AS pd
+              JOIN documents AS scoped_doc ON scoped_doc.id = pd.documentId
+             WHERE pd.projectId = ?`
+      )
+      scopeParams.push(options.scope.projectId)
+
+      if (options.scope.directoryPath !== undefined) {
+        if (options.scope.directoryPath !== '') {
+          const escapedDirectoryPath = escapeSqlLikePattern(options.scope.directoryPath)
+          if (options.scope.directoryExact) {
+            scopeFragments.push(
+              `               AND scoped_doc.title LIKE ? ESCAPE '\\'
+                   AND scoped_doc.title NOT LIKE ? ESCAPE '\\'`
+            )
+            scopeParams.push(`${escapedDirectoryPath}/%`, `${escapedDirectoryPath}/%/%`)
+          } else {
+            scopeFragments.push(
+              `               AND (
+                    scoped_doc.title = ?
+                    OR scoped_doc.title LIKE ? ESCAPE '\\'
+                  )`
+            )
+            scopeParams.push(options.scope.directoryPath, `${escapedDirectoryPath}/%`)
+          }
+        } else if (options.scope.directoryExact) {
+          // directoryPath is empty string, meaning root level exactly (no subdirectories)
+          scopeFragments.push(`               AND scoped_doc.title NOT LIKE ? ESCAPE '\\'`)
+          scopeParams.push(`%/%`)
+        }
+      }
+
+      scopeFragments.push('          )')
+    }
+
+    const scopeSql = scopeFragments.join('\n')
 
     return this.connection.all<SearchMatchRow>(
       `SELECT de.documentId,
@@ -247,7 +290,7 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
       [
         new Float32Array(options.input.queryEmbedding),
         limit,
-        scopeParam,
+        ...scopeParams,
         options.normalizedBaseURL,
         options.model,
         options.dimensions,
@@ -429,7 +472,15 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
       dimensions,
       normalizedBaseURL,
       model,
-      scope: { kind: 'project', projectId: input.projectId },
+      scope:
+        input.scope.type === 'project'
+          ? { kind: 'project', projectId: input.projectId }
+          : {
+              kind: 'project',
+              projectId: input.projectId,
+              directoryPath: input.scope.directoryPath,
+              directoryExact: input.scope.type === 'directory',
+            },
     })
   }
 

@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { type ColumnDef } from '@tanstack/react-table'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   PointerSensor,
   useDroppable,
@@ -21,13 +20,11 @@ import { parseDropData } from './dnd-utils'
 import {
   basename,
   buildRows,
-  formatDate,
   normalizeDestination,
   parentPath,
   remapPathInsideDirectory,
 } from './path-utils'
-import { DirectoryCell, DocumentCell } from './row-cells'
-import { RowActionsMenu } from './row-actions-menu'
+import type { SortField, SortDirection } from './list-toolbar'
 import type {
   BrowserRow,
   DeleteTarget,
@@ -61,6 +58,10 @@ export function useDocumentBrowser({
   const [userPath, setUserPath] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const [searchMode, setSearchMode] = useState<'filter' | 'semantic'>('semantic')
+  const [searchScope, setSearchScope] = useState<'folder' | 'subtree' | 'project'>('subtree')
+  const [sortField, setSortField] = useState<SortField>('name')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [newDocumentName, setNewDocumentName] = useState('')
   const [newDirectoryName, setNewDirectoryName] = useState('')
   const [createDocumentOpen, setCreateDocumentOpen] = useState(false)
@@ -86,16 +87,20 @@ export function useDocumentBrowser({
     failed: number
     isRunning: boolean
   }>({ total: 0, imported: 0, failed: 0, isRunning: false })
-  const prevSignatureRef = useRef<string | null>(null)
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery.trim())
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [searchQuery])
+    if (searchMode === 'semantic') {
+      const timer = setTimeout(() => {
+        setDebouncedSearchQuery(searchQuery.trim())
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+    setDebouncedSearchQuery('')
+  }, [searchQuery, searchMode])
 
-  const isSearchActive = debouncedSearchQuery.length > 0
+  const isSemanticSearchActive = searchMode === 'semantic' && debouncedSearchQuery.length > 0
+  const isFilterActive = searchMode === 'filter' && searchQuery.trim().length > 0
+  const isSearchActive = isSemanticSearchActive || isFilterActive
 
   const utils = trpc.useUtils()
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -141,45 +146,129 @@ export function useDocumentBrowser({
     return active ? normalizeDocumentPath(active.title) : null
   }, [visibleDocuments, activeDocumentId])
 
-  const activeSignature = activeDocumentPath ? `${activeDocumentId}:${activeDocumentPath}` : null
-  if (activeSignature !== prevSignatureRef.current) {
-    prevSignatureRef.current = activeSignature
-    setUserPath(null)
-  }
-
   const currentPath = userPath ?? (activeDocumentPath ? parentPath(activeDocumentPath) : '')
 
   const searchResultsQuery = trpc.documents.search.useQuery(
     {
       projectId,
       query: debouncedSearchQuery,
+      scope:
+        searchScope === 'project'
+          ? { type: 'project' as const }
+          : searchScope === 'folder' && typeof currentPath === 'string'
+            ? { type: 'directory' as const, directoryPath: currentPath }
+            : searchScope === 'subtree' && typeof currentPath === 'string'
+              ? { type: 'directory_subtree' as const, directoryPath: currentPath }
+              : { type: 'project' as const },
     },
     {
-      enabled: isSearchActive,
+      enabled: isSemanticSearchActive,
     }
   )
 
-  const searchRows = useMemo<Array<BrowserRow>>(
-    () =>
-      (searchResultsQuery.data ?? []).map((result: DocumentSearchResultItem) => ({
-        key: `search:${result.id}`,
-        type: 'search-result',
-        id: result.id,
-        name: basename(normalizeDocumentPath(result.title)),
-        path: normalizeDocumentPath(result.title),
-        createdAt: result.createdAt,
-        updatedAt: result.updatedAt,
-        score: result.score,
-        matchType: result.matchType,
-        snippets: result.snippets,
-      })),
-    [searchResultsQuery.data]
+  const searchRows = useMemo<Array<BrowserRow>>(() => {
+    const results = (searchResultsQuery.data ?? []).map((result: DocumentSearchResultItem) => ({
+      key: `search:${result.id}`,
+      type: 'search-result' as const,
+      id: result.id,
+      name: basename(normalizeDocumentPath(result.title)),
+      path: normalizeDocumentPath(result.title),
+      createdAt: result.createdAt,
+      updatedAt: result.updatedAt,
+      score: result.score,
+      matchType: result.matchType,
+      snippets: result.snippets,
+    }))
+
+    return results
+  }, [searchResultsQuery.data])
+
+  // Client-side title filtering
+  const filterRows = useMemo<Array<BrowserRow>>(() => {
+    if (!isFilterActive) return []
+    const query = searchQuery.trim().toLowerCase()
+
+    let sourceRows: BrowserRow[]
+    if (searchScope === 'folder') {
+      sourceRows = buildRows(allDocuments, currentPath)
+    } else if (searchScope === 'subtree') {
+      const prefix = currentPath ? `${currentPath}/` : ''
+      sourceRows = visibleDocuments
+        .filter((doc) => {
+          const normalizedPath = normalizeDocumentPath(doc.title)
+          return !prefix || normalizedPath.startsWith(prefix)
+        })
+        .map((doc) => {
+          const normalizedPath = normalizeDocumentPath(doc.title)
+          return {
+            key: `doc:${doc.id}`,
+            type: 'document' as const,
+            id: doc.id,
+            name: basename(normalizedPath),
+            path: normalizedPath,
+            createdAt: doc.createdAt,
+            updatedAt: doc.updatedAt,
+          }
+        })
+    } else {
+      sourceRows = visibleDocuments.map((doc) => {
+        const normalizedPath = normalizeDocumentPath(doc.title)
+        return {
+          key: `doc:${doc.id}`,
+          type: 'document' as const,
+          id: doc.id,
+          name: basename(normalizedPath),
+          path: normalizedPath,
+          createdAt: doc.createdAt,
+          updatedAt: doc.updatedAt,
+        }
+      })
+    }
+
+    return sourceRows.filter((row) => {
+      if (row.type === 'search-result') return false
+      return row.name.toLowerCase().includes(query) || row.path.toLowerCase().includes(query)
+    })
+  }, [allDocuments, currentPath, isFilterActive, searchQuery, searchScope, visibleDocuments])
+
+  const sortRows = useCallback(
+    (input: BrowserRow[]): BrowserRow[] => {
+      const dirFirst = (a: BrowserRow, b: BrowserRow) => {
+        if (a.type === 'directory' && b.type !== 'directory') return -1
+        if (a.type !== 'directory' && b.type === 'directory') return 1
+        return 0
+      }
+
+      const fieldComparator = (a: BrowserRow, b: BrowserRow) => {
+        if (sortField === 'name') {
+          return sortDirection === 'asc'
+            ? a.name.localeCompare(b.name)
+            : b.name.localeCompare(a.name)
+        }
+        const aVal = a[sortField]
+        const bVal = b[sortField]
+        return sortDirection === 'asc' ? aVal - bVal : bVal - aVal
+      }
+
+      return [...input].sort((a, b) => dirFirst(a, b) || fieldComparator(a, b))
+    },
+    [sortField, sortDirection]
   )
 
-  const rows = useMemo(
-    () => (isSearchActive ? searchRows : buildRows(allDocuments, currentPath)),
-    [allDocuments, currentPath, isSearchActive, searchRows]
-  )
+  const rows = useMemo(() => {
+    if (isSemanticSearchActive) return searchRows
+    if (isFilterActive) return sortRows(filterRows)
+    return sortRows(buildRows(allDocuments, currentPath))
+  }, [
+    allDocuments,
+    currentPath,
+    filterRows,
+    isFilterActive,
+    isSemanticSearchActive,
+    searchRows,
+    sortRows,
+  ])
+
   const breadcrumbs = useMemo(() => pathSegments(currentPath), [currentPath])
 
   const invalidateBrowserQueries = useCallback(() => {
@@ -814,59 +903,9 @@ export function useDocumentBrowser({
     setDeleteTarget({ type: 'directory', path })
   }, [])
 
-  const columns = useMemo<Array<ColumnDef<BrowserRow>>>(
-    () => [
-      {
-        accessorKey: 'name',
-        header: 'Name',
-        cell: ({ row }) => {
-          const item = row.original
-          const isActive = item.type === 'document' && item.id === activeDocumentId
-
-          return item.type === 'directory' ? (
-            <DirectoryCell name={item.name} path={item.path} isActive={isActive} />
-          ) : item.type === 'document' ? (
-            <DocumentCell id={item.id} name={item.name} path={item.path} isActive={isActive} />
-          ) : null
-        },
-      },
-      {
-        accessorKey: 'updatedAt',
-        header: 'Updated',
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">{formatDate(row.original.updatedAt)}</span>
-        ),
-      },
-      {
-        id: 'actions',
-        header: '',
-        cell: ({ row }) => (
-          <RowActionsMenu
-            item={row.original}
-            onRenameDocument={handleRenameDocument}
-            onMoveDocument={handleMoveDocument}
-            onSettingsDocument={handleSettingsDocument}
-            onDeleteDocument={handleDeleteDocument}
-            onExportDocument={handleExportDocument}
-            onRenameDirectory={handleRenameDirectory}
-            onMoveDirectory={handleMoveDirectory}
-            onDeleteDirectory={handleDeleteDirectory}
-          />
-        ),
-      },
-    ],
-    [
-      activeDocumentId,
-      handleDeleteDirectory,
-      handleDeleteDocument,
-      handleExportDocument,
-      handleMoveDirectory,
-      handleMoveDocument,
-      handleSettingsDocument,
-      handleRenameDirectory,
-      handleRenameDocument,
-    ]
-  )
+  const toggleSortDirection = useCallback(() => {
+    setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+  }, [])
 
   const handleRowClick = useCallback(
     (row: BrowserRow) => {
@@ -937,17 +976,31 @@ export function useDocumentBrowser({
     isOverRoot,
     isLoading,
     isSearchActive,
+    isSemanticSearchActive,
     isSearchLoading: searchResultsQuery.isFetching,
     searchQuery,
     setSearchQuery,
     clearSearch: () => setSearchQuery(''),
-    searchResultCount: searchRows.length,
-    emptyMessage: isSearchActive
-      ? 'No semantic matches found in this project.'
-      : 'No documents in this directory.',
+    searchMode,
+    setSearchMode,
+    searchScope,
+    setSearchScope,
+    searchResultCount: isSemanticSearchActive
+      ? searchRows.length
+      : isFilterActive
+        ? filterRows.length
+        : 0,
+    emptyMessage: isSemanticSearchActive
+      ? 'No semantic matches found.'
+      : isFilterActive
+        ? 'No documents match this filter.'
+        : 'No documents in this directory.',
     rows,
-    columns,
     breadcrumbs,
+    sortField,
+    setSortField,
+    sortDirection,
+    toggleSortDirection,
     currentPath,
     createDocumentOpen,
     setCreateDocumentOpen,
@@ -1008,5 +1061,14 @@ export function useDocumentBrowser({
     isRenaming: renameMutation.isPending || moveDirectoryMutation.isPending,
     isMoving: moveDocumentMutation.isPending || moveDirectoryMutation.isPending,
     isDeleting: deleteMutation.isPending || deleteDirectoryMutation.isPending,
+    // Row action callbacks for DocumentList
+    handleRenameDocument,
+    handleMoveDocument,
+    handleSettingsDocument,
+    handleDeleteDocument,
+    handleExportDocument,
+    handleRenameDirectory,
+    handleMoveDirectory,
+    handleDeleteDirectory,
   }
 }

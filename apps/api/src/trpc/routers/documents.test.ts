@@ -283,6 +283,7 @@ describe('documentsRouter', () => {
       projectId: projectA.id,
       query: 'silver moonlight forest',
       limit: 5,
+      scope: { type: 'project' },
     })
 
     expect(results.map((result) => result.id)).toEqual([sharedDoc.id, localDoc.id])
@@ -294,6 +295,179 @@ describe('documentsRouter', () => {
     expect(results[1]?.snippets).toEqual([])
     expect(results.some((result) => result.id === foreignDoc.id)).toBe(false)
     expect(results.some((result) => result.id === mismatchedModelDoc.id)).toBe(false)
+  })
+
+  test('search supports directory subtree scope for semantic results', async () => {
+    const user: User = {
+      id: 'owner_1',
+      name: 'Owner One',
+      email: 'owner1@example.com',
+      role: 'user',
+    }
+    const adapter = createTestAdapter()
+    await initializeEmbeddingSelection(adapter)
+
+    const project = await adapter.services.projects.create('Story', { ownerUserId: user.id })
+    const inScopeDoc = await adapter.services.documents.createForProject(
+      project.id,
+      'notes/chapter-one/scene-a.md'
+    )
+    const outOfScopeDoc = await adapter.services.documents.createForProject(
+      project.id,
+      'notes/chapter-two/scene-b.md'
+    )
+
+    if (!inScopeDoc || !outOfScopeDoc) {
+      throw new Error('Expected scoped test documents to be created.')
+    }
+
+    const now = Date.now()
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: inScopeDoc.id,
+      providerConfigId: null,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'openai/text-embedding-3-small',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 200,
+      contentHash: 'in-scope-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 64,
+          text: 'Moonlight gathers over the forest floor where the path splits in two.',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: outOfScopeDoc.id,
+      providerConfigId: null,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'openai/text-embedding-3-small',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 201,
+      contentHash: 'out-scope-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 68,
+          text: 'Moonlight crosses the distant market while the harbor bells ring.',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const caller = documentsRouter.createCaller(
+      createCallerContext({
+        user,
+        adapter,
+      })
+    )
+
+    const results = await caller.search({
+      projectId: project.id,
+      query: 'moonlight path',
+      scope: { type: 'directory_subtree', directoryPath: 'notes/chapter-one' },
+      limit: 10,
+    })
+
+    expect(results.map((result) => result.id)).toEqual([inScopeDoc.id])
+  })
+
+  test('search supports root directory scope for semantic results', async () => {
+    const user: User = {
+      id: 'owner_1',
+      name: 'Owner One',
+      email: 'owner1@example.com',
+      role: 'user',
+    }
+    const adapter = createTestAdapter()
+    await initializeEmbeddingSelection(adapter)
+
+    const project = await adapter.services.projects.create('Story', { ownerUserId: user.id })
+    const rootDoc = await adapter.services.documents.createForProject(project.id, 'root-note.md')
+    const nestedDoc = await adapter.services.documents.createForProject(
+      project.id,
+      'notes/chapter-one/scene-a.md'
+    )
+
+    if (!rootDoc || !nestedDoc) {
+      throw new Error('Expected root-scope test documents to be created.')
+    }
+
+    const now = Date.now()
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: rootDoc.id,
+      providerConfigId: null,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'openai/text-embedding-3-small',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 300,
+      contentHash: 'root-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 48,
+          text: 'Moonlight catches the root-level note by the door.',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: nestedDoc.id,
+      providerConfigId: null,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'openai/text-embedding-3-small',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 301,
+      contentHash: 'nested-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 62,
+          text: 'Moonlight reaches the nested scene deeper in the chapter notes.',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const caller = documentsRouter.createCaller(
+      createCallerContext({
+        user,
+        adapter,
+      })
+    )
+
+    const results = await caller.search({
+      projectId: project.id,
+      query: 'moonlight note',
+      scope: { type: 'directory', directoryPath: '' },
+      limit: 10,
+    })
+
+    expect(results.map((result) => result.id)).toEqual([rootDoc.id])
   })
 
   test('get returns documents linked to the project even when they are shared across projects', async () => {

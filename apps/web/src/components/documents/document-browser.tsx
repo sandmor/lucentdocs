@@ -1,14 +1,20 @@
+import { useCallback, useState } from 'react'
 import { DndContext, closestCenter } from '@dnd-kit/core'
 import { Loader2 } from 'lucide-react'
-import { DataTable } from '@/components/ui/data-table'
 import { BrowserDialogs } from './browser/dialogs'
 import { BrowserHeader } from './browser/header'
+import { DocumentList } from './browser/document-list'
+import { ListToolbar } from './browser/list-toolbar'
 import { useDocumentBrowser } from './browser/use-document-browser'
 import type { DocumentBrowserProps } from './browser/types'
 import { SearchResultsList } from './browser/search-results'
 
 export function DocumentBrowser(props: DocumentBrowserProps) {
   const browser = useDocumentBrowser(props)
+  const [listScrollElement, setListScrollElement] = useState<HTMLDivElement | null>(null)
+  const handleListScrollRef = useCallback((node: HTMLDivElement | null) => {
+    setListScrollElement(node)
+  }, [])
 
   return (
     <DndContext
@@ -32,15 +38,28 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
           isSearchActive={browser.isSearchActive}
           isSearchLoading={browser.isSearchLoading}
           searchResultCount={browser.searchResultCount}
+          searchMode={browser.searchMode}
+          onSearchModeChange={browser.setSearchMode}
+          searchScope={browser.searchScope}
+          onSearchScopeChange={browser.setSearchScope}
         />
 
-        <div className="flex-1 overflow-y-auto p-3">
+        {!browser.isSearchActive && (
+          <ListToolbar
+            sortField={browser.sortField}
+            sortDirection={browser.sortDirection}
+            onSortFieldChange={browser.setSortField}
+            onSortDirectionToggle={browser.toggleSortDirection}
+          />
+        )}
+
+        <div ref={handleListScrollRef} className="flex-1 overflow-y-auto">
           {browser.isLoading && !browser.isSearchActive ? (
             <div className="text-muted-foreground flex h-24 items-center justify-center gap-2 text-sm">
               <Loader2 className="size-4 animate-spin" />
               Loading documents...
             </div>
-          ) : browser.isSearchActive ? (
+          ) : browser.isSemanticSearchActive ? (
             <SearchResultsList
               results={browser.rows}
               query={browser.searchQuery}
@@ -49,11 +68,20 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
               onOpenDocument={props.onOpenDocument}
             />
           ) : (
-            <DataTable
-              columns={browser.columns}
-              data={browser.rows}
+            <DocumentList
+              rows={browser.rows}
+              activeDocumentId={props.activeDocumentId}
+              scrollElement={listScrollElement}
               emptyMessage={browser.emptyMessage}
               onRowClick={browser.handleRowClick}
+              onRenameDocument={browser.handleRenameDocument}
+              onMoveDocument={browser.handleMoveDocument}
+              onSettingsDocument={browser.handleSettingsDocument}
+              onDeleteDocument={browser.handleDeleteDocument}
+              onExportDocument={browser.handleExportDocument}
+              onRenameDirectory={browser.handleRenameDirectory}
+              onMoveDirectory={browser.handleMoveDirectory}
+              onDeleteDirectory={browser.handleDeleteDirectory}
             />
           )}
         </div>

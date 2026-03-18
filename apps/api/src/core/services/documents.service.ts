@@ -57,6 +57,11 @@ export interface ProjectDocumentSearchResult {
   snippets: ProjectDocumentSearchSnippet[]
 }
 
+export type ProjectSemanticSearchScope =
+  | { type: 'project' }
+  | { type: 'directory'; directoryPath: string }
+  | { type: 'directory_subtree'; directoryPath: string }
+
 export interface ProjectDocumentSemanticSearchMatch {
   strategyType: 'whole_document' | 'sliding_window'
   chunkOrdinal: number
@@ -93,7 +98,11 @@ export interface DocumentsService {
   searchForProject(
     projectId: string,
     query: string,
-    options?: { limit?: number; maxSnippetsPerDocument?: number }
+    scope: ProjectSemanticSearchScope,
+    options: {
+      limit?: number
+      maxSnippetsPerDocument?: number
+    }
   ): Promise<ProjectDocumentSearchResult[]>
   searchForProjectDocument(
     projectId: string,
@@ -568,13 +577,21 @@ export function createDocumentsService(
      *
      * @param projectId - The project to search within
      * @param query - The natural language search query
+     * @param scope - The semantic search scope. Use `{ type: 'project' }` to search
+     * across the whole project, `{ type: 'directory', directoryPath }` to search
+     * only the exact directory, or `{ type: 'directory_subtree', directoryPath }` to
+     * search the directory and all subdirectories.
      * @param options.limit - Max results to return (uses config default if omitted)
      * @param options.maxSnippetsPerDocument - Max snippets per document (default 4)
      */
     async searchForProject(
       projectId: string,
       query: string,
-      options?: { limit?: number; maxSnippetsPerDocument?: number }
+      scope: ProjectSemanticSearchScope,
+      options: {
+        limit?: number
+        maxSnippetsPerDocument?: number
+      }
     ): Promise<ProjectDocumentSearchResult[]> {
       if (!isValidId(projectId)) return []
 
@@ -586,6 +603,21 @@ export function createDocumentsService(
 
       const limit = clampSearchLimit(options?.limit)
       const maxSnippetsPerDocument = clampSnippetLimit(options?.maxSnippetsPerDocument)
+      let normalizedScope: ProjectSemanticSearchScope = scope
+      if (scope.type === 'directory' || scope.type === 'directory_subtree') {
+        const normalizedDirectoryPath = normalizeDocumentPath(scope.directoryPath)
+        if (pathHasSentinelSegment(normalizedDirectoryPath)) {
+          return []
+        }
+        if (scope.type === 'directory_subtree' && normalizedDirectoryPath === '') {
+          normalizedScope = { type: 'project' }
+        } else {
+          normalizedScope = {
+            type: scope.type,
+            directoryPath: normalizedDirectoryPath,
+          }
+        }
+      }
       if (!aiSettingsService) return []
 
       const selection = await aiSettingsService.resolveRuntimeSelection('embedding')
@@ -605,6 +637,7 @@ export function createDocumentsService(
           model: selection.model,
           queryEmbedding,
           limit: candidateLimit,
+          scope: normalizedScope,
         })
         if (matches.length === 0) return []
 

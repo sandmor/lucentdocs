@@ -1,9 +1,62 @@
 import { useRef, type RefCallback } from 'react'
-import { ChevronRight, FilePlus, FolderPlus, Info, Loader2, Search, Upload, X } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Check,
+  FilePlus,
+  Filter,
+  FolderPlus,
+  Info,
+  Loader2,
+  Search,
+  Upload,
+  X,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+
+type SearchMode = 'filter' | 'semantic'
+type SearchScope = 'folder' | 'subtree' | 'project'
+
+const MODE_LABELS: Record<SearchMode, string> = {
+  filter: 'Filter by title',
+  semantic: 'Semantic search',
+}
+
+const SCOPE_LABELS: Record<SearchScope, string> = {
+  folder: 'This folder',
+  subtree: 'This folder & subfolders',
+  project: 'All documents',
+}
+
+const PLACEHOLDERS: Record<`${SearchMode}:${SearchScope}`, string> = {
+  'filter:folder': 'Filter by name in this folder…',
+  'filter:subtree': 'Filter by name in folder & subfolders…',
+  'filter:project': 'Filter by name across all documents…',
+  'semantic:folder': 'Semantic search this folder…',
+  'semantic:subtree': 'Semantic search folder & subfolders…',
+  'semantic:project': 'Semantic search all documents…',
+}
+
+const STATUS_LABELS: Record<`${SearchMode}:${SearchScope}`, string> = {
+  'filter:folder': 'Filter — this folder',
+  'filter:subtree': 'Filter — folder & subfolders',
+  'filter:project': 'Filter — all documents',
+  'semantic:folder': 'Semantic — this folder',
+  'semantic:subtree': 'Semantic — folder & subfolders',
+  'semantic:project': 'Semantic — all documents',
+}
 
 interface BrowserHeaderProps {
   breadcrumbs: string[]
@@ -20,6 +73,10 @@ interface BrowserHeaderProps {
   isSearchActive: boolean
   isSearchLoading: boolean
   searchResultCount: number
+  searchMode: SearchMode
+  onSearchModeChange: (mode: SearchMode) => void
+  searchScope: SearchScope
+  onSearchScopeChange: (scope: SearchScope) => void
 }
 
 export function BrowserHeader({
@@ -37,6 +94,10 @@ export function BrowserHeader({
   isSearchActive,
   isSearchLoading,
   searchResultCount,
+  searchMode,
+  onSearchModeChange,
+  searchScope,
+  onSearchScopeChange,
 }: BrowserHeaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -51,6 +112,8 @@ export function BrowserHeader({
       event.target.value = ''
     }
   }
+
+  const modeKey = `${searchMode}:${searchScope}` as const
 
   return (
     <header className="border-b px-3 py-2">
@@ -130,16 +193,60 @@ export function BrowserHeader({
 
       <div className="mt-2">
         <label className="sr-only" htmlFor="document-browser-search">
-          Search project documents
+          Search or filter documents
         </label>
-        <div className="relative">
-          <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" />
+        <div className="relative flex">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="text-muted-foreground absolute left-1 top-1/2 z-10 -translate-y-1/2 gap-0.5 rounded-lg px-1.5 font-normal"
+                  aria-label="Search mode"
+                />
+              }
+            >
+              {searchMode === 'filter' ? (
+                <Filter className="size-3.5" />
+              ) : (
+                <Search className="size-3.5" />
+              )}
+              <ChevronDown className="size-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-52 w-auto">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Search mode</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => onSearchModeChange('filter')}>
+                  <Filter className="size-3.5 mr-2 shrink-0" />
+                  <span className="flex-1">{MODE_LABELS.filter}</span>
+                  {searchMode === 'filter' && <Check className="size-3.5 ml-2 shrink-0" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onSearchModeChange('semantic')}>
+                  <Search className="size-3.5 mr-2 shrink-0" />
+                  <span className="flex-1">{MODE_LABELS.semantic}</span>
+                  {searchMode === 'semantic' && <Check className="size-3.5 ml-2 shrink-0" />}
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Search in</DropdownMenuLabel>
+                {(['folder', 'subtree', 'project'] as const).map((scope) => (
+                  <DropdownMenuItem key={scope} onClick={() => onSearchScopeChange(scope)}>
+                    <span className="flex-1">{SCOPE_LABELS[scope]}</span>
+                    {searchScope === scope && <Check className="size-3.5 ml-2 shrink-0" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Input
             id="document-browser-search"
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder="Search linked documents semantically"
-            className="h-9 rounded-xl border-border/70 bg-background pl-9 pr-20 text-sm shadow-none"
+            placeholder={PLACEHOLDERS[modeKey]}
+            className="h-9 rounded-xl border-border/70 bg-background pl-14 pr-20 text-sm shadow-none"
             data-document-search="true"
             autoComplete="off"
           />
@@ -162,9 +269,10 @@ export function BrowserHeader({
         </div>
       </div>
 
+      {/* Status / breadcrumbs row */}
       {isSearchActive ? (
         <div className="text-muted-foreground mt-1.5 flex items-center justify-between gap-3 text-xs">
-          <span className="truncate">Searching all documents linked to this project</span>
+          <span className="truncate">{STATUS_LABELS[modeKey]}</span>
           <span className="shrink-0">
             {searchResultCount} result{searchResultCount === 1 ? '' : 's'}
           </span>

@@ -868,7 +868,7 @@ export function EditorPage() {
 
   const sidebarContent = (
     <>
-      {sidebarPanel === 'explorer' && (
+      <div className={sidebarPanel === 'explorer' ? 'h-full' : 'hidden'}>
         <DocumentBrowser
           projectId={id}
           documents={documentsQuery.data ?? []}
@@ -876,7 +876,7 @@ export function EditorPage() {
           activeDocumentId={currentDocumentId ?? ''}
           onOpenDocument={handleMobileOpenDocument}
         />
-      )}
+      </div>
       {sidebarPanel === 'chat' && (
         <ChatPanel
           editorSelection={editorSelectionForChat}

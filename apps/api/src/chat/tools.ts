@@ -4,6 +4,7 @@ import {
   describeIndexingStrategy,
   isPathInsideDirectory,
   normalizeDocumentPath,
+  pathHasSentinelSegment,
   parentDocumentPath,
   inlineZoneChoicesToolInputSchema,
   inlineZoneWriteToolInputSchema,
@@ -358,8 +359,36 @@ export function buildReadTools({ scope, services }: BuildReadToolsContext) {
       inputSchema: z.object({
         query: z.string().describe('Exact text or natural-language description to search for.'),
         limit: z.number().int().min(1).max(searchToolConfig.maxResultLimit).optional(),
+        scope: z
+          .union([
+            z.object({ type: z.literal('project') }),
+            z.object({
+              type: z.literal('directory'),
+              directoryPath: z
+                .string()
+                .trim()
+                .max(1000)
+                .describe(
+                  'Directory path without leading/trailing slashes, e.g. "notes/research". Matches only direct children of this directory.'
+                ),
+            }),
+            z.object({
+              type: z.literal('directory_subtree'),
+              directoryPath: z
+                .string()
+                .trim()
+                .max(1000)
+                .describe(
+                  'Directory path without leading/trailing slashes, e.g. "notes/research". Matches this directory and all its subdirectories.'
+                ),
+            }),
+          ])
+          .optional()
+          .describe(
+            'Search scope. Defaults to whole project. Use "directory" for exact folder or "directory_subtree" for recursive. Use list_files to discover valid directory paths first.'
+          ),
       }),
-      execute: async ({ query, limit }) => {
+      execute: async ({ query, limit, scope: inputScope }) => {
         const normalizedQuery = normalizeValidatedSearchText(
           query,
           configManager.getConfig().search.maxQueryChars
@@ -376,15 +405,36 @@ export function buildReadTools({ scope, services }: BuildReadToolsContext) {
           'Use read_file on the returned paths to inspect exact passages after you identify the relevant documents.',
         ]
 
+        let searchScope:
+          | { type: 'project' }
+          | { type: 'directory'; directoryPath: string }
+          | {
+              type: 'directory_subtree'
+              directoryPath: string
+            } = inputScope ?? ({ type: 'project' } as const)
+        if (searchScope.type === 'directory' || searchScope.type === 'directory_subtree') {
+          const normalizedDirectoryPath = normalizeDocumentPath(searchScope.directoryPath)
+          if (pathHasSentinelSegment(normalizedDirectoryPath)) {
+            throw new Error('Search scope directory path contains a reserved segment.')
+          }
+
+          if (searchScope.type === 'directory_subtree' && normalizedDirectoryPath === '') {
+            searchScope = { type: 'project' }
+          } else {
+            searchScope = {
+              type: searchScope.type,
+              directoryPath: normalizedDirectoryPath,
+            }
+          }
+        }
+
         let semanticResults: ProjectDocumentSearchResult[] = []
         try {
           semanticResults = await services.documents.searchForProject(
             scope.projectId,
             normalizedQuery,
-            {
-              limit: resultLimit,
-              maxSnippetsPerDocument: searchToolConfig.snippetLimit,
-            }
+            searchScope,
+            { limit: resultLimit, maxSnippetsPerDocument: searchToolConfig.snippetLimit }
           )
         } catch (error) {
           noteToolFailure(

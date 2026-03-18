@@ -71,6 +71,10 @@ export interface SearchProjectDocumentEmbeddingsInput {
   model: string
   queryEmbedding: number[]
   limit: number
+  scope:
+    | { type: 'project' }
+    | { type: 'directory'; directoryPath: string }
+    | { type: 'directory_subtree'; directoryPath: string }
 }
 
 export interface SearchDocumentEmbeddingsInput {

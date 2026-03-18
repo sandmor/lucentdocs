@@ -24,6 +24,7 @@ const IMPORT_TRANSFER_MAX_BYTES = API_JSON_BODY_LIMIT_BYTES
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 const pathSchema = z.string().trim().min(1).max(1000)
+const searchScopePathSchema = z.string().trim().max(1000)
 const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
     z.string(),
@@ -36,9 +37,13 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 )
 const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSchema)
 
-function normalizeAndValidatePath(inputPath: string, label: string): string {
+function normalizeAndValidatePath(
+  inputPath: string,
+  label: string,
+  options?: { allowEmpty?: boolean }
+): string {
   const normalized = normalizeDocumentPath(inputPath)
-  if (!normalized) {
+  if (!normalized && !options?.allowEmpty) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: `${label} is invalid`,
@@ -194,6 +199,11 @@ export const documentsRouter = router({
         query: z.string().trim().min(1),
         limit: z.number().int().min(1).optional(),
         maxSnippetsPerDocument: z.number().int().min(1).optional(),
+        scope: z.union([
+          z.object({ type: z.literal('project') }),
+          z.object({ type: z.literal('directory'), directoryPath: searchScopePathSchema }),
+          z.object({ type: z.literal('directory_subtree'), directoryPath: searchScopePathSchema }),
+        ]),
       })
     )
     .query(async ({ ctx, input }) => {
@@ -207,7 +217,17 @@ export const documentsRouter = router({
           message: error instanceof Error ? error.message : 'Search query is invalid.',
         })
       }
-      return ctx.services.documents.searchForProject(input.projectId, input.query, {
+      let scope = input.scope
+      if (scope.type === 'directory' || scope.type === 'directory_subtree') {
+        scope = {
+          type: scope.type,
+          directoryPath: normalizeAndValidatePath(scope.directoryPath, 'directory path', {
+            allowEmpty: true,
+          }),
+        }
+      }
+
+      return ctx.services.documents.searchForProject(input.projectId, input.query, scope, {
         limit: input.limit,
         maxSnippetsPerDocument: input.maxSnippetsPerDocument,
       })
