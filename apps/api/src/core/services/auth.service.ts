@@ -4,6 +4,7 @@ import type { RepositorySet } from '../ports/types.js'
 import type { TransactionPort } from '../ports/transaction.port.js'
 import type { AuthInvitationEntity, AuthUserEntity, AuthUserRole } from '../ports/authData.port.js'
 import type { User } from '../models/user.js'
+import { readTrimmedEnvValue } from '../../config/env.js'
 
 const PASSWORD_HASH_KEYLEN = 64
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -60,13 +61,6 @@ export interface AuthService {
 
 function trimEmail(email: string): string {
   return email.trim().toLowerCase()
-}
-
-function readTrimmedEnvValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
-  const raw = env[key]
-  if (typeof raw !== 'string') return undefined
-  const trimmed = raw.trim()
-  return trimmed ? trimmed : undefined
 }
 
 function hashPassword(password: string): string {

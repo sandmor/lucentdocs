@@ -1,7 +1,6 @@
 import type { ServiceSet } from '../core/services/types.js'
 import type { RepositorySet } from '../core/ports/types.js'
 import type { TransactionPort } from '../core/ports/transaction.port.js'
-import { createSqliteAdapter } from '../infrastructure/sqlite/factory.js'
 import { createYjsRuntime, type YjsRuntime, type YjsRuntimeConfig } from '../yjs/runtime.js'
 import { createChatRuntime, type ChatRuntime } from '../chat/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
@@ -17,11 +16,25 @@ import { LocalAuthAdapter } from '../infrastructure/auth/local-auth.adapter.js'
 import { SqliteAuthAdapter } from '../infrastructure/auth/sqlite-auth.adapter.js'
 import { configManager } from '../config/runtime.js'
 import { createJobWorkerRuntime, type JobWorkerRuntime } from './job-worker-runtime.js'
+import {
+  resolveQdrantRuntimeConfig,
+  resolveVectorStorageConfig,
+} from '../infrastructure/vector/vector-storage.js'
+import { QdrantDocumentEmbeddingsRepository } from '../infrastructure/vector/qdrantDocumentEmbeddings.adapter.js'
+import {
+  createMainDatabaseAdapter,
+  resolvePrimaryDatabaseConfig,
+} from '../infrastructure/database/main-storage.js'
 import { DOCUMENT_IMPORT_JOB_TYPE } from '../core/jobs/job-types.js'
 import {
   createEmbeddingReindexBatchHandler,
   EMBEDDING_REINDEX_JOB_TYPE,
 } from './embedding-reindex-runtime.js'
+import {
+  createEmbeddingVectorCleanupBatchHandler,
+  EMBEDDING_VECTOR_CLEANUP_JOB_TYPE,
+} from './embedding-vector-cleanup-runtime.js'
+import { scheduleVectorHealOnBackendChange } from './vector-heal-startup.js'
 
 export interface AppContainer {
   services: ServiceSet
@@ -45,7 +58,28 @@ export async function createContainer(
   dbPath: string,
   yjsConfig: YjsRuntimeConfig
 ): Promise<AppContainer> {
-  const adapter = createSqliteAdapter(dbPath)
+  const primaryDatabase = resolvePrimaryDatabaseConfig(process.env)
+  const adapter = createMainDatabaseAdapter(dbPath, primaryDatabase)
+
+  const vectorStorage = resolveVectorStorageConfig(process.env)
+  const qdrantConfig =
+    vectorStorage.kind === 'qdrant' ? resolveQdrantRuntimeConfig(process.env) : undefined
+
+  if (vectorStorage.kind === 'qdrant') {
+    adapter.repositories.documentEmbeddings = new QdrantDocumentEmbeddingsRepository(
+      adapter.metadataStores.documentEmbeddings,
+      qdrantConfig!
+    )
+  }
+
+  await scheduleVectorHealOnBackendChange({
+    connection: adapter.connection,
+    vectorStorage,
+    qdrantConfig,
+    documents: adapter.services.documents,
+    embeddingIndex: adapter.services.embeddingIndex,
+  })
+
   await adapter.services.aiSettings.initializeDefaults({ env: process.env })
   configureAiProvider(adapter.services.aiSettings)
   configureEmbeddingProvider(adapter.services.aiSettings)
@@ -94,6 +128,9 @@ export async function createContainer(
       [DOCUMENT_IMPORT_JOB_TYPE]: documentImportJobHandler,
       [EMBEDDING_REINDEX_JOB_TYPE]: createEmbeddingReindexBatchHandler(
         adapter.services.embeddingIndex
+      ),
+      [EMBEDDING_VECTOR_CLEANUP_JOB_TYPE]: createEmbeddingVectorCleanupBatchHandler(
+        adapter.repositories.documentEmbeddings
       ),
     },
   })

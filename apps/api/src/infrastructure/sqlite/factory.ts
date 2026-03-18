@@ -24,19 +24,37 @@ import { createAuthService } from '../../core/services/auth.service.js'
 import { configManager } from '../../config/runtime.js'
 import { SqliteJobQueueAdapter } from '../queue/sqlite-job-queue.adapter.js'
 import type { JobQueuePort } from '../../core/ports/jobQueue.port.js'
+import type { DocumentEmbeddingsRepositoryPort } from '../../core/ports/documentEmbeddings.port.js'
+import type { DocumentEmbeddingMetadataStorePort } from '../../core/ports/documentEmbeddingMetadata.port.js'
+import { SqliteDocumentEmbeddingMetadataStore } from './documentEmbeddingMetadataStore.adapter.js'
 
 export interface SqliteAdapter {
   connection: SqliteConnection
   transaction: TransactionPort
   jobQueue: JobQueuePort
+  metadataStores: {
+    documentEmbeddings: DocumentEmbeddingMetadataStorePort
+  }
   repositories: RepositorySet
   services: ServiceSet
 }
 
-export function createSqliteAdapter(dbPath: string): SqliteAdapter {
+export function createSqliteAdapter(
+  dbPath: string,
+  options: {
+    createDocumentEmbeddings?: (dependencies: {
+      connection: SqliteConnection
+      metadataStore: DocumentEmbeddingMetadataStorePort
+    }) => DocumentEmbeddingsRepositoryPort
+  } = {}
+): SqliteAdapter {
   const connection = createConnection(dbPath)
   const transaction = createTransaction(connection)
   const jobQueue = new SqliteJobQueueAdapter(connection, transaction)
+  const metadataStore = new SqliteDocumentEmbeddingMetadataStore(connection)
+  const documentEmbeddings =
+    options.createDocumentEmbeddings?.({ connection, metadataStore }) ??
+    new DocumentEmbeddingsRepository(connection)
 
   const repositories: RepositorySet = {
     projects: new ProjectsRepository(connection),
@@ -48,7 +66,7 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
     aiSettings: new AiSettingsRepository(connection),
     indexingSettings: new IndexingSettingsRepository(connection),
     embeddingIndexQueue: new EmbeddingIndexQueueRepository(jobQueue),
-    documentEmbeddings: new DocumentEmbeddingsRepository(connection),
+    documentEmbeddings,
     authData: new AuthDataRepository(connection),
   }
 
@@ -57,6 +75,7 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
   const embeddingIndex = createEmbeddingIndexService(
     repositories,
     transaction,
+    jobQueue,
     aiSettings,
     indexingSettings,
     {
@@ -65,11 +84,15 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
   )
 
   const services: ServiceSet = {
-    projects: createProjectsService(repositories, transaction),
+    projects: createProjectsService(repositories, transaction, {
+      onDocumentsDeleted: (documentIds, references) =>
+        embeddingIndex.deleteDocuments(documentIds, { references }),
+    }),
     documents: createDocumentsService(repositories, transaction, aiSettings, {
       onDocumentContentStored: (documentId) => embeddingIndex.enqueueDocument(documentId),
       onDocumentsContentStored: (documentIds) => embeddingIndex.enqueueDocuments(documentIds),
-      onDocumentDeleted: (documentId) => embeddingIndex.deleteDocument(documentId),
+      onDocumentsDeleted: (documentIds, references) =>
+        embeddingIndex.deleteDocuments(documentIds, { references }),
     }),
     chats: createChatsService(repositories),
     aiSettings,
@@ -78,5 +101,14 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
     auth: createAuthService(repositories, transaction),
   }
 
-  return { connection, transaction, jobQueue, repositories, services }
+  return {
+    connection,
+    transaction,
+    jobQueue,
+    metadataStores: {
+      documentEmbeddings: metadataStore,
+    },
+    repositories,
+    services,
+  }
 }

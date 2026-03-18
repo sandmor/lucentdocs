@@ -88,6 +88,21 @@ export interface ProjectDocumentEmbeddingSearchMatch {
   distance: number
 }
 
+export interface DocumentEmbeddingVectorReference {
+  documentId: string
+  vectorKey: string
+  dimensions: number
+  /**
+   * Backend-specific stable identifier for the stored vector payload.
+   *
+   * For the SQLite vec0 backend, this corresponds to the `document_embedding_vector_rows.id`
+   * value which is used as the `rowid` in the `document_embedding_vec_*` virtual tables.
+   *
+   * Other backends may omit this field.
+   */
+  vectorRowId?: number
+}
+
 export interface DocumentEmbeddingsRepositoryPort {
   findEmbeddings(
     documentId: string,
@@ -101,5 +116,9 @@ export interface DocumentEmbeddingsRepositoryPort {
     input: SearchProjectDocumentEmbeddingsInput
   ): Promise<ProjectDocumentEmbeddingSearchMatch[]>
   replaceEmbeddings(input: ReplaceDocumentEmbeddingsInput): Promise<ReplaceDocumentEmbeddingsResult>
+  listVectorReferencesByDocumentIds(
+    documentIds: string[]
+  ): Promise<DocumentEmbeddingVectorReference[]>
+  deleteVectorsByReferences(references: DocumentEmbeddingVectorReference[]): Promise<void>
   deleteEmbeddingsByDocumentId(documentId: string): Promise<void>
 }

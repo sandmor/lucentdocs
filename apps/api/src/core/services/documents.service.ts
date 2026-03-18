@@ -20,13 +20,17 @@ import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 import { configManager } from '../../config/runtime.js'
 import { getEmbeddingProvider } from '../../embeddings/provider.js'
-import type { ProjectDocumentEmbeddingSearchMatch } from '../ports/documentEmbeddings.port.js'
+import type {
+  DocumentEmbeddingVectorReference,
+  ProjectDocumentEmbeddingSearchMatch,
+} from '../ports/documentEmbeddings.port.js'
 import type { AiSettingsService } from './aiSettings.service.js'
 import {
   buildSnippetPreview as buildSearchSnippetPreview,
   normalizeValidatedSearchText,
   rangesSubstantiallyOverlap,
 } from './documentSearch.js'
+import { createDocumentDeletionDispatcher } from './document-deletion-dispatch.js'
 
 export interface DocumentWithContent extends Document {
   content: string
@@ -177,7 +181,14 @@ export interface DocumentsService {
 export interface DocumentContentObserver {
   onDocumentContentStored?(documentId: string): Promise<void> | void
   onDocumentsContentStored?(documentIds: string[]): Promise<void> | void
-  onDocumentDeleted?(documentId: string): Promise<void> | void
+  onDocumentDeleted?(
+    documentId: string,
+    references?: DocumentEmbeddingVectorReference[]
+  ): Promise<void> | void
+  onDocumentsDeleted?(
+    documentIds: string[],
+    references?: DocumentEmbeddingVectorReference[]
+  ): Promise<void> | void
 }
 
 function listVisibleDocuments(docs: Document[]): Document[] {
@@ -435,6 +446,10 @@ export function createDocumentsService(
     aiSettingsServiceOrObserver && 'resolveRuntimeSelection' in aiSettingsServiceOrObserver
       ? observer
       : (aiSettingsServiceOrObserver ?? observer)
+
+  const { dispatchDocumentsDeleted } = createDocumentDeletionDispatcher(resolvedObserver, {
+    logLabel: 'documents',
+  })
 
   const getDocumentContent = async (id: string): Promise<string> => {
     const yjsData = await repos.yjsDocuments.getLatest(id)
@@ -806,12 +821,16 @@ export function createDocumentsService(
       const doc = await repos.documents.findById(id)
       if (!doc) return false
 
-      await transaction.run(async () => {
+      const references = await transaction.run(async () => {
+        const capturedReferences = await repos.documentEmbeddings.listVectorReferencesByDocumentIds(
+          [id]
+        )
         await repos.documents.deleteById(id)
         await repos.yjsDocuments.delete(id)
+        return capturedReferences
       })
 
-      await resolvedObserver.onDocumentDeleted?.(id)
+      dispatchDocumentsDeleted([id], references)
 
       return true
     },
@@ -1040,18 +1059,21 @@ export function createDocumentsService(
 
       if (docsToDelete.length === 0) return null
 
-      await transaction.run(async () => {
+      const deletedDocumentIds = docsToDelete.map((doc) => doc.id)
+
+      const references = await transaction.run(async () => {
+        const capturedReferences =
+          await repos.documentEmbeddings.listVectorReferencesByDocumentIds(deletedDocumentIds)
         for (const doc of docsToDelete) {
           await repos.documents.deleteById(doc.id)
           await repos.yjsDocuments.delete(doc.id)
         }
+        return capturedReferences
       })
 
-      for (const doc of docsToDelete) {
-        await resolvedObserver.onDocumentDeleted?.(doc.id)
-      }
+      dispatchDocumentsDeleted(deletedDocumentIds, references)
 
-      return { deletedDocumentIds: docsToDelete.map((d) => d.id) }
+      return { deletedDocumentIds }
     },
 
     getForProject: async (

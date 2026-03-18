@@ -31,7 +31,9 @@ function createCallerContext(options?: {
       logout: async () => ({ success: true }),
       signup: async () => ({ success: false, error: 'not implemented' }),
     },
-    yjsRuntime: {} as AppContext['yjsRuntime'],
+    yjsRuntime: {
+      evictLiveDocument: () => {},
+    } as unknown as AppContext['yjsRuntime'],
     chatRuntime: {} as AppContext['chatRuntime'],
     inlineRuntime: {} as AppContext['inlineRuntime'],
     documentImportRuntime: {
@@ -41,6 +43,62 @@ function createCallerContext(options?: {
 }
 
 describe('projectsRouter', () => {
+  test('delete removes embeddings for project-owned documents', async () => {
+    const user: User = {
+      id: 'owner_1',
+      name: 'Owner One',
+      email: 'owner1@example.com',
+      role: 'user',
+    }
+    const adapter = createTestAdapter()
+    const caller = projectsRouter.createCaller(
+      createCallerContext({
+        user,
+        identityUsers: [user],
+        adapter,
+      })
+    )
+
+    const project = await caller.create({ title: 'Story' })
+    const doc = await adapter.services.documents.createForProject(project.id, 'chapter-1.md')
+    if (!doc) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    const now = Date.now()
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: doc.id,
+      providerConfigId: null,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: 'https://openrouter.ai/api/v1',
+      model: 'openai/text-embedding-3-small',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: now,
+      contentHash: 'project-delete-embedding-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 32,
+          text: 'Moonlight crosses the empty quay.',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await caller.delete({ id: project.id })
+
+    const remaining = await adapter.repositories.documentEmbeddings.findEmbeddings(
+      doc.id,
+      'https://openrouter.ai/api/v1',
+      'openai/text-embedding-3-small'
+    )
+    expect(remaining).toHaveLength(0)
+  })
+
   test('reassignOwner updates the explicit project owner through the identity boundary', async () => {
     const adminUser: User = {
       id: 'admin_user',

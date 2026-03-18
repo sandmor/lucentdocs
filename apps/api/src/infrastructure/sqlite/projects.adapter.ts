@@ -64,10 +64,15 @@ export class ProjectsRepository implements ProjectsRepositoryPort {
       return []
     }
 
-    const placeholders = uniqueIds.map(() => '?').join(',')
     const rows = this.connection.all<ProjectRow>(
-      `SELECT * FROM projects WHERE id IN (${placeholders})`,
-      uniqueIds
+      `WITH requested AS (
+         SELECT value AS id
+           FROM json_each(?)
+       )
+       SELECT p.*
+         FROM projects AS p
+         JOIN requested ON requested.id = p.id`,
+      [JSON.stringify(uniqueIds)]
     )
     return rows.map(fromRow)
   }

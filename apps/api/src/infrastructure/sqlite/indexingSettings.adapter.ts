@@ -53,12 +53,16 @@ export class IndexingSettingsRepository implements IndexingSettingsRepositoryPor
       return []
     }
 
-    const placeholders = uniqueScopeIds.map(() => '?').join(',')
     const rows = this.connection.all<IndexingSettingsRow>(
-      `SELECT scopeType, scopeId, strategyType, strategyProperties, updatedAt
-         FROM indexing_strategy_settings
-        WHERE scopeType = ? AND scopeId IN (${placeholders})`,
-      [scopeType, ...uniqueScopeIds]
+      `WITH requested AS (
+         SELECT value AS scopeId
+           FROM json_each(?)
+       )
+       SELECT s.scopeType, s.scopeId, s.strategyType, s.strategyProperties, s.updatedAt
+         FROM indexing_strategy_settings AS s
+         JOIN requested ON requested.scopeId = s.scopeId
+        WHERE s.scopeType = ?`,
+      [JSON.stringify(uniqueScopeIds), scopeType]
     )
 
     return rows.map(toEntity)

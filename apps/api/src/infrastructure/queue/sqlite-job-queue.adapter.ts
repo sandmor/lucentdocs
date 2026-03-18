@@ -81,6 +81,8 @@ function nextUpdatedAt(previousUpdatedAt: number, now: number): number {
 
 export class SqliteJobQueueAdapter implements JobQueuePort {
   private waitListeners = new Set<(signal: { type: string; availableAt: number }) => void>()
+  private readonly lockRetryAttempts = 6
+  private readonly lockRetryBaseMs = 20
 
   constructor(
     private connection: SqliteConnection,
@@ -90,6 +92,32 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
   private notifyWaiters(type: string, availableAt: number): void {
     for (const listener of this.waitListeners) {
       listener({ type, availableAt })
+    }
+  }
+
+  private isSqliteLockError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false
+    return /database is locked|SQLITE_BUSY|SQLITE_LOCKED/i.test(error.message)
+  }
+
+  private async wait(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, ms)
+    })
+  }
+
+  private async withLockRetry<T>(operation: () => Promise<T>): Promise<T> {
+    let attempt = 0
+    while (true) {
+      try {
+        return await operation()
+      } catch (error) {
+        attempt += 1
+        if (!this.isSqliteLockError(error) || attempt >= this.lockRetryAttempts) {
+          throw error
+        }
+        await this.wait(this.lockRetryBaseMs * 2 ** (attempt - 1))
+      }
     }
   }
 
@@ -133,114 +161,126 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
   }
 
   async enqueue<TPayload>(input: EnqueueJobInput<TPayload>): Promise<QueueJobEnvelope<TPayload>> {
-    const now = Date.now()
-    const id = nanoid()
-    const availableAt = input.runAt ?? now
-    const maxAttempts = normalizeAttempts(input.maxAttempts)
-    const priority = normalizePriority(input.priority)
+    return this.withLockRetry(async () => {
+      const now = Date.now()
+      const id = nanoid()
+      const availableAt = input.runAt ?? now
+      const maxAttempts = normalizeAttempts(input.maxAttempts)
+      const priority = normalizePriority(input.priority)
 
-    this.connection.run(
-      `INSERT INTO job_queue (
-         id, type, dedupeKey, payloadJson, availableAt,
-         leaseOwner, leaseUntil, attempt, maxAttempts, priority,
-         createdAt, updatedAt, lastError
-       ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL)`,
-      [
-        id,
-        input.type,
-        input.dedupeKey ?? null,
-        JSON.stringify(input.payload),
-        availableAt,
-        maxAttempts,
-        priority,
-        now,
-        now,
-      ]
-    )
+      this.connection.run(
+        `INSERT INTO job_queue (
+           id, type, dedupeKey, payloadJson, availableAt,
+           leaseOwner, leaseUntil, attempt, maxAttempts, priority,
+           createdAt, updatedAt, lastError
+         ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL)`,
+        [
+          id,
+          input.type,
+          input.dedupeKey ?? null,
+          JSON.stringify(input.payload),
+          availableAt,
+          maxAttempts,
+          priority,
+          now,
+          now,
+        ]
+      )
 
-    const row = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [id])
-    if (!row) {
-      throw new Error(`Failed to load queued job ${id}.`)
-    }
-    this.notifyWaiters(input.type, availableAt)
-    return toEnvelope<TPayload>(row)
+      const row = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [id])
+      if (!row) {
+        throw new Error(`Failed to load queued job ${id}.`)
+      }
+      this.notifyWaiters(input.type, availableAt)
+      return toEnvelope<TPayload>(row)
+    })
   }
 
   async upsertUnique<TPayload>(
     input: UpsertUniqueJobInput<TPayload>
   ): Promise<QueueJobEnvelope<TPayload>> {
-    const now = Date.now()
-    const maxAttempts = normalizeAttempts(input.maxAttempts)
-    const priority = normalizePriority(input.priority)
+    return this.withLockRetry(async () => {
+      const now = Date.now()
+      const maxAttempts = normalizeAttempts(input.maxAttempts)
+      const priority = normalizePriority(input.priority)
 
-    const row = await this.transaction.run(async () => {
-      const existing = this.connection.get<QueueRow>(
-        `SELECT *
-           FROM job_queue
-          WHERE type = ? AND dedupeKey = ?
-          LIMIT 1`,
-        [input.type, input.dedupeKey]
-      )
+      const row = await this.transaction.run(async () => {
+        const existing = this.connection.get<QueueRow>(
+          `SELECT *
+             FROM job_queue
+            WHERE type = ? AND dedupeKey = ?
+            LIMIT 1`,
+          [input.type, input.dedupeKey]
+        )
 
-      if (!existing) {
-        const id = nanoid()
-        this.connection.run(
-          `INSERT INTO job_queue (
-             id, type, dedupeKey, payloadJson, availableAt,
-             leaseOwner, leaseUntil, attempt, maxAttempts, priority,
-             createdAt, updatedAt, lastError
-           ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL)`,
-          [
+        if (!existing) {
+          const id = nanoid()
+          this.connection.run(
+            `INSERT INTO job_queue (
+               id, type, dedupeKey, payloadJson, availableAt,
+               leaseOwner, leaseUntil, attempt, maxAttempts, priority,
+               createdAt, updatedAt, lastError
+             ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL)`,
+            [
+              id,
+              input.type,
+              input.dedupeKey,
+              JSON.stringify(input.payload),
+              input.runAt,
+              maxAttempts,
+              priority,
+              now,
+              now,
+            ]
+          )
+
+          const inserted = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [
             id,
-            input.type,
-            input.dedupeKey,
+          ])
+          if (!inserted) {
+            throw new Error(`Failed to load queued job ${id}.`)
+          }
+
+          return inserted
+        }
+
+        const updatedAt = nextUpdatedAt(existing.updatedAt, now)
+
+        this.connection.run(
+          `UPDATE job_queue
+              SET payloadJson = ?,
+                  availableAt = ?,
+                  leaseOwner = NULL,
+                  leaseUntil = NULL,
+                  attempt = 0,
+                  maxAttempts = ?,
+                  priority = ?,
+                  updatedAt = ?,
+                  lastError = NULL
+            WHERE id = ?`,
+          [
             JSON.stringify(input.payload),
             input.runAt,
             maxAttempts,
             priority,
-            now,
-            now,
+            updatedAt,
+            existing.id,
           ]
         )
 
-        const inserted = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [id])
-        if (!inserted) {
-          throw new Error(`Failed to load queued job ${id}.`)
+        const updated = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [
+          existing.id,
+        ])
+        if (!updated) {
+          throw new Error(`Failed to upsert queued job ${input.type}:${input.dedupeKey}.`)
         }
 
-        return inserted
-      }
+        return updated
+      })
 
-      const updatedAt = nextUpdatedAt(existing.updatedAt, now)
-
-      this.connection.run(
-        `UPDATE job_queue
-            SET payloadJson = ?,
-                availableAt = ?,
-                leaseOwner = NULL,
-                leaseUntil = NULL,
-                attempt = 0,
-                maxAttempts = ?,
-                priority = ?,
-                updatedAt = ?,
-                lastError = NULL
-          WHERE id = ?`,
-        [JSON.stringify(input.payload), input.runAt, maxAttempts, priority, updatedAt, existing.id]
-      )
-
-      const updated = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [
-        existing.id,
-      ])
-      if (!updated) {
-        throw new Error(`Failed to upsert queued job ${input.type}:${input.dedupeKey}.`)
-      }
-
-      return updated
+      this.notifyWaiters(input.type, row.availableAt)
+      return toEnvelope<TPayload>(row)
     })
-
-    this.notifyWaiters(input.type, row.availableAt)
-
-    return toEnvelope<TPayload>(row)
   }
 
   async lease(input: LeaseJobsInput): Promise<Array<QueueJobEnvelope<unknown>>> {
@@ -443,13 +483,15 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
 
   async deleteQueuedByTypeAndDedupeKeys(type: string, dedupeKeys: string[]): Promise<void> {
     if (dedupeKeys.length === 0) return
-    const placeholders = dedupeKeys.map(() => '?').join(', ')
-    this.connection.run(
-      `DELETE FROM job_queue
-        WHERE type = ?
-          AND dedupeKey IN (${placeholders})`,
-      [type, ...dedupeKeys]
-    )
+    await this.withLockRetry(async () => {
+      const placeholders = dedupeKeys.map(() => '?').join(', ')
+      this.connection.run(
+        `DELETE FROM job_queue
+          WHERE type = ?
+            AND dedupeKey IN (${placeholders})`,
+        [type, ...dedupeKeys]
+      )
+    })
   }
 
   async getTypeStats(type: string): Promise<JobQueueTypeStats> {

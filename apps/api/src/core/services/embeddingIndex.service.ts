@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto'
 import type { IndexingStrategy } from '@lucentdocs/shared'
 import type { RepositorySet } from '../ports/types.js'
 import type { TransactionPort } from '../ports/transaction.port.js'
+import type { JobQueuePort } from '../ports/jobQueue.port.js'
 import type { AiSettingsService } from './aiSettings.service.js'
 import type { IndexingSettingsService } from './indexingSettings.service.js'
 import type { DocumentEmbeddingEntity } from '../ports/documentEmbeddings.port.js'
+import type { DocumentEmbeddingVectorReference } from '../ports/documentEmbeddings.port.js'
 import type {
   DocumentEmbeddingJobEntity,
   DocumentEmbeddingQueueStats,
@@ -13,6 +15,8 @@ import { readDocumentContentSnapshot } from '../../embeddings/document-content.j
 import { prepareEmbeddingDocumentsNative } from '../../embeddings/native-preparation.js'
 import { getEmbeddingProvider } from '../../embeddings/provider.js'
 import { normalizeBaseURL } from '../ai/provider-types.js'
+import { EMBEDDING_VECTOR_CLEANUP_JOB_TYPE } from '../jobs/job-types.js'
+import type { EmbeddingVectorCleanupJobPayload } from '../jobs/embedding-vector-cleanup-job.js'
 
 interface PreparedEmbeddingChunk {
   ordinal: number
@@ -44,6 +48,10 @@ export interface EmbeddingIndexService {
     options?: { queuedAt?: number; debounceMs?: number }
   ): Promise<void>
   deleteDocument(documentId: string): Promise<void>
+  deleteDocuments(
+    documentIds: string[],
+    options?: { references?: DocumentEmbeddingVectorReference[] }
+  ): Promise<void>
   processQueuedDocuments(
     requests: Array<{ documentId: string; expectedLastQueuedAt?: number }>,
     now?: number
@@ -112,6 +120,7 @@ function isDocumentDeletedDuringFlush(error: unknown): boolean {
 export function createEmbeddingIndexService(
   repos: RepositorySet,
   transaction: TransactionPort,
+  jobQueue: JobQueuePort,
   aiSettingsService: AiSettingsService,
   indexingSettingsService: IndexingSettingsService,
   configOptions: {
@@ -122,6 +131,34 @@ export function createEmbeddingIndexService(
   let activeTargetedFlush: Promise<EmbeddingFlushResult> | null = null
 
   const EMBED_BATCH_MAX_INPUTS = 128
+  const EMBED_REPLACE_CONCURRENCY = 4
+  const VECTOR_CLEANUP_JOB_MAX_REFERENCES = 500
+  const VECTOR_CLEANUP_JOB_PRIORITY = 50
+
+  const mapWithConcurrency = async <T, R>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T, index: number) => Promise<R>
+  ): Promise<R[]> => {
+    if (items.length === 0) return []
+    const normalizedConcurrency = Math.max(1, Math.min(concurrency, items.length))
+    const results: R[] = new Array(items.length)
+    let nextIndex = 0
+
+    const runWorker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex
+        nextIndex += 1
+        if (index >= items.length) {
+          return
+        }
+        results[index] = await worker(items[index] as T, index)
+      }
+    }
+
+    await Promise.all(Array.from({ length: normalizedConcurrency }, () => runWorker()))
+    return results
+  }
 
   const embedInBatches = async (
     provider: { embed: (inputs: string[]) => Promise<Array<{ embedding: number[] }>> },
@@ -302,18 +339,32 @@ export function createEmbeddingIndexService(
       const chunkTexts = documentsToEmbed.flatMap((item) => item.chunks.map((chunk) => chunk.text))
       const embeddings = chunkTexts.length > 0 ? await embedInBatches(provider, chunkTexts) : []
 
-      await transaction.run(async () => {
-        let embeddingOffset = 0
+      const replacements: Array<{
+        item: (typeof documentsToEmbed)[number]
+        startOffset: number
+      }> = []
+      let embeddingOffset = 0
+      for (const item of documentsToEmbed) {
+        replacements.push({ item, startOffset: embeddingOffset })
+        embeddingOffset += item.chunks.length
+      }
 
-        for (const item of documentsToEmbed) {
+      const replacementResults = await mapWithConcurrency(
+        replacements,
+        EMBED_REPLACE_CONCURRENCY,
+        async ({ item, startOffset }) => {
           const currentJob = await repos.embeddingIndexQueue.getQueuedDocument(item.documentId)
           if (!currentJob || currentJob.lastQueuedAt !== item.expectedLastQueuedAt) {
-            embeddingOffset += item.chunks.length
-            continue
+            return {
+              documentId: item.documentId,
+              shouldClear: false,
+              processedDelta: 0,
+              skippedDelta: 0,
+            }
           }
 
           const nextChunks = item.chunks.map((chunk, chunkIndex) => {
-            const embedding = embeddings[embeddingOffset + chunkIndex]?.embedding
+            const embedding = embeddings[startOffset + chunkIndex]?.embedding
             if (!embedding) {
               throw new Error(
                 `Missing embedding vector for document ${item.documentId} chunk ${chunk.ordinal}.`
@@ -331,8 +382,6 @@ export function createEmbeddingIndexService(
               embedding,
             }
           })
-
-          embeddingOffset += item.chunks.length
 
           let replacement
           try {
@@ -356,38 +405,57 @@ export function createEmbeddingIndexService(
               if (stillExists) {
                 throw error
               }
-              queueIdsToClear.add(item.documentId)
-              skipped += 1
-              continue
+
+              return {
+                documentId: item.documentId,
+                shouldClear: true,
+                processedDelta: 0,
+                skippedDelta: 1,
+              }
             }
 
             throw error
           }
 
           if (replacement.status === 'stale') {
-            queueIdsToClear.add(item.documentId)
-            skipped += 1
-            continue
+            return {
+              documentId: item.documentId,
+              shouldClear: true,
+              processedDelta: 0,
+              skippedDelta: 1,
+            }
           }
 
-          queueIdsToClear.add(item.documentId)
-          if (item.chunks.length > 0) {
-            processed += 1
+          return {
+            documentId: item.documentId,
+            shouldClear: true,
+            processedDelta: item.chunks.length > 0 ? 1 : 0,
+            skippedDelta: 0,
           }
         }
+      )
 
-        for (const candidate of candidatesToClear) {
-          const currentJob = await repos.embeddingIndexQueue.getQueuedDocument(candidate.documentId)
-          if (!currentJob || currentJob.lastQueuedAt !== candidate.expectedLastQueuedAt) {
-            continue
-          }
-          queueIdsToClear.add(candidate.documentId)
+      for (const result of replacementResults) {
+        processed += result.processedDelta
+        skipped += result.skippedDelta
+        if (result.shouldClear) {
+          queueIdsToClear.add(result.documentId)
         }
+      }
 
-        if (queueIdsToClear.size > 0) {
+      for (const candidate of candidatesToClear) {
+        const currentJob = await repos.embeddingIndexQueue.getQueuedDocument(candidate.documentId)
+        if (!currentJob || currentJob.lastQueuedAt !== candidate.expectedLastQueuedAt) {
+          continue
+        }
+        queueIdsToClear.add(candidate.documentId)
+      }
+
+      if (queueIdsToClear.size > 0) {
+        await transaction.run(async () => {
           await repos.embeddingIndexQueue.clearQueuedDocuments([...queueIdsToClear])
-        }
-      })
+        })
+      }
     } else if (candidatesToClear.length > 0) {
       await transaction.run(async () => {
         for (const candidate of candidatesToClear) {
@@ -430,8 +498,60 @@ export function createEmbeddingIndexService(
     },
 
     async deleteDocument(documentId: string): Promise<void> {
-      await repos.embeddingIndexQueue.clearQueuedDocuments([documentId])
-      await repos.documentEmbeddings.deleteEmbeddingsByDocumentId(documentId)
+      await this.deleteDocuments([documentId])
+    },
+
+    async deleteDocuments(
+      documentIds: string[],
+      options: { references?: DocumentEmbeddingVectorReference[] } = {}
+    ): Promise<void> {
+      const uniqueIds = [...new Set(documentIds)].filter((id) => typeof id === 'string' && id)
+      if (uniqueIds.length === 0) return
+
+      await repos.embeddingIndexQueue.clearQueuedDocuments(uniqueIds)
+
+      // Eventual consistency note: external vector cleanup is asynchronous by design.
+      // Callers should pass references captured in their successful DB transaction,
+      // so jobs only run after the source-of-truth delete commits.
+      const references =
+        options.references ??
+        (await repos.documentEmbeddings.listVectorReferencesByDocumentIds(uniqueIds))
+      if (references.length === 0) return
+
+      const dedupedReferences = [
+        ...new Map(
+          references
+            .filter(
+              (reference) =>
+                reference.documentId &&
+                reference.vectorKey &&
+                Number.isInteger(reference.dimensions) &&
+                reference.dimensions > 0 &&
+                (reference.vectorRowId === undefined ||
+                  (Number.isInteger(reference.vectorRowId) && reference.vectorRowId > 0))
+            )
+            .map((reference) => [
+              `${reference.documentId}:${reference.vectorKey}:${reference.dimensions}`,
+              reference,
+            ])
+        ).values(),
+      ]
+
+      for (
+        let offset = 0;
+        offset < dedupedReferences.length;
+        offset += VECTOR_CLEANUP_JOB_MAX_REFERENCES
+      ) {
+        const payload: EmbeddingVectorCleanupJobPayload = {
+          references: dedupedReferences.slice(offset, offset + VECTOR_CLEANUP_JOB_MAX_REFERENCES),
+        }
+
+        await jobQueue.enqueue({
+          type: EMBEDDING_VECTOR_CLEANUP_JOB_TYPE,
+          payload,
+          priority: VECTOR_CLEANUP_JOB_PRIORITY,
+        })
+      }
     },
 
     async processQueuedDocuments(requests, now = Date.now()): Promise<EmbeddingFlushResult> {

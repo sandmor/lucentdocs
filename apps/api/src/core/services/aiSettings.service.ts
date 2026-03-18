@@ -10,6 +10,7 @@ import {
   normalizeProviderBaseURL,
   parseAndNormalizeHttpBaseURL,
 } from '../ai/provider-types.js'
+import { readTrimmedEnvValue } from '../../config/env.js'
 
 const DEFAULT_OPENAI_MODEL = 'gpt-5'
 const DEFAULT_OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small'
@@ -214,13 +215,6 @@ function sortApiKeys(left: AiApiKeyEntity, right: AiApiKeyEntity): number {
   if (byBase !== 0) return byBase
   if (left.isDefault !== right.isDefault) return left.isDefault ? -1 : 1
   return right.updatedAt - left.updatedAt
-}
-
-function readTrimmedEnvValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
-  const raw = env[key]
-  if (typeof raw !== 'string') return undefined
-  const trimmed = raw.trim()
-  return trimmed ? trimmed : undefined
 }
 
 function inferBootstrapProviderType(baseURL: string, model: string): AiModelSourceType {

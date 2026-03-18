@@ -46,12 +46,18 @@ export class DocumentsRepository implements DocumentsRepositoryPort {
   }
 
   async findByIds(ids: string[]): Promise<Document[]> {
-    if (ids.length === 0) return []
+    const uniqueIds = Array.from(new Set(ids.filter((id) => id.length > 0)))
+    if (uniqueIds.length === 0) return []
 
-    const placeholders = ids.map(() => '?').join(',')
     const rows = this.connection.all<DocumentRow>(
-      `SELECT * FROM documents WHERE id IN (${placeholders})`,
-      ids
+      `WITH requested AS (
+         SELECT value AS id
+           FROM json_each(?)
+       )
+       SELECT d.*
+         FROM documents AS d
+         JOIN requested ON requested.id = d.id`,
+      [JSON.stringify(uniqueIds)]
     )
     return rows.map(fromRow)
   }

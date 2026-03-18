@@ -1,5 +1,6 @@
 import type {
   DocumentEmbeddingEntity,
+  DocumentEmbeddingVectorReference,
   DocumentEmbeddingsRepositoryPort,
   ProjectDocumentEmbeddingSearchMatch,
   ReplaceDocumentEmbeddingsInput,
@@ -11,8 +12,13 @@ import { indexingStrategySchema } from '@lucentdocs/shared'
 import { normalizeModelSourceType, normalizeBaseURL } from '../../core/ai/provider-types.js'
 import type { SqliteConnection } from './connection.js'
 import { fromJsonField, toJsonField } from './utils.js'
-
-const MAX_EMBEDDING_DIMENSIONS = 8192
+import {
+  MAX_EMBEDDING_DIMENSIONS,
+  resolveChunkVectorKey,
+  validateEmbeddingVector,
+  validateReplacementChunks,
+  validateSearchLimit,
+} from '../../core/embeddings/documentEmbeddings.shared.js'
 
 interface EmbeddingRow {
   id: number
@@ -76,90 +82,6 @@ function vectorTableName(dimensions: number): string {
     )
   }
   return `document_embedding_vec_${dimensions}`
-}
-
-function validateEmbeddingVector(embedding: number[]): void {
-  if (embedding.length === 0) {
-    throw new Error('Embedding vector cannot be empty.')
-  }
-
-  if (embedding.length > MAX_EMBEDDING_DIMENSIONS) {
-    throw new Error(
-      `Embedding vector exceeds the maximum supported dimension count (${MAX_EMBEDDING_DIMENSIONS}).`
-    )
-  }
-
-  for (const [index, value] of embedding.entries()) {
-    if (!Number.isFinite(value)) {
-      throw new Error(`Embedding vector value ${index} is invalid.`)
-    }
-  }
-}
-
-function validateSearchLimit(limit: number): number {
-  if (!Number.isInteger(limit) || limit <= 0) {
-    throw new Error('Search limit must be a positive integer.')
-  }
-
-  return Math.min(limit, 200)
-}
-
-function validateReplacementChunks(input: ReplaceDocumentEmbeddingsInput): void {
-  const ordinals = new Set<number>()
-  const expectedDimensions = input.chunks[0]?.embedding.length ?? null
-
-  for (const [index, chunk] of input.chunks.entries()) {
-    if (!Number.isInteger(chunk.ordinal) || chunk.ordinal < 0) {
-      throw new Error(`Embedding chunk ${index} has an invalid ordinal.`)
-    }
-
-    if (ordinals.has(chunk.ordinal)) {
-      throw new Error(`Embedding chunk ordinal ${chunk.ordinal} is duplicated.`)
-    }
-    ordinals.add(chunk.ordinal)
-
-    if (!Number.isInteger(chunk.start) || chunk.start < 0) {
-      throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid start offset.`)
-    }
-
-    if (!Number.isInteger(chunk.end) || chunk.end < chunk.start) {
-      throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid end offset.`)
-    }
-
-    const hasSelectionFrom = chunk.selectionFrom !== undefined && chunk.selectionFrom !== null
-    const hasSelectionTo = chunk.selectionTo !== undefined && chunk.selectionTo !== null
-    if (hasSelectionFrom !== hasSelectionTo) {
-      throw new Error(`Embedding chunk ${chunk.ordinal} has an incomplete editor selection range.`)
-    }
-    if (hasSelectionFrom) {
-      const selectionFrom = chunk.selectionFrom as number
-      const selectionTo = chunk.selectionTo as number
-
-      if (!Number.isInteger(selectionFrom) || selectionFrom < 0) {
-        throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid selection start.`)
-      }
-      if (!Number.isInteger(selectionTo) || selectionTo < selectionFrom) {
-        throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid selection end.`)
-      }
-    }
-
-    validateEmbeddingVector(chunk.embedding)
-
-    if (expectedDimensions !== null && chunk.embedding.length !== expectedDimensions) {
-      throw new Error('Embedding provider returned inconsistent dimensions for one document.')
-    }
-
-    if (chunk.vectorKey !== undefined && chunk.vectorKey.trim().length === 0) {
-      throw new Error(`Embedding chunk ${chunk.ordinal} has an invalid vector key.`)
-    }
-  }
-
-  const sortedOrdinals = [...ordinals].sort((left, right) => left - right)
-  for (const [index, ordinal] of sortedOrdinals.entries()) {
-    if (ordinal !== index) {
-      throw new Error('Embedding chunk ordinals must be contiguous and zero-based.')
-    }
-  }
 }
 
 function toEmbeddingEntity(row: EmbeddingRow): DocumentEmbeddingEntity {
@@ -308,7 +230,6 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
             scopeParams.push(options.scope.directoryPath, `${escapedDirectoryPath}/%`)
           }
         } else if (options.scope.directoryExact) {
-          // directoryPath is empty string, meaning root level exactly (no subdirectories)
           scopeFragments.push(`               AND scoped_doc.title NOT LIKE ? ESCAPE '\\'`)
           scopeParams.push(`%/%`)
         }
@@ -318,6 +239,15 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
     }
 
     const scopeSql = scopeFragments.join('\n')
+
+    const params: Array<string | number | Float32Array> = [
+      new Float32Array(options.input.queryEmbedding),
+      limit,
+      options.dimensions,
+      ...scopeParams,
+      options.normalizedBaseURL,
+      options.model,
+    ]
 
     return this.connection.all<SearchMatchRow>(
       `SELECT de.documentId,
@@ -348,14 +278,7 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
                AND candidate.model = ?
           )
         ORDER BY v.distance ASC, de.documentId ASC, de.chunkOrdinal ASC`,
-      [
-        new Float32Array(options.input.queryEmbedding),
-        limit,
-        options.dimensions,
-        ...scopeParams,
-        options.normalizedBaseURL,
-        options.model,
-      ]
+      params
     )
   }
 
@@ -457,9 +380,7 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
       for (const chunk of input.chunks) {
         const dimensions = chunk.embedding.length
         const targetTable = vectorTableName(dimensions)
-        const vectorKey =
-          chunk.vectorKey?.trim() ||
-          `${input.documentId}:${normalizedBaseURL}:${model}:${chunk.ordinal}`
+        const vectorKey = resolveChunkVectorKey(input, chunk, normalizedBaseURL, model)
 
         this.connection.run(
           `INSERT INTO document_embeddings
@@ -536,27 +457,161 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
     })
   }
 
-  async deleteEmbeddingsByDocumentId(documentId: string): Promise<void> {
-    const rows = this.connection.all<{ id: number; dimensions: number }>(
-      `SELECT vr.id, vr.dimensions
-         FROM document_embedding_vector_rows AS vr
-         JOIN document_embeddings AS de ON de.vectorKey = vr.vectorKey
-        WHERE de.documentId = ?`,
-      [documentId]
+  async listVectorReferencesByDocumentIds(
+    documentIds: string[]
+  ): Promise<DocumentEmbeddingVectorReference[]> {
+    const uniqueDocumentIds = [...new Set(documentIds)].filter((id) => typeof id === 'string' && id)
+    if (uniqueDocumentIds.length === 0) return []
+
+    const rows = this.connection.all<{
+      documentId: string
+      vectorKey: string
+      dimensions: number
+      vectorRowId: number | null
+    }>(
+      `WITH requested AS (
+         SELECT value AS documentId
+           FROM json_each(?)
+       )
+       SELECT de.documentId,
+              de.vectorKey,
+              de.dimensions,
+              vr.id AS vectorRowId
+         FROM document_embeddings AS de
+         JOIN requested ON requested.documentId = de.documentId
+         LEFT JOIN document_embedding_vector_rows AS vr ON vr.vectorKey = de.vectorKey`,
+      [JSON.stringify(uniqueDocumentIds)]
     )
 
-    this.connection.transaction(() => {
-      for (const row of rows) {
-        this.connection.run(`DELETE FROM ${vectorTableName(row.dimensions)} WHERE rowid = ?`, [
-          row.id,
-        ])
+    return rows.map((row) => {
+      const reference: DocumentEmbeddingVectorReference = {
+        documentId: row.documentId,
+        vectorKey: row.vectorKey,
+        dimensions: row.dimensions,
       }
-      this.connection.run('DELETE FROM document_embeddings WHERE documentId = ?', [documentId])
+      if (typeof row.vectorRowId === 'number') {
+        reference.vectorRowId = row.vectorRowId
+      }
+      return reference
+    })
+  }
+
+  async deleteVectorsByReferences(references: DocumentEmbeddingVectorReference[]): Promise<void> {
+    if (references.length === 0) return
+
+    const uniqueReferences = [
+      ...new Map(
+        references
+          .filter(
+            (reference) =>
+              reference.vectorKey &&
+              Number.isInteger(reference.dimensions) &&
+              reference.dimensions > 0 &&
+              (reference.vectorRowId === undefined ||
+                (Number.isInteger(reference.vectorRowId) && reference.vectorRowId > 0))
+          )
+          .map((reference) => [
+            `${reference.vectorKey}:${reference.dimensions}:${reference.vectorRowId ?? ''}`,
+            reference,
+          ])
+      ).values(),
+    ]
+    if (uniqueReferences.length === 0) return
+
+    const allVectorKeys = [...new Set(uniqueReferences.map((reference) => reference.vectorKey))]
+    const groupedByDimensions = new Map<
+      number,
+      {
+        vectorKeys: Set<string>
+        rowIds: Set<number>
+      }
+    >()
+    for (const reference of uniqueReferences) {
+      const group = groupedByDimensions.get(reference.dimensions) ?? {
+        vectorKeys: new Set<string>(),
+        rowIds: new Set<number>(),
+      }
+      group.vectorKeys.add(reference.vectorKey)
+      if (reference.vectorRowId !== undefined) {
+        group.rowIds.add(reference.vectorRowId)
+      }
+      groupedByDimensions.set(reference.dimensions, group)
+    }
+
+    this.connection.transaction(() => {
+      // Resolve vec0 rowids before deleting metadata; metadata deletion may cascade vector-row entries.
+      const resolvedRowIdsByDimensions = new Map<number, number[]>()
+      for (const [dimensions, group] of groupedByDimensions) {
+        if (group.rowIds.size > 0) {
+          resolvedRowIdsByDimensions.set(dimensions, [...group.rowIds])
+          continue
+        }
+
+        if (group.vectorKeys.size === 0) continue
+        const rows = this.connection.all<{ id: number }>(
+          `WITH requested AS (
+             SELECT value AS vectorKey
+               FROM json_each(?)
+           )
+           SELECT vr.id
+             FROM document_embedding_vector_rows AS vr
+             JOIN requested ON requested.vectorKey = vr.vectorKey
+            WHERE vr.dimensions = ?`,
+          [JSON.stringify([...group.vectorKeys]), dimensions]
+        )
+        if (rows.length > 0) {
+          resolvedRowIdsByDimensions.set(
+            dimensions,
+            rows.map((row) => row.id)
+          )
+        }
+      }
+
+      for (const [dimensions, rowIds] of resolvedRowIdsByDimensions) {
+        if (rowIds.length === 0) continue
+        const targetTable = vectorTableName(dimensions)
+        const rowIdJson = JSON.stringify(rowIds)
+
+        if (this.hasVectorTable(targetTable)) {
+          this.connection.run(
+            `WITH requested_ids AS (
+               SELECT CAST(value AS INTEGER) AS rowId
+                 FROM json_each(?)
+             )
+             DELETE FROM ${targetTable}
+              WHERE rowid IN (SELECT rowId FROM requested_ids)`,
+            [rowIdJson]
+          )
+        }
+
+        // Best-effort cleanup of mapping rows (may already be gone via cascades).
+        this.connection.run(
+          `WITH requested_ids AS (
+             SELECT CAST(value AS INTEGER) AS rowId
+               FROM json_each(?)
+           )
+           DELETE FROM document_embedding_vector_rows
+            WHERE id IN (SELECT rowId FROM requested_ids)`,
+          [rowIdJson]
+        )
+      }
+
+      // Best-effort metadata cleanup (may already be gone via cascades).
+      this.connection.run(
+        `WITH requested AS (
+           SELECT value AS vectorKey
+             FROM json_each(?)
+         )
+         DELETE FROM document_embeddings
+          WHERE vectorKey IN (SELECT vectorKey FROM requested)`,
+        [JSON.stringify(allVectorKeys)]
+      )
     })
 
-    const uniqueDimensions = Array.from(new Set(rows.map((row) => row.dimensions)))
-    for (const dimensions of uniqueDimensions) {
+    for (const dimensions of groupedByDimensions.keys()) {
       const table = vectorTableName(dimensions)
+      if (!this.hasVectorTable(table)) continue
+
       const countRow = this.connection.get<{ count: number }>(
         `SELECT COUNT(*) AS count FROM ${table}`,
         []
@@ -565,5 +620,10 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
         this.connection.exec(`DROP TABLE IF EXISTS ${table}`)
       }
     }
+  }
+
+  async deleteEmbeddingsByDocumentId(documentId: string): Promise<void> {
+    const references = await this.listVectorReferencesByDocumentIds([documentId])
+    await this.deleteVectorsByReferences(references)
   }
 }

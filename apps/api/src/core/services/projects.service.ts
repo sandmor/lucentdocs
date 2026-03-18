@@ -2,6 +2,19 @@ import { nanoid } from 'nanoid'
 import { isValidId, type Project, type JsonObject } from '@lucentdocs/shared'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
+import type { DocumentEmbeddingVectorReference } from '../ports/documentEmbeddings.port.js'
+import { createDocumentDeletionDispatcher } from './document-deletion-dispatch.js'
+
+interface ProjectContentObserver {
+  onDocumentDeleted?(
+    documentId: string,
+    references?: DocumentEmbeddingVectorReference[]
+  ): Promise<void> | void
+  onDocumentsDeleted?(
+    documentIds: string[],
+    references?: DocumentEmbeddingVectorReference[]
+  ): Promise<void> | void
+}
 
 export interface ProjectsService {
   create(title: string, options: { ownerUserId: string }): Promise<Project>
@@ -19,8 +32,13 @@ export interface ProjectsService {
 
 export function createProjectsService(
   repos: RepositorySet,
-  transaction: TransactionPort
+  transaction: TransactionPort,
+  observer: ProjectContentObserver = {}
 ): ProjectsService {
+  const { dispatchDocumentsDeleted } = createDocumentDeletionDispatcher(observer, {
+    logLabel: 'projects',
+  })
+
   return {
     async create(title: string, options: { ownerUserId: string }): Promise<Project> {
       const now = Date.now()
@@ -121,15 +139,25 @@ export function createProjectsService(
       const existing = await repos.projects.findById(id)
       if (!existing) return false
 
-      await transaction.run(async () => {
+      const { deletedDocumentIds, references } = await transaction.run(async () => {
         const soleDocumentIds = await repos.projectDocuments.findSoleDocumentIdsByProjectId(id)
+        const capturedReferences =
+          await repos.documentEmbeddings.listVectorReferencesByDocumentIds(soleDocumentIds)
+
         for (const documentId of soleDocumentIds) {
           await repos.documents.deleteById(documentId)
           await repos.yjsDocuments.delete(documentId)
         }
 
         await repos.projects.deleteById(id)
+
+        return {
+          deletedDocumentIds: soleDocumentIds,
+          references: capturedReferences,
+        }
       })
+
+      dispatchDocumentsDeleted(deletedDocumentIds, references)
 
       return true
     },

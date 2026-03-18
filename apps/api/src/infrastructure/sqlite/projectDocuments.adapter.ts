@@ -33,13 +33,16 @@ export class ProjectDocumentsRepository implements ProjectDocumentsRepositoryPor
       return new Set()
     }
 
-    const placeholders = uniqueDocumentIds.map(() => '?').join(',')
     const rows = this.connection.all<{ documentId: string }>(
-      `SELECT DISTINCT documentId
-         FROM project_documents
-        WHERE projectId = ?
-          AND documentId IN (${placeholders})`,
-      [projectId, ...uniqueDocumentIds]
+      `WITH requested AS (
+         SELECT value AS documentId
+           FROM json_each(?)
+       )
+       SELECT DISTINCT pd.documentId
+         FROM project_documents AS pd
+         JOIN requested ON requested.documentId = pd.documentId
+        WHERE pd.projectId = ?`,
+      [JSON.stringify(uniqueDocumentIds), projectId]
     )
 
     return new Set(rows.map((row) => row.documentId))
@@ -104,14 +107,17 @@ export class ProjectDocumentsRepository implements ProjectDocumentsRepositoryPor
       return new Map()
     }
 
-    const placeholders = uniqueDocumentIds.map(() => '?').join(',')
     const rows = this.connection.all<{ documentId: string; projectId: string }>(
-      `SELECT documentId, MIN(projectId) AS projectId
-         FROM project_documents
-        WHERE documentId IN (${placeholders})
-        GROUP BY documentId
-       HAVING COUNT(DISTINCT projectId) = 1`,
-      uniqueDocumentIds
+      `WITH requested AS (
+         SELECT value AS documentId
+           FROM json_each(?)
+       )
+       SELECT pd.documentId, MIN(pd.projectId) AS projectId
+         FROM project_documents AS pd
+         JOIN requested ON requested.documentId = pd.documentId
+        GROUP BY pd.documentId
+       HAVING COUNT(DISTINCT pd.projectId) = 1`,
+      [JSON.stringify(uniqueDocumentIds)]
     )
 
     return new Map(rows.map((row) => [row.documentId, row.projectId]))

@@ -115,10 +115,15 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
       return
     }
 
-    const placeholders = ids.map(() => '?').join(', ')
     this.connection.run(
-      `DELETE FROM ai_provider_configs WHERE usage = ? AND id NOT IN (${placeholders})`,
-      [usage, ...ids]
+      `DELETE FROM ai_provider_configs AS cfg
+        WHERE cfg.usage = ?
+          AND NOT EXISTS (
+            SELECT 1
+              FROM json_each(?) AS requested
+             WHERE requested.value = cfg.id
+          )`,
+      [usage, JSON.stringify(ids)]
     )
   }
 
