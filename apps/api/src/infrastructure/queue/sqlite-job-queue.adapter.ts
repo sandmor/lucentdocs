@@ -75,6 +75,10 @@ function normalizePriority(priority: number | undefined): number {
   return priority
 }
 
+function nextUpdatedAt(previousUpdatedAt: number, now: number): number {
+  return now > previousUpdatedAt ? now : previousUpdatedAt + 1
+}
+
 export class SqliteJobQueueAdapter implements JobQueuePort {
   private waitListeners = new Set<(signal: { type: string; availableAt: number }) => void>()
 
@@ -207,16 +211,21 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
         return inserted
       }
 
+      const updatedAt = nextUpdatedAt(existing.updatedAt, now)
+
       this.connection.run(
         `UPDATE job_queue
             SET payloadJson = ?,
                 availableAt = ?,
+                leaseOwner = NULL,
+                leaseUntil = NULL,
+                attempt = 0,
                 maxAttempts = ?,
                 priority = ?,
                 updatedAt = ?,
                 lastError = NULL
           WHERE id = ?`,
-        [JSON.stringify(input.payload), input.runAt, maxAttempts, priority, now, existing.id]
+        [JSON.stringify(input.payload), input.runAt, maxAttempts, priority, updatedAt, existing.id]
       )
 
       const updated = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [
@@ -294,12 +303,21 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
 
   async complete(input: CompleteLeasedJobInput): Promise<CompleteLeasedJobResult> {
     return this.transaction.run(async () => {
-      const row = this.connection.get<QueueRow>(
-        `SELECT * FROM job_queue WHERE id = ? AND leaseOwner = ?`,
-        [input.id, input.workerId]
-      )
+      const row = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [input.id])
 
       if (!row) {
+        return 'missing'
+      }
+
+      if (row.leaseOwner !== input.workerId) {
+        if (
+          input.expectedUpdatedAt !== undefined &&
+          Number.isFinite(input.expectedUpdatedAt) &&
+          row.updatedAt !== input.expectedUpdatedAt
+        ) {
+          return 'released'
+        }
+
         return 'missing'
       }
 
