@@ -4,11 +4,11 @@ import type { RepositorySet } from '../ports/types.js'
 import type { TransactionPort } from '../ports/transaction.port.js'
 import type { AiSettingsService } from './aiSettings.service.js'
 import type { IndexingSettingsService } from './indexingSettings.service.js'
+import type { DocumentEmbeddingEntity } from '../ports/documentEmbeddings.port.js'
 import type {
   DocumentEmbeddingJobEntity,
   DocumentEmbeddingQueueStats,
-  DocumentEmbeddingEntity,
-} from '../ports/documentEmbeddings.port.js'
+} from '../ports/embeddingIndexQueue.port.js'
 import { readDocumentContentSnapshot } from '../../embeddings/document-content.js'
 import { prepareEmbeddingDocumentsNative } from '../../embeddings/native-preparation.js'
 import { getEmbeddingProvider } from '../../embeddings/provider.js'
@@ -95,8 +95,7 @@ function isStoredEmbeddingSetCurrent(
       entry.chunkStart === chunk?.start &&
       entry.chunkEnd === chunk?.end &&
       entry.selectionFrom === chunk?.selectionFrom &&
-      entry.selectionTo === chunk?.selectionTo &&
-      entry.chunkText === chunk?.text
+      entry.selectionTo === chunk?.selectionTo
     )
   })
 }
@@ -307,7 +306,7 @@ export function createEmbeddingIndexService(
         let embeddingOffset = 0
 
         for (const item of documentsToEmbed) {
-          const currentJob = await repos.documentEmbeddings.getQueuedDocument(item.documentId)
+          const currentJob = await repos.embeddingIndexQueue.getQueuedDocument(item.documentId)
           if (!currentJob || currentJob.lastQueuedAt !== item.expectedLastQueuedAt) {
             embeddingOffset += item.chunks.length
             continue
@@ -328,6 +327,7 @@ export function createEmbeddingIndexService(
               selectionFrom: chunk.selectionFrom,
               selectionTo: chunk.selectionTo,
               text: chunk.text,
+              vectorKey: `${item.documentId}:${normalizeBaseURL(selection.baseURL)}:${selection.model.trim()}:${chunk.ordinal}`,
               embedding,
             }
           })
@@ -377,7 +377,7 @@ export function createEmbeddingIndexService(
         }
 
         for (const candidate of candidatesToClear) {
-          const currentJob = await repos.documentEmbeddings.getQueuedDocument(candidate.documentId)
+          const currentJob = await repos.embeddingIndexQueue.getQueuedDocument(candidate.documentId)
           if (!currentJob || currentJob.lastQueuedAt !== candidate.expectedLastQueuedAt) {
             continue
           }
@@ -385,13 +385,13 @@ export function createEmbeddingIndexService(
         }
 
         if (queueIdsToClear.size > 0) {
-          await repos.documentEmbeddings.clearQueuedDocuments([...queueIdsToClear])
+          await repos.embeddingIndexQueue.clearQueuedDocuments([...queueIdsToClear])
         }
       })
     } else if (candidatesToClear.length > 0) {
       await transaction.run(async () => {
         for (const candidate of candidatesToClear) {
-          const currentJob = await repos.documentEmbeddings.getQueuedDocument(candidate.documentId)
+          const currentJob = await repos.embeddingIndexQueue.getQueuedDocument(candidate.documentId)
           if (!currentJob || currentJob.lastQueuedAt !== candidate.expectedLastQueuedAt) {
             continue
           }
@@ -399,7 +399,7 @@ export function createEmbeddingIndexService(
         }
 
         if (queueIdsToClear.size > 0) {
-          await repos.documentEmbeddings.clearQueuedDocuments([...queueIdsToClear])
+          await repos.embeddingIndexQueue.clearQueuedDocuments([...queueIdsToClear])
         }
       })
     }
@@ -426,10 +426,11 @@ export function createEmbeddingIndexService(
       const existingIds = documents.map((doc) => doc.id)
       const queuedAt = options.queuedAt ?? Date.now()
       const debounceMs = options.debounceMs ?? configOptions.getRuntimeConfig?.().debounceMs ?? 0
-      await repos.documentEmbeddings.enqueueDocuments(existingIds, queuedAt, queuedAt + debounceMs)
+      await repos.embeddingIndexQueue.enqueueDocuments(existingIds, queuedAt, queuedAt + debounceMs)
     },
 
     async deleteDocument(documentId: string): Promise<void> {
+      await repos.embeddingIndexQueue.clearQueuedDocuments([documentId])
       await repos.documentEmbeddings.deleteEmbeddingsByDocumentId(documentId)
     },
 
@@ -449,7 +450,7 @@ export function createEmbeddingIndexService(
         const selectedJobs: DocumentEmbeddingJobEntity[] = []
 
         for (const request of uniqueRequests) {
-          const queuedJob = await repos.documentEmbeddings.getQueuedDocument(request.documentId)
+          const queuedJob = await repos.embeddingIndexQueue.getQueuedDocument(request.documentId)
           if (!queuedJob) continue
           if (
             request.expectedLastQueuedAt !== undefined &&
@@ -477,7 +478,7 @@ export function createEmbeddingIndexService(
       }
 
       activeFlush = (async (): Promise<EmbeddingFlushResult> => {
-        const jobs = await repos.documentEmbeddings.listQueuedDocuments()
+        const jobs = await repos.embeddingIndexQueue.listQueuedDocuments()
         if (jobs.length === 0) {
           return { queued: 0, processed: 0, skipped: 0 }
         }
@@ -495,7 +496,7 @@ export function createEmbeddingIndexService(
     },
 
     async getQueueStats(): Promise<DocumentEmbeddingQueueStats> {
-      return repos.documentEmbeddings.getQueueStats()
+      return repos.embeddingIndexQueue.getQueueStats()
     },
   }
 }

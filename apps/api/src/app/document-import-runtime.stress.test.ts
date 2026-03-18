@@ -81,7 +81,7 @@ describeImportStress('DocumentImportRuntime stress', () => {
       })
 
       await waitFor(async () => {
-        const queue = await adapter.repositories.documentEmbeddings.listQueuedDocuments()
+        const queue = await adapter.repositories.embeddingIndexQueue.listQueuedDocuments()
         return queue.length === totalDocs
       })
 
@@ -162,7 +162,7 @@ describeImportStress('DocumentImportRuntime stress', () => {
       })
 
       await waitFor(async () => {
-        const queue = await adapter.repositories.documentEmbeddings.listQueuedDocuments()
+        const queue = await adapter.repositories.embeddingIndexQueue.listQueuedDocuments()
         return queue.length === batchSize * 2
       })
 
@@ -241,7 +241,7 @@ describeImportStress('DocumentImportRuntime stress', () => {
       })
 
       await waitFor(async () => {
-        const queue = await adapter.repositories.documentEmbeddings.listQueuedDocuments()
+        const queue = await adapter.repositories.embeddingIndexQueue.listQueuedDocuments()
         return queue.length === batchSize * 2
       })
 

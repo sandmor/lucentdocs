@@ -107,7 +107,7 @@ describe('indexingRouter', () => {
       addedAt: Date.now(),
     })
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([document.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([document.id])
 
     const caller = indexingRouter.createCaller(
       createCallerContext({
@@ -123,7 +123,7 @@ describe('indexingRouter', () => {
       },
     })
 
-    const queued = await adapter.repositories.documentEmbeddings.getQueuedDocument(document.id)
+    const queued = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(document.id)
     expect(queued).toBeDefined()
   })
 })

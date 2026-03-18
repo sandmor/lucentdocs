@@ -1,12 +1,5 @@
 import type { AiModelSourceType, IndexingStrategy } from '@lucentdocs/shared'
 
-export interface DocumentEmbeddingJobEntity {
-  documentId: string
-  firstQueuedAt: number
-  lastQueuedAt: number
-  debounceUntil: number
-}
-
 export interface DocumentEmbeddingEntity {
   id: number
   documentId: string
@@ -21,7 +14,7 @@ export interface DocumentEmbeddingEntity {
   chunkEnd: number
   selectionFrom: number | null
   selectionTo: number | null
-  chunkText: string
+  vectorKey: string
   dimensions: number
   documentTimestamp: number
   contentHash: string
@@ -36,6 +29,7 @@ export interface ReplaceDocumentEmbeddingChunkInput {
   selectionFrom?: number | null
   selectionTo?: number | null
   text: string
+  vectorKey?: string
   embedding: number[]
 }
 
@@ -57,12 +51,6 @@ export interface ReplaceDocumentEmbeddingsInput {
 export interface ReplaceDocumentEmbeddingsResult {
   status: 'applied' | 'stale'
   embeddings: DocumentEmbeddingEntity[]
-}
-
-export interface DocumentEmbeddingQueueStats {
-  totalJobs: number
-  oldestQueuedAt: number | null
-  nextDebounceUntil: number | null
 }
 
 export interface SearchProjectDocumentEmbeddingsInput {
@@ -101,12 +89,6 @@ export interface ProjectDocumentEmbeddingSearchMatch {
 }
 
 export interface DocumentEmbeddingsRepositoryPort {
-  enqueueDocument(documentId: string, queuedAt: number, debounceUntil: number): Promise<void>
-  enqueueDocuments(documentIds: string[], queuedAt: number, debounceUntil: number): Promise<void>
-  listQueuedDocuments(): Promise<DocumentEmbeddingJobEntity[]>
-  getQueuedDocument(documentId: string): Promise<DocumentEmbeddingJobEntity | undefined>
-  clearQueuedDocuments(documentIds: string[]): Promise<void>
-  getQueueStats(): Promise<DocumentEmbeddingQueueStats>
   findEmbeddings(
     documentId: string,
     baseURL: string,

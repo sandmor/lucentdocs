@@ -12,6 +12,7 @@ import { YjsDocumentsRepository } from './yjsDocuments.adapter.js'
 import { AiSettingsRepository } from './aiSettings.adapter.js'
 import { IndexingSettingsRepository } from './indexingSettings.adapter.js'
 import { DocumentEmbeddingsRepository } from './documentEmbeddings.adapter.js'
+import { EmbeddingIndexQueueRepository } from './embeddingIndexQueue.adapter.js'
 import { AuthDataRepository } from './authData.adapter.js'
 import { createProjectsService } from '../../core/services/projects.service.js'
 import { createDocumentsService } from '../../core/services/documents.service.js'
@@ -46,7 +47,8 @@ export function createSqliteAdapter(dbPath: string): SqliteAdapter {
     yjsDocuments: new YjsDocumentsRepository(connection),
     aiSettings: new AiSettingsRepository(connection),
     indexingSettings: new IndexingSettingsRepository(connection),
-    documentEmbeddings: new DocumentEmbeddingsRepository(connection, jobQueue),
+    embeddingIndexQueue: new EmbeddingIndexQueueRepository(jobQueue),
+    documentEmbeddings: new DocumentEmbeddingsRepository(connection),
     authData: new AuthDataRepository(connection),
   }
 

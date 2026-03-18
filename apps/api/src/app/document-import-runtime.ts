@@ -160,7 +160,7 @@ export function createDocumentImportJobHandler(options: {
     }
 
     const queuedAt = Date.now()
-    await options.repositories.documentEmbeddings.enqueueDocuments(
+    await options.repositories.embeddingIndexQueue.enqueueDocuments(
       visibleImportedIds,
       queuedAt,
       queuedAt

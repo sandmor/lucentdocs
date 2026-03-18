@@ -76,7 +76,7 @@ describe('EmbeddingIndexService', () => {
       })
     )
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const result = await adapter.services.embeddingIndex.flushDueQueue(
@@ -123,7 +123,7 @@ describe('EmbeddingIndexService', () => {
       })
     )
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, {
       queuedAt: 1000,
       debounceMs: 10_000,
@@ -188,7 +188,7 @@ describe('EmbeddingIndexService', () => {
       })
     )
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const firstFlushPromise = adapter.services.embeddingIndex.flushDueQueue(
@@ -219,7 +219,7 @@ describe('EmbeddingIndexService', () => {
     )
     expect(storedAfterFirst).toHaveLength(0)
 
-    const statsAfterFirst = await adapter.repositories.documentEmbeddings.getQueueStats()
+    const statsAfterFirst = await adapter.repositories.embeddingIndexQueue.getQueueStats()
     expect(statsAfterFirst.totalJobs).toBe(1)
 
     globalThis.fetch = (async (input) => {
@@ -245,7 +245,7 @@ describe('EmbeddingIndexService', () => {
     )
     expect(storedAfterSecond).toHaveLength(1)
 
-    const statsAfterSecond = await adapter.repositories.documentEmbeddings.getQueueStats()
+    const statsAfterSecond = await adapter.repositories.embeddingIndexQueue.getQueueStats()
     expect(statsAfterSecond.totalJobs).toBe(0)
 
     adapter.connection.close()
@@ -305,7 +305,7 @@ describe('EmbeddingIndexService', () => {
       },
     })
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const result = await adapter.services.embeddingIndex.flushDueQueue(
@@ -353,7 +353,7 @@ describe('EmbeddingIndexService', () => {
       })
     )
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
 
     await adapter.repositories.documentEmbeddings.replaceEmbeddings({
       documentId: doc.id,
@@ -402,7 +402,7 @@ describe('EmbeddingIndexService', () => {
     )
     expect(existingAfter).toHaveLength(0)
 
-    const queueStats = await adapter.repositories.documentEmbeddings.getQueueStats()
+    const queueStats = await adapter.repositories.embeddingIndexQueue.getQueueStats()
     expect(queueStats.totalJobs).toBe(0)
 
     adapter.connection.close()
@@ -580,14 +580,14 @@ describe('EmbeddingIndexService', () => {
       })
     )
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     await expect(
       adapter.services.embeddingIndex.flushDueQueue({ debounceMs: 0, batchMaxWaitMs: 5000 }, 1000)
     ).rejects.toThrow('Embedding response was not valid JSON')
 
-    const job = await adapter.repositories.documentEmbeddings.getQueuedDocument(doc.id)
+    const job = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(doc.id)
     expect(job).toBeTruthy()
     expect(job!.debounceUntil).toBe(1000)
 
@@ -611,12 +611,12 @@ describe('EmbeddingIndexService', () => {
     const doc = await adapter.services.documents.create('delete-queued.md')
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
-    const queuedBefore = await adapter.repositories.documentEmbeddings.getQueuedDocument(doc.id)
+    const queuedBefore = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(doc.id)
     expect(queuedBefore).toBeTruthy()
 
     await adapter.services.embeddingIndex.deleteDocument(doc.id)
 
-    const queuedAfter = await adapter.repositories.documentEmbeddings.getQueuedDocument(doc.id)
+    const queuedAfter = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(doc.id)
     expect(queuedAfter).toBeUndefined()
 
     adapter.connection.close()
@@ -652,7 +652,7 @@ describe('EmbeddingIndexService', () => {
       })
     )
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([doc.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const originalReplace = adapter.repositories.documentEmbeddings.replaceEmbeddings.bind(
@@ -672,7 +672,7 @@ describe('EmbeddingIndexService', () => {
     )
     expect(result.processed).toBe(0)
 
-    const queued = await adapter.repositories.documentEmbeddings.getQueuedDocument(doc.id)
+    const queued = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(doc.id)
     expect(queued).toBeUndefined()
 
     adapter.connection.close()
@@ -713,14 +713,14 @@ describe('EmbeddingIndexService', () => {
       })
     )
 
-    await adapter.repositories.documentEmbeddings.clearQueuedDocuments([docA.id, docB.id])
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([docA.id, docB.id])
     await adapter.services.embeddingIndex.enqueueDocuments([docA.id, docB.id], {
       queuedAt: 1_000,
       debounceMs: 0,
     })
 
-    const queuedA = await adapter.repositories.documentEmbeddings.getQueuedDocument(docA.id)
-    const queuedB = await adapter.repositories.documentEmbeddings.getQueuedDocument(docB.id)
+    const queuedA = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(docA.id)
+    const queuedB = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(docB.id)
     expect(queuedA).toBeTruthy()
     expect(queuedB).toBeTruthy()
 
@@ -729,8 +729,8 @@ describe('EmbeddingIndexService', () => {
     ])
     expect(result.processed).toBe(1)
 
-    const afterA = await adapter.repositories.documentEmbeddings.getQueuedDocument(docA.id)
-    const afterB = await adapter.repositories.documentEmbeddings.getQueuedDocument(docB.id)
+    const afterA = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(docA.id)
+    const afterB = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(docB.id)
     expect(afterA).toBeUndefined()
     expect(afterB).toBeTruthy()
 

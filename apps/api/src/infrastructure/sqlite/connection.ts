@@ -169,7 +169,7 @@ const SCHEMA = `
   );
 
   CREATE TABLE IF NOT EXISTS document_embeddings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vectorKey TEXT PRIMARY KEY,
     documentId TEXT NOT NULL,
     providerConfigId TEXT,
     providerId TEXT NOT NULL,
@@ -198,6 +198,16 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_document_embeddings_document
     ON document_embeddings(documentId ASC);
+
+  CREATE TABLE IF NOT EXISTS document_embedding_vector_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vectorKey TEXT NOT NULL UNIQUE,
+    dimensions INTEGER NOT NULL CHECK (dimensions > 0),
+    FOREIGN KEY (vectorKey) REFERENCES document_embeddings(vectorKey) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_document_embedding_vector_rows_dimensions
+    ON document_embedding_vector_rows(dimensions ASC);
 
   CREATE TABLE IF NOT EXISTS app_config_values (
     key TEXT PRIMARY KEY,
@@ -403,7 +413,7 @@ export class SqliteConnection implements ConnectionPort {
     }
 
     const coreTableMissingPattern =
-      /no such table:\s*(projects|documents|project_documents|yjs_documents|version_snapshots|job_queue|document_embeddings)/i
+      /no such table:\s*(projects|documents|project_documents|yjs_documents|version_snapshots|job_queue|document_embeddings|document_embedding_vector_rows)/i
     return coreTableMissingPattern.test(message)
   }
 }
