@@ -38,6 +38,16 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 const NONE_VALUE = '__none__'
 
@@ -173,6 +183,7 @@ export function AdminPromptsPage() {
   const [creatingMode, setCreatingMode] = useState<PromptMode | null>(null)
   const [form, setForm] = useState<PromptFormState>(createEmptyForm('continue'))
   const [formError, setFormError] = useState<string | null>(null)
+  const [promptToDelete, setPromptToDelete] = useState<{ id: string; name: string } | null>(null)
 
   const selectedPromptQuery = trpc.prompts.get.useQuery(
     { id: selectedPromptId ?? '' },
@@ -365,22 +376,25 @@ export function AdminPromptsPage() {
     )
   }
 
-  const deletePrompt = () => {
-    if (!selectedPromptId) return
-    const promptName = selectedSummary?.name ?? 'this prompt'
-    const confirmed = window.confirm(`Delete "${promptName}"?`)
-    if (!confirmed) return
+  const requestDeletePrompt = () => {
+    if (!selectedPromptId || !selectedSummary || selectedSummary.isSystem) return
+    setPromptToDelete({ id: selectedPromptId, name: selectedSummary.name })
+  }
 
+  const confirmDeletePrompt = () => {
+    if (!promptToDelete) return
+    const deletingPrompt = promptToDelete
     deleteMutation.mutate(
-      { id: selectedPromptId },
+      { id: deletingPrompt.id },
       {
         onSuccess: async (payload) => {
           await utils.prompts.list.invalidate()
           const nextPrompts = payload.list.prompts
           setCreatingMode(null)
+          setPromptToDelete(null)
           setSelectedPromptId(nextPrompts[0]?.id ?? null)
           if (nextPrompts.length === 0) setForm(createEmptyForm('continue'))
-          toast.success(`Deleted "${promptName}"`)
+          toast.success(`Deleted "${deletingPrompt.name}"`)
         },
         onError: (error) => {
           toast.error('Failed to delete prompt', { description: error.message })
@@ -439,6 +453,12 @@ export function AdminPromptsPage() {
             <p className="text-muted-foreground mt-1 text-sm sm:text-base">
               Manage prompt templates and bind defaults by slot.
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <Badge variant="outline">{summaries.length} prompts</Badge>
+              <Badge variant="outline">{continueOptions.length} continue</Badge>
+              <Badge variant="outline">{selectionOptions.length} selection</Badge>
+              <Badge variant="outline">{chatOptions.length} chat</Badge>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -482,7 +502,7 @@ export function AdminPromptsPage() {
                 !selectedPromptId ||
                 selectedSummary?.isSystem === true
               }
-              onClick={deletePrompt}
+              onClick={requestDeletePrompt}
             >
               <Trash2 data-icon="inline-start" />
               Delete
@@ -492,7 +512,7 @@ export function AdminPromptsPage() {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
           <div className="grid gap-6">
-            <Card>
+            <Card className="bg-card/90 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle>System Defaults</CardTitle>
                 <CardDescription>Bind prompt names to runtime slots.</CardDescription>
@@ -593,7 +613,7 @@ export function AdminPromptsPage() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-card/90 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle>Prompt Library</CardTitle>
                 <CardDescription>{summaries.length} prompts.</CardDescription>
@@ -608,7 +628,11 @@ export function AdminPromptsPage() {
                     <button
                       key={summary.id}
                       type="button"
-                      className="hover:bg-muted/60 flex flex-col gap-2 rounded-lg border p-3 text-left transition-colors"
+                      className={`flex flex-col gap-2 rounded-lg border p-3 text-left transition-colors ${
+                        summary.id === selectedPromptId
+                          ? 'border-primary/50 bg-primary/5 ring-1 ring-primary/20'
+                          : 'hover:bg-muted/60'
+                      }`}
                       onClick={() => selectPrompt(summary.id)}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -631,7 +655,7 @@ export function AdminPromptsPage() {
             </Card>
           </div>
 
-          <Card>
+          <Card className="bg-card/95 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Editor</CardTitle>
               <CardDescription>
@@ -679,7 +703,7 @@ export function AdminPromptsPage() {
                   <FieldLabel htmlFor="prompt-name">Name</FieldLabel>
                   <Input
                     id="prompt-name"
-                    spellCheck={false}
+                    autoComplete="off"
                     maxLength={limitsQuery.data?.promptNameChars}
                     value={form.name}
                     onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
@@ -691,7 +715,7 @@ export function AdminPromptsPage() {
                 <FieldLabel htmlFor="prompt-description">Description</FieldLabel>
                 <Input
                   id="prompt-description"
-                  spellCheck={false}
+                  autoComplete="off"
                   maxLength={limitsQuery.data?.promptDescChars}
                   value={form.description}
                   onChange={(event) =>
@@ -737,7 +761,7 @@ export function AdminPromptsPage() {
                 <Textarea
                   id="system-template"
                   className="min-h-52 font-mono text-xs"
-                  spellCheck={false}
+                  autoComplete="off"
                   maxLength={limitsQuery.data?.promptSystemChars}
                   value={form.systemTemplate}
                   onChange={(event) =>
@@ -751,7 +775,7 @@ export function AdminPromptsPage() {
                 <Textarea
                   id="user-template"
                   className="min-h-52 font-mono text-xs"
-                  spellCheck={false}
+                  autoComplete="off"
                   maxLength={limitsQuery.data?.promptUserChars}
                   value={form.userTemplate}
                   onChange={(event) =>
@@ -803,6 +827,32 @@ export function AdminPromptsPage() {
           </Card>
         </div>
       </div>
+
+      <AlertDialog
+        open={promptToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPromptToDelete(null)
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete prompt?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{promptToDelete?.name}" will be permanently deleted from your prompt library.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={confirmDeletePrompt}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
