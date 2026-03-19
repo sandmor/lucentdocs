@@ -25,6 +25,10 @@ fn range_length(range: ChunkRange) -> usize {
   range.end.saturating_sub(range.start)
 }
 
+fn is_line_break(grapheme: &str) -> bool {
+  grapheme == "\n" || grapheme == "\r" || grapheme == "\r\n"
+}
+
 fn build_sentence_ranges(text: &str, total_graphemes: usize) -> Vec<ChunkRange> {
   if text.is_empty() {
     return vec![];
@@ -65,13 +69,15 @@ fn build_paragraph_ranges(text: &str, total_graphemes: usize) -> Vec<ChunkRange>
   let mut i = 0usize;
 
   while i < full.len() {
-    if full[i] == "\n" {
+    if is_line_break(full[i]) {
       let mut j = i;
-      while j < full.len() && full[j] == "\n" {
+      let mut break_count = 0usize;
+      while j < full.len() && is_line_break(full[j]) {
+        break_count += 1;
         j += 1;
       }
 
-      if j - i >= 2 {
+      if break_count >= 2 {
         if i > start {
           ranges.push(ChunkRange { start, end: i });
         }
@@ -167,35 +173,51 @@ fn normalize_units(
     return vec![];
   }
 
-  let mut merged = vec![];
-  let mut i = 0usize;
+  let merge_short_units =
+    |input: &[ChunkRange], max_merged_chars: Option<usize>| -> Vec<ChunkRange> {
+      let mut merged = vec![];
+      let mut i = 0usize;
 
-  while i < units.len() {
-    let mut current = units[i];
-    while range_length(current) < min_chars && i + 1 < units.len() {
-      i += 1;
-      current.end = units[i].end;
-    }
+      while i < input.len() {
+        let mut current = input[i];
+        while range_length(current) < min_chars && i + 1 < input.len() {
+          let next = input[i + 1];
+          let next_len = next.end.saturating_sub(current.start);
+          if max_merged_chars.is_some_and(|limit| next_len > limit) {
+            break;
+          }
 
-    merged.push(current);
-    i += 1;
-  }
+          i += 1;
+          current.end = next.end;
+        }
 
-  let mut result = vec![];
+        merged.push(current);
+        i += 1;
+      }
+
+      merged
+    };
+
+  let merged = merge_short_units(units, None);
+
+  let mut split_units = vec![];
   for unit in merged {
     if range_length(unit) > max_chars {
       match level {
-        ChunkLevel::Sentence => result.extend(split_range_by_graphemes(unit, max_chars)),
+        ChunkLevel::Sentence => split_units.extend(split_range_by_graphemes(unit, max_chars)),
         ChunkLevel::Paragraph => {
-          result.extend(split_range_by_sentences(unit, max_chars, graphemes))
+          split_units.extend(split_range_by_sentences(unit, max_chars, graphemes))
         }
       }
     } else {
-      result.push(unit);
+      split_units.push(unit);
     }
   }
 
-  result
+  // Oversized paragraph splitting can create tiny sentence fragments.
+  // Re-merge adjacent units to satisfy min_chars where possible, without
+  // violating the max_chars cap.
+  merge_short_units(&split_units, Some(max_chars))
 }
 
 fn dedupe_ranges(ranges: Vec<ChunkRange>) -> Vec<ChunkRange> {
@@ -455,6 +477,49 @@ mod tests {
         "Another paragraph.".to_string(),
       ]
     );
+  }
+
+  #[test]
+  fn remixes_tiny_sentence_fragments_after_oversized_paragraph_split() {
+    let paragraph = "A. ".repeat(30);
+
+    let chunks = build_embedding_chunks(
+      &paragraph,
+      &Strategy::SlidingStructured {
+        level: ChunkLevel::Paragraph,
+        window_size: 1,
+        stride: 1,
+        min_unit_chars: 20,
+        max_unit_chars: 40,
+      },
+    );
+
+    assert!(chunks.len() < 10);
+    for chunk in chunks.iter().take(chunks.len().saturating_sub(1)) {
+      assert!(chunk.text.len() >= 20);
+      assert!(chunk.text.len() <= 40);
+    }
+  }
+
+  #[test]
+  fn paragraph_split_handles_crlf_boundaries() {
+    let text = "First paragraph.\r\n\r\nSecond paragraph.";
+    let chunks = build_embedding_chunks(
+      text,
+      &Strategy::SlidingStructured {
+        level: ChunkLevel::Paragraph,
+        window_size: 1,
+        stride: 1,
+        min_unit_chars: 1,
+        max_unit_chars: 500,
+      },
+    );
+
+    let texts = chunks
+      .into_iter()
+      .map(|chunk| chunk.text)
+      .collect::<Vec<_>>();
+    assert_eq!(texts, vec!["First paragraph.", "Second paragraph."]);
   }
 
   #[test]
