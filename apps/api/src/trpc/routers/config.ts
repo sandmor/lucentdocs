@@ -25,7 +25,12 @@ const AI_RUNTIME_KEYS = [
   'aiSelectionEditTemperature',
   'aiDefaultMaxOutputTokens',
 ] as const
-const EMBEDDING_RUNTIME_KEYS = ['embeddingDebounceMs', 'embeddingBatchMaxWaitMs'] as const
+const EMBEDDING_RUNTIME_KEYS = [
+  'embeddingDebounceMs',
+  'embeddingBatchMaxWaitMs',
+  'embeddingBatchMaxTokens',
+  'embeddingBatchMaxInputs',
+] as const
 const YJS_RUNTIME_KEYS = ['yjsPersistenceFlushMs', 'yjsVersionIntervalMs'] as const
 
 interface ConfigFieldPayload {
@@ -242,6 +247,8 @@ export const configRouter = router({
       aiDefaultMaxOutputTokens: input.aiDefaultMaxOutputTokens,
       embeddingDebounceMs: input.embeddingDebounceMs,
       embeddingBatchMaxWaitMs: input.embeddingBatchMaxWaitMs,
+      embeddingBatchMaxTokens: input.embeddingBatchMaxTokens,
+      embeddingBatchMaxInputs: input.embeddingBatchMaxInputs,
       yjsPersistenceFlushMs: input.yjsPersistenceFlushMs,
       yjsVersionIntervalMs: input.yjsVersionIntervalMs,
       searchDefaultLimit: input.searchDefaultLimit,

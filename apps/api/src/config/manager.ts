@@ -21,6 +21,8 @@ export interface ResolvedAiConfig {
 export interface ResolvedEmbeddingConfig {
   debounceMs: number
   batchMaxWaitMs: number
+  batchMaxTokens: number
+  batchMaxInputs: number
 }
 
 export interface AppConfig {
@@ -332,6 +334,8 @@ function buildResolvedConfig(rawConfig: PersistedAppConfig, store: ConfigStoreHa
     embeddings: {
       debounceMs: rawConfig.embeddingDebounceMs,
       batchMaxWaitMs: rawConfig.embeddingBatchMaxWaitMs,
+      batchMaxTokens: rawConfig.embeddingBatchMaxTokens,
+      batchMaxInputs: rawConfig.embeddingBatchMaxInputs,
     },
     yjs: {
       persistenceFlushIntervalMs: rawConfig.yjsPersistenceFlushMs,

@@ -24,6 +24,20 @@ function jsonResponse(payload: unknown, status = 200): Response {
 describe('EmbeddingIndexService', () => {
   const originalFetch = globalThis.fetch
   let cleanupDir: string | null = null
+  const embeddingRuntimeConfig = (
+    overrides: Partial<{
+      debounceMs: number
+      batchMaxWaitMs: number
+      batchMaxTokens: number
+      batchMaxInputs: number
+    }> = {}
+  ) => ({
+    debounceMs: 0,
+    batchMaxWaitMs: 5000,
+    batchMaxTokens: 300_000,
+    batchMaxInputs: 2048,
+    ...overrides,
+  })
 
   const readFetchUrl = (input: string | URL | Request): string => {
     if (typeof input === 'string') return input
@@ -80,7 +94,7 @@ describe('EmbeddingIndexService', () => {
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const result = await adapter.services.embeddingIndex.flushDueQueue(
-      { debounceMs: 0, batchMaxWaitMs: 5000 },
+      embeddingRuntimeConfig({ debounceMs: 0, batchMaxWaitMs: 5000 }),
       1000
     )
 
@@ -130,13 +144,13 @@ describe('EmbeddingIndexService', () => {
     })
 
     const early = await adapter.services.embeddingIndex.flushDueQueue(
-      { debounceMs: 10_000, batchMaxWaitMs: 2_000 },
+      embeddingRuntimeConfig({ debounceMs: 10_000, batchMaxWaitMs: 2_000 }),
       1500
     )
     expect(early.processed).toBe(0)
 
     const late = await adapter.services.embeddingIndex.flushDueQueue(
-      { debounceMs: 10_000, batchMaxWaitMs: 2_000 },
+      embeddingRuntimeConfig({ debounceMs: 10_000, batchMaxWaitMs: 2_000 }),
       3100
     )
     expect(late.processed).toBe(1)
@@ -192,7 +206,7 @@ describe('EmbeddingIndexService', () => {
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const firstFlushPromise = adapter.services.embeddingIndex.flushDueQueue(
-      { debounceMs: 0, batchMaxWaitMs: 5_000 },
+      embeddingRuntimeConfig({ debounceMs: 0, batchMaxWaitMs: 5_000 }),
       1000
     )
 
@@ -233,7 +247,7 @@ describe('EmbeddingIndexService', () => {
     }) as typeof fetch
 
     const secondFlush = await adapter.services.embeddingIndex.flushDueQueue(
-      { debounceMs: 0, batchMaxWaitMs: 5_000 },
+      embeddingRuntimeConfig({ debounceMs: 0, batchMaxWaitMs: 5_000 }),
       1001
     )
     expect(secondFlush.processed).toBe(1)
@@ -309,7 +323,7 @@ describe('EmbeddingIndexService', () => {
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const result = await adapter.services.embeddingIndex.flushDueQueue(
-      { debounceMs: 0, batchMaxWaitMs: 5000 },
+      embeddingRuntimeConfig({ debounceMs: 0, batchMaxWaitMs: 5000 }),
       1000
     )
 
@@ -388,7 +402,7 @@ describe('EmbeddingIndexService', () => {
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const result = await adapter.services.embeddingIndex.flushDueQueue(
-      { debounceMs: 0, batchMaxWaitMs: 5000 },
+      embeddingRuntimeConfig({ debounceMs: 0, batchMaxWaitMs: 5000 }),
       1000
     )
 
@@ -584,7 +598,10 @@ describe('EmbeddingIndexService', () => {
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     await expect(
-      adapter.services.embeddingIndex.flushDueQueue({ debounceMs: 0, batchMaxWaitMs: 5000 }, 1000)
+      adapter.services.embeddingIndex.flushDueQueue(
+        embeddingRuntimeConfig({ debounceMs: 0, batchMaxWaitMs: 5000 }),
+        1000
+      )
     ).rejects.toThrow('Embedding response was not valid JSON')
 
     const job = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(doc.id)
@@ -667,7 +684,7 @@ describe('EmbeddingIndexService', () => {
     }
 
     const result = await adapter.services.embeddingIndex.flushDueQueue(
-      { debounceMs: 0, batchMaxWaitMs: 5000 },
+      embeddingRuntimeConfig({ debounceMs: 0, batchMaxWaitMs: 5000 }),
       1000
     )
     expect(result.processed).toBe(0)

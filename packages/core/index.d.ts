@@ -72,6 +72,7 @@ export interface PreparedEmbeddingChunk {
   end: number
   selectionFrom?: number
   selectionTo?: number
+  estimatedTokens: number
   text: string
 }
 

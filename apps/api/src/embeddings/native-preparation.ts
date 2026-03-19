@@ -14,6 +14,7 @@ export interface NativePreparedEmbeddingChunk {
   end: number
   selectionFrom: number | null
   selectionTo: number | null
+  estimatedTokens: number
   text: string
 }
 
@@ -48,6 +49,7 @@ export async function prepareEmbeddingDocumentsNative(
       end: chunk.end,
       selectionFrom: chunk.selectionFrom ?? null,
       selectionTo: chunk.selectionTo ?? null,
+      estimatedTokens: chunk.estimatedTokens,
       text: chunk.text,
     })),
   }))

@@ -3,6 +3,7 @@ use rayon::prelude::*;
 mod chunking;
 mod projection;
 mod strategy;
+mod token_estimate;
 mod types;
 
 pub use types::{EmbeddingDocumentRequest, PreparedEmbeddingDocument};
@@ -59,6 +60,13 @@ fn prepare_single_document(
         end: checked_u32(chunk.end, "end", &document_id)?,
         selection_from,
         selection_to,
+        estimated_tokens: u32::try_from(token_estimate::estimate_tokens_with_buffer(&chunk.text))
+          .map_err(|_| {
+          format!(
+            "Estimated token count exceeds u32 range for document '{document_id}' chunk {}.",
+            chunk.ordinal
+          )
+        })?,
         text: chunk.text,
       })
     })

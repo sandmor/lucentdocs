@@ -249,6 +249,8 @@ function registerProcessHandlers(
             .flushDueQueue({
               debounceMs: runtimeConfig.debounceMs,
               batchMaxWaitMs: runtimeConfig.batchMaxWaitMs,
+              batchMaxTokens: runtimeConfig.batchMaxTokens,
+              batchMaxInputs: runtimeConfig.batchMaxInputs,
             })
             .catch((error) => {
               console.error('Failed to flush embedding queue on shutdown:', error)

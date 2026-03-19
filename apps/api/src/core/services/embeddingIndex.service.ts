@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { IndexingStrategy } from '@lucentdocs/shared'
+import { DEFAULT_PERSISTED_CONFIG, type IndexingStrategy } from '@lucentdocs/shared'
 import type { RepositorySet } from '../ports/types.js'
 import type { TransactionPort } from '../ports/transaction.port.js'
 import type { JobQueuePort } from '../ports/jobQueue.port.js'
@@ -24,12 +24,15 @@ interface PreparedEmbeddingChunk {
   end: number
   selectionFrom: number | null
   selectionTo: number | null
+  estimatedTokens: number
   text: string
 }
 
 export interface EmbeddingIndexRuntimeConfig {
   debounceMs: number
   batchMaxWaitMs: number
+  batchMaxTokens: number
+  batchMaxInputs: number
 }
 
 export interface EmbeddingFlushResult {
@@ -130,7 +133,14 @@ export function createEmbeddingIndexService(
   let activeFlush: Promise<EmbeddingFlushResult> | null = null
   let activeTargetedFlush: Promise<EmbeddingFlushResult> | null = null
 
-  const EMBED_BATCH_MAX_INPUTS = 128
+  const DEFAULT_BATCH_MAX_TOKENS = DEFAULT_PERSISTED_CONFIG.embeddingBatchMaxTokens
+  const DEFAULT_BATCH_MAX_INPUTS = DEFAULT_PERSISTED_CONFIG.embeddingBatchMaxInputs
+  const DEFAULT_RUNTIME_CONFIG: EmbeddingIndexRuntimeConfig = {
+    debounceMs: 0,
+    batchMaxWaitMs: 0,
+    batchMaxTokens: DEFAULT_BATCH_MAX_TOKENS,
+    batchMaxInputs: DEFAULT_BATCH_MAX_INPUTS,
+  }
   const EMBED_REPLACE_CONCURRENCY = 4
   const VECTOR_CLEANUP_JOB_MAX_REFERENCES = 500
   const VECTOR_CLEANUP_JOB_PRIORITY = 50
@@ -160,24 +170,81 @@ export function createEmbeddingIndexService(
     return results
   }
 
-  const embedInBatches = async (
+  const embedDocumentsInPlannedBatches = async (
     provider: { embed: (inputs: string[]) => Promise<Array<{ embedding: number[] }>> },
-    inputs: string[]
+    documents: Array<{ chunks: Array<{ text: string; estimatedTokens: number }> }>,
+    context: { baseURL: string; model: string },
+    limits: { maxTokens: number; maxInputs: number }
   ): Promise<Array<{ embedding: number[] }>> => {
-    if (inputs.length === 0) return []
     const result: Array<{ embedding: number[] }> = []
-    for (let i = 0; i < inputs.length; i += EMBED_BATCH_MAX_INPUTS) {
-      const chunk = inputs.slice(i, i + EMBED_BATCH_MAX_INPUTS)
-      const embeddings = await provider.embed(chunk)
-      result.push(...embeddings)
+    let batch: string[] = []
+    let batchTokens = 0
+
+    const runEmbed = async (
+      inputs: string[],
+      estimatedTokens: number,
+      mode: 'batch' | 'single-oversized'
+    ): Promise<Array<{ embedding: number[] }>> => {
+      try {
+        return await provider.embed(inputs)
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        console.warn('[embedding] Embedding request failed:', {
+          baseURL: context.baseURL,
+          model: context.model,
+          inputs: inputs.length,
+          estimatedTokens,
+          maxTokens: limits.maxTokens,
+          maxInputs: limits.maxInputs,
+          mode,
+          message: errorMessage,
+        })
+        throw error
+      }
     }
+
+    const flush = async (): Promise<void> => {
+      if (batch.length === 0) return
+      const embeddings = await runEmbed(batch, batchTokens, 'batch')
+      result.push(...embeddings)
+      batch = []
+      batchTokens = 0
+    }
+
+    for (const document of documents) {
+      for (const chunk of document.chunks) {
+        const estimatedTokens = Number.isFinite(chunk.estimatedTokens)
+          ? Math.max(0, Math.floor(chunk.estimatedTokens))
+          : 0
+
+        if (
+          batch.length > 0 &&
+          (batchTokens + estimatedTokens > limits.maxTokens || batch.length >= limits.maxInputs)
+        ) {
+          await flush()
+        }
+
+        if (estimatedTokens > limits.maxTokens && batch.length === 0) {
+          // Too large for the configured budget even as a single entry; still try to embed it alone.
+          const embeddings = await runEmbed([chunk.text], estimatedTokens, 'single-oversized')
+          result.push(...embeddings)
+          continue
+        }
+
+        batch.push(chunk.text)
+        batchTokens += estimatedTokens
+      }
+    }
+
+    await flush()
     return result
   }
 
   const processJobs = async (
     jobsToProcess: DocumentEmbeddingJobEntity[],
     queuedCount: number,
-    now: number
+    now: number,
+    runtimeConfig: EmbeddingIndexRuntimeConfig
   ): Promise<EmbeddingFlushResult> => {
     if (jobsToProcess.length === 0) {
       return { queued: queuedCount, processed: 0, skipped: 0 }
@@ -336,8 +403,23 @@ export function createEmbeddingIndexService(
     const queueIdsToClear = new Set<string>()
 
     if (documentsToEmbed.length > 0) {
-      const chunkTexts = documentsToEmbed.flatMap((item) => item.chunks.map((chunk) => chunk.text))
-      const embeddings = chunkTexts.length > 0 ? await embedInBatches(provider, chunkTexts) : []
+      const maxTokens = Math.max(
+        1,
+        Math.floor(runtimeConfig.batchMaxTokens || DEFAULT_BATCH_MAX_TOKENS)
+      )
+      const maxInputs = Math.max(
+        1,
+        Math.floor(runtimeConfig.batchMaxInputs || DEFAULT_BATCH_MAX_INPUTS)
+      )
+      const embeddings = await embedDocumentsInPlannedBatches(
+        provider,
+        documentsToEmbed,
+        {
+          baseURL: selection.baseURL,
+          model: selection.model,
+        },
+        { maxTokens, maxInputs }
+      )
 
       const replacements: Array<{
         item: (typeof documentsToEmbed)[number]
@@ -581,7 +663,9 @@ export function createEmbeddingIndexService(
           selectedJobs.push(queuedJob)
         }
 
-        return processJobs(selectedJobs, uniqueRequests.length, now)
+        const runtimeConfig = configOptions.getRuntimeConfig?.() ?? DEFAULT_RUNTIME_CONFIG
+
+        return processJobs(selectedJobs, uniqueRequests.length, now, runtimeConfig)
       })().finally(() => {
         activeTargetedFlush = null
       })
@@ -607,7 +691,7 @@ export function createEmbeddingIndexService(
         if (dueJobs.length === 0) {
           return { queued: jobs.length, processed: 0, skipped: 0 }
         }
-        return processJobs(dueJobs, jobs.length, now)
+        return processJobs(dueJobs, jobs.length, now, config)
       })().finally(() => {
         activeFlush = null
       })

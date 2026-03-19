@@ -16,6 +16,8 @@ export interface PersistedAppConfig {
   aiDefaultMaxOutputTokens: number
   embeddingDebounceMs: number
   embeddingBatchMaxWaitMs: number
+  embeddingBatchMaxTokens: number
+  embeddingBatchMaxInputs: number
   yjsPersistenceFlushMs: number
   yjsVersionIntervalMs: number
   searchDefaultLimit: number
@@ -123,6 +125,22 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     envVar: 'EMBEDDING_BATCH_MAX_WAIT_MS',
     kind: 'int',
     defaultValue: 300_000,
+    allowEmptyString: false,
+    min: 1,
+  },
+  {
+    key: 'embeddingBatchMaxTokens',
+    envVar: 'EMBEDDING_BATCH_MAX_TOKENS',
+    kind: 'int',
+    defaultValue: 300_000,
+    allowEmptyString: false,
+    min: 1,
+  },
+  {
+    key: 'embeddingBatchMaxInputs',
+    envVar: 'EMBEDDING_BATCH_MAX_INPUTS',
+    kind: 'int',
+    defaultValue: 2048,
     allowEmptyString: false,
     min: 1,
   },
@@ -334,6 +352,8 @@ export const EDITABLE_CONFIG_KEYS = [
   'aiDefaultMaxOutputTokens',
   'embeddingDebounceMs',
   'embeddingBatchMaxWaitMs',
+  'embeddingBatchMaxTokens',
+  'embeddingBatchMaxInputs',
   'yjsPersistenceFlushMs',
   'yjsVersionIntervalMs',
   'searchDefaultLimit',
@@ -438,6 +458,8 @@ const aiSelEditTempField = CONFIG_FIELD_BY_KEY.aiSelectionEditTemperature
 const aiDefaultMaxTokensField = CONFIG_FIELD_BY_KEY.aiDefaultMaxOutputTokens
 const embeddingDebounceField = CONFIG_FIELD_BY_KEY.embeddingDebounceMs
 const embeddingBatchMaxWaitField = CONFIG_FIELD_BY_KEY.embeddingBatchMaxWaitMs
+const embeddingBatchMaxTokensField = CONFIG_FIELD_BY_KEY.embeddingBatchMaxTokens
+const embeddingBatchMaxInputsField = CONFIG_FIELD_BY_KEY.embeddingBatchMaxInputs
 
 export const editableConfigSchema = z
   .object({
@@ -461,6 +483,14 @@ export const editableConfigSchema = z
       .number()
       .int()
       .min(embeddingBatchMaxWaitField.min ?? 1),
+    embeddingBatchMaxTokens: z
+      .number()
+      .int()
+      .min(embeddingBatchMaxTokensField.min ?? 1),
+    embeddingBatchMaxInputs: z
+      .number()
+      .int()
+      .min(embeddingBatchMaxInputsField.min ?? 1),
     yjsPersistenceFlushMs: z
       .number()
       .int()

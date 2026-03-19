@@ -17,6 +17,7 @@ pub struct PreparedEmbeddingChunk {
   pub end: u32,
   pub selection_from: Option<u32>,
   pub selection_to: Option<u32>,
+  pub estimated_tokens: u32,
   pub text: String,
 }
 

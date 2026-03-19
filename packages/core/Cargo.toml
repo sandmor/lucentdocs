@@ -22,6 +22,7 @@ tokio = { version = "1", features = ["rt", "sync"] }
 rayon = "1.10"
 unicode-segmentation = "1.12"
 yrs = "0.25"
+tiktoken-rs = "0.9.1"
 
 [build-dependencies]
 napi-build = "2"

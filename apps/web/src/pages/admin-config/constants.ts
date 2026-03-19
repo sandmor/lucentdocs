@@ -91,6 +91,8 @@ export const AI_TUNING_FIELD_KEYS = [
 export const EMBEDDING_RUNTIME_FIELD_KEYS = [
   'embeddingDebounceMs',
   'embeddingBatchMaxWaitMs',
+  'embeddingBatchMaxTokens',
+  'embeddingBatchMaxInputs',
 ] as const satisfies ReadonlyArray<VisibleNumberFieldKey>
 
 export const COLLABORATION_FIELD_KEYS = [
@@ -176,6 +178,17 @@ export const VISIBLE_FIELD_META: Record<
     description:
       'Maximum age of the oldest queued document before the pending embedding batch is flushed.',
     overrideSuffix: ' ms',
+  },
+  embeddingBatchMaxTokens: {
+    id: 'embedding-batch-max-tokens',
+    label: 'Embedding max batch tokens',
+    description:
+      'Maximum approximate token count per embedding provider request (uses a padded native tiktoken estimate).',
+  },
+  embeddingBatchMaxInputs: {
+    id: 'embedding-batch-max-inputs',
+    label: 'Embedding max batch inputs',
+    description: 'Maximum number of inputs per embedding provider request.',
   },
   yjsPersistenceFlushMs: {
     id: 'flush-ms',
