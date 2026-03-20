@@ -14,13 +14,7 @@ import { IndexingSettingsRepository } from './indexingSettings.adapter.js'
 import { DocumentEmbeddingsRepository } from './documentEmbeddings.adapter.js'
 import { EmbeddingIndexQueueRepository } from './embeddingIndexQueue.adapter.js'
 import { AuthDataRepository } from './authData.adapter.js'
-import { createProjectsService } from '../../core/services/projects.service.js'
-import { createDocumentsService } from '../../core/services/documents.service.js'
-import { createChatsService } from '../../core/services/chats.service.js'
-import { createAiSettingsService } from '../../core/services/aiSettings.service.js'
-import { createIndexingSettingsService } from '../../core/services/indexingSettings.service.js'
-import { createEmbeddingIndexService } from '../../core/services/embeddingIndex.service.js'
-import { createAuthService } from '../../core/services/auth.service.js'
+import { createCoreServiceSet } from '../../core/services/service-set.factory.js'
 import { configManager } from '../../config/runtime.js'
 import { SqliteJobQueueAdapter } from '../queue/sqlite-job-queue.adapter.js'
 import type { JobQueuePort } from '../../core/ports/jobQueue.port.js'
@@ -70,36 +64,12 @@ export function createSqliteAdapter(
     authData: new AuthDataRepository(connection),
   }
 
-  const aiSettings = createAiSettingsService(repositories, transaction)
-  const indexingSettings = createIndexingSettingsService(repositories)
-  const embeddingIndex = createEmbeddingIndexService(
+  const services = createCoreServiceSet({
     repositories,
     transaction,
     jobQueue,
-    aiSettings,
-    indexingSettings,
-    {
-      getRuntimeConfig: () => configManager.getConfig().embeddings,
-    }
-  )
-
-  const services: ServiceSet = {
-    projects: createProjectsService(repositories, transaction, {
-      onDocumentsDeleted: (documentIds, references) =>
-        embeddingIndex.deleteDocuments(documentIds, { references }),
-    }),
-    documents: createDocumentsService(repositories, transaction, aiSettings, {
-      onDocumentContentStored: (documentId) => embeddingIndex.enqueueDocument(documentId),
-      onDocumentsContentStored: (documentIds) => embeddingIndex.enqueueDocuments(documentIds),
-      onDocumentsDeleted: (documentIds, references) =>
-        embeddingIndex.deleteDocuments(documentIds, { references }),
-    }),
-    chats: createChatsService(repositories),
-    aiSettings,
-    indexingSettings,
-    embeddingIndex,
-    auth: createAuthService(repositories, transaction),
-  }
+    getEmbeddingRuntimeConfig: () => configManager.getConfig().embeddings,
+  })
 
   return {
     connection,

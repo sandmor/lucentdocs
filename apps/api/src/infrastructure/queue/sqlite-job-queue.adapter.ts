@@ -116,7 +116,8 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
         if (!this.isSqliteLockError(error) || attempt >= this.lockRetryAttempts) {
           throw error
         }
-        await this.wait(this.lockRetryBaseMs * 2 ** (attempt - 1))
+        const backoffMs = this.lockRetryBaseMs * 2 ** (attempt - 1)
+        await this.wait(backoffMs)
       }
     }
   }

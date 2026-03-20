@@ -137,6 +137,9 @@ export interface DocumentsService {
 
   getDefaultDocumentIdForProject(projectId: string): Promise<string | null>
   setDefaultForProject(projectId: string, documentId: string): Promise<boolean>
+  // Resolves or creates the default document without loading document content.
+  // Useful for write-heavy flows where only the selected default ID is needed.
+  openOrCreateDefaultIdForProject(projectId: string): Promise<string | null>
   openOrCreateDefaultForProject(projectId: string): Promise<DocumentWithContent | null>
 
   moveForProject(
@@ -464,8 +467,10 @@ export function createDocumentsService(
 
   const getDocumentWithContent = async (id: string): Promise<DocumentWithContent | null> => {
     if (!isValidId(id)) return null
+
     const doc = await repos.documents.findById(id)
     if (!doc) return null
+
     const content = await getDocumentContent(id)
     return { ...doc, content }
   }
@@ -855,7 +860,7 @@ export function createDocumentsService(
       return true
     },
 
-    async openOrCreateDefaultForProject(projectId: string): Promise<DocumentWithContent | null> {
+    async openOrCreateDefaultIdForProject(projectId: string): Promise<string | null> {
       if (!isValidId(projectId)) return null
 
       const project = await repos.projects.findById(projectId)
@@ -867,7 +872,7 @@ export function createDocumentsService(
 
       if (metadataDefaultDocumentId) {
         const preferred = initialVisibleDocs.find((d) => d.id === metadataDefaultDocumentId)
-        if (preferred) return getDocumentWithContent(preferred.id)
+        if (preferred) return preferred.id
       }
 
       if (initialVisibleDocs.length > 0) {
@@ -875,7 +880,7 @@ export function createDocumentsService(
         await transaction.run(async () => {
           await setProjectDefaultDocument(projectId, fallback.id)
         })
-        return getDocumentWithContent(fallback.id)
+        return fallback.id
       }
 
       return transaction.run(async () => {
@@ -884,7 +889,7 @@ export function createDocumentsService(
         if (visibleDocs.length > 0) {
           const fallback = visibleDocs[0]!
           await setProjectDefaultDocument(projectId, fallback.id)
-          return getDocumentWithContent(fallback.id)
+          return fallback.id
         }
 
         const existingPaths = docs.map((d) => normalizeDocumentPath(d.title))
@@ -892,8 +897,14 @@ export function createDocumentsService(
         const created = await this.createForProject(projectId, title)
         if (!created) return null
         await setProjectDefaultDocument(projectId, created.id)
-        return created
+        return created.id
       })
+    },
+
+    async openOrCreateDefaultForProject(projectId: string): Promise<DocumentWithContent | null> {
+      const defaultDocumentId = await this.openOrCreateDefaultIdForProject(projectId)
+      if (!defaultDocumentId) return null
+      return getDocumentWithContent(defaultDocumentId)
     },
 
     async moveForProject(

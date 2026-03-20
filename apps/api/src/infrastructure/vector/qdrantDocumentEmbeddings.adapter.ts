@@ -311,6 +311,8 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
   private async deleteExistingPointsBestEffort(
     rows: Array<{ vectorKey: string; dimensions: number }>
   ): Promise<void> {
+    if (rows.length === 0) return
+
     const groupedDeletes = new Map<number, string[]>()
     for (const row of rows) {
       const pointId = qdrantPointId(row.vectorKey)
@@ -545,6 +547,7 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
     const existingRows = await this.metadataStore.listVectorReferencesByDocumentId(documentId)
 
     await this.metadataStore.deleteEmbeddingsByDocumentId(documentId)
+
     await this.deleteExistingPointsBestEffort(existingRows)
   }
 }

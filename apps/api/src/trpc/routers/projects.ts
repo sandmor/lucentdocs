@@ -136,7 +136,6 @@ export const projectsRouter = router({
   delete: protectedProcedure.input(z.object({ id: idSchema })).mutation(async ({ ctx, input }) => {
     const project = await assertProjectAccess(ctx, input.id)
     const scopedDocuments = await ctx.services.documents.listForProject(input.id)
-
     const deleted = await ctx.services.projects.delete(input.id)
     if (!deleted) {
       throw new TRPCError({
@@ -148,7 +147,6 @@ export const projectsRouter = router({
     for (const document of scopedDocuments) {
       ctx.yjsRuntime.evictLiveDocument(document.id)
     }
-
     projectSyncBus.publish({
       audienceUserIds: [project.ownerUserId],
       type: 'project.deleted',

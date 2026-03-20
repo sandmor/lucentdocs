@@ -13,8 +13,23 @@ function asUrl(input: string | URL | Request): string {
   return input.url
 }
 
+async function waitForCleanupJobs(
+  adapter: ReturnType<typeof createSqliteAdapter>,
+  timeoutMs = 2000
+): Promise<number> {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const queued = await adapter.jobQueue.listQueuedByType(EMBEDDING_VECTOR_CLEANUP_JOB_TYPE)
+    if (queued.length > 0) return queued.length
+    await Bun.sleep(10)
+  }
+
+  return 0
+}
+
 describe('Qdrant delete lifecycle', () => {
-  test('deleteDirectoryForProject removes Qdrant points before sqlite cascades metadata', async () => {
+  test('deleteDirectoryForProject defers Qdrant point deletes to cleanup worker jobs', async () => {
     const calls: Array<{ url: string; method: string }> = []
     const collections = new Set<string>()
 
@@ -105,6 +120,10 @@ describe('Qdrant delete lifecycle', () => {
       (call) => call.method === 'POST' && call.url.includes('/points/delete?wait=true')
     )
     expect(deleteCallsBeforeWorker).toHaveLength(0)
+
+    // Cleanup dispatch is deferred; wait until jobs are observable before worker tick.
+    const queuedCleanupJobs = await waitForCleanupJobs(adapter)
+    expect(queuedCleanupJobs).toBeGreaterThan(0)
 
     const worker = createJobWorkerRuntime({
       queue: adapter.jobQueue,

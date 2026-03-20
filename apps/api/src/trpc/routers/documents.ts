@@ -485,17 +485,15 @@ export const documentsRouter = router({
       }
 
       ctx.yjsRuntime.evictLiveDocument(input.id)
-
-      const nextDefaultDocument = await ctx.services.documents.openOrCreateDefaultForProject(
+      const defaultDocumentId = await ctx.services.documents.openOrCreateDefaultIdForProject(
         input.projectId
       )
-      const defaultDocumentId = nextDefaultDocument?.id ?? null
 
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
         reason: 'documents.delete',
-        changedDocumentIds: nextDefaultDocument ? [nextDefaultDocument.id] : [],
+        changedDocumentIds: defaultDocumentId ? [defaultDocumentId] : [],
         deletedDocumentIds: [input.id],
         defaultDocumentId,
       })
@@ -667,17 +665,15 @@ export const documentsRouter = router({
       for (const deletedDocumentId of deleted.deletedDocumentIds) {
         ctx.yjsRuntime.evictLiveDocument(deletedDocumentId)
       }
-
-      const nextDefaultDocument = await ctx.services.documents.openOrCreateDefaultForProject(
+      const defaultDocumentId = await ctx.services.documents.openOrCreateDefaultIdForProject(
         input.projectId
       )
-      const defaultDocumentId = nextDefaultDocument?.id ?? null
 
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
         reason: 'documents.delete-directory',
-        changedDocumentIds: nextDefaultDocument ? [nextDefaultDocument.id] : [],
+        changedDocumentIds: defaultDocumentId ? [defaultDocumentId] : [],
         deletedDocumentIds: deleted.deletedDocumentIds,
         defaultDocumentId,
       })
