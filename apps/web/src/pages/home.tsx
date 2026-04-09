@@ -151,12 +151,12 @@ export function HomePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-4xl px-4 sm:px-6 py-6 sm:py-12">
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 py-6 sm:py-12 page-enter-animated">
         <div className="mb-8 sm:mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">LucentDocs</h1>
-            <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              Your stories, your way.
+            <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight">LucentDocs</h1>
+            <p className="text-muted-foreground mt-1 text-sm sm:text-base italic">
+              Write without friction.
             </p>
           </div>
 
@@ -211,7 +211,7 @@ export function HomePage() {
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger
                 render={
-                  <Button size="sm" className="sm:size-auto sm:px-3 sm:py-2">
+                  <Button variant="accent" size="sm" className="sm:size-auto sm:px-3 sm:py-2">
                     <Plus data-icon="inline-start" />
                     New Project
                   </Button>
@@ -253,25 +253,25 @@ export function HomePage() {
 
         {projectsQuery.data?.length === 0 && (
           <div className="flex flex-col items-center gap-4 py-24 text-center">
-            <BookOpen className="text-muted-foreground size-12" />
+            <BookOpen className="text-muted-foreground/40 size-14" />
             <div>
-              <p className="text-lg font-medium">No projects yet</p>
-              <p className="text-muted-foreground text-sm">
+              <p className="font-serif text-xl font-semibold">No projects yet</p>
+              <p className="text-muted-foreground text-sm mt-1">
                 Create your first project to start writing.
               </p>
             </div>
           </div>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 card-stagger">
           {projectsQuery.data?.map((project) => (
             <Card
               key={project.id}
-              className="cursor-pointer transition-shadow hover:shadow-lg"
+              className="cursor-pointer transition-all duration-300 hover:shadow-lg hover:scale-[1.02] hover:ring-accent/25"
               onClick={() => navigate(`/project/${project.id}`)}
             >
               <CardHeader>
-                <CardTitle className="truncate">{project.title}</CardTitle>
+                <CardTitle className="truncate font-serif">{project.title}</CardTitle>
                 <CardDescription>
                   Updated{' '}
                   {new Date(project.updatedAt).toLocaleDateString(undefined, {

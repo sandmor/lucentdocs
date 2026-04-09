@@ -744,18 +744,16 @@ export function AdminConfigPage() {
 
         {!runtime.isLoopbackHost && (
           <div className="mb-6">
-            <Card className="border-destructive/35 bg-destructive/5">
-              <CardHeader className="gap-2">
-                <CardTitle className="flex items-center gap-2">
-                  <AlertTriangle className="text-destructive size-4" />
-                  Server is exposed beyond loopback
-                </CardTitle>
-                <CardDescription className="text-foreground/80">
-                  Current host is <code>{runtime.host}</code>. Without auth, this settings page is
-                  open to anyone who can reach this server.
-                </CardDescription>
-              </CardHeader>
-            </Card>
+            <div className="rounded-xl border border-destructive/35 bg-destructive/5 p-4 sm:p-6">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="text-destructive size-4" />
+                <h3 className="text-base font-semibold">Server is exposed beyond loopback</h3>
+              </div>
+              <p className="text-sm text-foreground/80 mt-1">
+                Current host is <code>{runtime.host}</code>. Without auth, this settings page is
+                open to anyone who can reach this server.
+              </p>
+            </div>
           </div>
         )}
 

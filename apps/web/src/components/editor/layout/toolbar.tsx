@@ -23,7 +23,7 @@ export function EditorToolbar({
   titleDisabled,
 }: EditorToolbarProps) {
   return (
-    <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-border/80 bg-card/60 px-3 py-2 backdrop-blur">
+    <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card/70 px-3 py-2 shadow-sm backdrop-blur">
       <Input
         value={titleInput}
         onChange={(e) => onTitleChange(e.target.value)}
@@ -31,11 +31,11 @@ export function EditorToolbar({
         onKeyDown={onTitleKeyDown}
         autoComplete="off"
         disabled={titleDisabled}
-        className="flex-1 min-w-0 max-w-45 sm:max-w-xs border-none bg-transparent text-sm sm:text-base font-semibold shadow-none focus-visible:ring-0"
+        className="flex-1 min-w-0 max-w-45 sm:max-w-xs border-none bg-transparent text-sm sm:text-base font-semibold font-serif shadow-none focus-visible:ring-0"
       />
 
       <Button
-        variant="outline"
+        variant="accent"
         size="icon-sm"
         onClick={onContinueWriting}
         disabled={isGenerating}

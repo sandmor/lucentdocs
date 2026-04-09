@@ -200,9 +200,9 @@ export function SignupPage() {
   if (!inviteToken) {
     return (
       <AuthLayout>
-        <Card className="w-full max-w-sm">
+        <Card className="w-full max-w-md lg:max-w-lg">
           <CardHeader>
-            <CardTitle className="text-2xl">Invitation required</CardTitle>
+            <CardTitle className="text-2xl md:text-3xl font-serif">Invitation required</CardTitle>
             <CardDescription>Ask an admin to generate a signup invitation link.</CardDescription>
           </CardHeader>
           <CardContent>
@@ -232,9 +232,9 @@ export function SignupPage() {
   if (!invitationQuery.data) {
     return (
       <AuthLayout>
-        <Card className="w-full max-w-sm">
+        <Card className="w-full max-w-md lg:max-w-lg">
           <CardHeader>
-            <CardTitle className="text-2xl">Invalid invitation</CardTitle>
+            <CardTitle className="text-2xl md:text-3xl font-serif">Invalid invitation</CardTitle>
             <CardDescription>
               This invitation link is invalid, expired, or already used.
             </CardDescription>
@@ -249,13 +249,13 @@ export function SignupPage() {
 
   return (
     <AuthLayout>
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-md lg:max-w-lg">
         <CardHeader className="pb-4">
-          <CardTitle className="text-2xl">Create an account</CardTitle>
+          <CardTitle className="text-2xl md:text-3xl font-serif">Create an account</CardTitle>
           <CardDescription>Join the workspace via invitation.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="grid gap-5" noValidate>
+          <form onSubmit={handleSubmit(onSubmit)} className="grid gap-5 field-stagger" noValidate>
             {/* Name */}
             <Field>
               <FieldLabel htmlFor="name">Name</FieldLabel>
@@ -303,7 +303,12 @@ export function SignupPage() {
               <PasswordStrengthBar password={passwordValue ?? ''} />
             </Field>
 
-            <Button type="submit" className="w-full mt-1" disabled={signupMutation.isPending}>
+            <Button
+              type="submit"
+              variant="accent"
+              className="w-full mt-1"
+              disabled={signupMutation.isPending}
+            >
               {signupMutation.isPending ? 'Creating account…' : 'Create account'}
             </Button>
 

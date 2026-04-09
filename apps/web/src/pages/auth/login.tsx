@@ -57,13 +57,13 @@ export function LoginPage() {
 
   return (
     <AuthLayout>
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-md lg:max-w-lg">
         <CardHeader className="pb-4">
-          <CardTitle className="text-2xl">Log in to LucentDocs</CardTitle>
+          <CardTitle className="text-2xl md:text-3xl font-serif">Welcome back</CardTitle>
           <CardDescription>Enter your credentials to continue.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="grid gap-5" noValidate>
+          <form onSubmit={handleSubmit(onSubmit)} className="grid gap-5 field-stagger" noValidate>
             <Field>
               <FieldLabel htmlFor="email">Email</FieldLabel>
               <Input
@@ -89,7 +89,12 @@ export function LoginPage() {
               <FieldError errors={[errors.password]} />
             </Field>
 
-            <Button type="submit" className="w-full mt-1" disabled={loginMutation.isPending}>
+            <Button
+              type="submit"
+              variant="accent"
+              className="w-full mt-1"
+              disabled={loginMutation.isPending}
+            >
               {loginMutation.isPending ? 'Logging in…' : 'Log in'}
             </Button>
           </form>

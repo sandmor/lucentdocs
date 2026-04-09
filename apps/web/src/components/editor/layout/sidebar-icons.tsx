@@ -28,7 +28,7 @@ export function SidebarIconBar({
   onToggleSidebar,
 }: SidebarIconBarProps) {
   return (
-    <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r border-border/50 bg-muted/10 py-3">
+    <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r border-border/40 bg-muted/20 py-3">
       {panels.map(({ id, label, icon: Icon }) => {
         const isActive = isSidebarOpen && activePanel === id
 
@@ -56,7 +56,7 @@ export function SidebarIconBar({
               <div
                 className={cn(
                   'absolute left-0 top-1/2 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-300',
-                  isActive ? 'h-3.5 bg-foreground/30' : 'h-0 bg-transparent'
+                  isActive ? 'h-3.5 bg-accent/70' : 'h-0 bg-transparent'
                 )}
               />
 
