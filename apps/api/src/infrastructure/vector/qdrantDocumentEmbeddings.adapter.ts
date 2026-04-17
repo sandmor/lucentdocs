@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import type {
   DocumentEmbeddingVectorReference,
   DocumentEmbeddingsRepositoryPort,
@@ -14,49 +13,12 @@ import type {
 } from '../../core/ports/documentEmbeddingMetadata.port.js'
 import { normalizeBaseURL } from '../../core/ai/provider-types.js'
 import {
-  qdrantCollectionName,
   resolveChunkVectorKey,
   validateEmbeddingVector,
   validateReplacementChunks,
   validateSearchLimit,
 } from '../../core/embeddings/documentEmbeddings.shared.js'
-
-interface QdrantSearchPoint {
-  id: number | string
-  score?: number
-  payload?: {
-    vectorKey?: string
-    documentId?: string
-    baseUrl?: string
-    model?: string
-  }
-}
-
-interface QdrantSearchResponse {
-  result?: QdrantSearchPoint[]
-}
-
-interface QdrantRetrievePoint {
-  id: number | string
-}
-
-interface QdrantRetrieveResponse {
-  result?: QdrantRetrievePoint[]
-}
-
-interface QdrantConfig {
-  endpoint: string
-  apiKey?: string
-  collectionPrefix: string
-  upsertBatchSize?: number
-  upsertBatchConcurrency?: number
-  fetchImpl?: typeof fetch
-}
-
-function qdrantPointId(vectorKey: string): string {
-  const hex = createHash('sha256').update(vectorKey).digest('hex')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
-}
+import { qdrantPointId, type QdrantClient } from './qdrant.client.js'
 
 function normalizeDirectoryPath(value: string): string {
   return value.trim().replace(/^\/+|\/+$/g, '')
@@ -67,198 +29,10 @@ function mustMatch(key: string, value: string): Record<string, unknown> {
 }
 
 export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRepositoryPort {
-  private readonly endpoint: string
-  private readonly apiKey?: string
-  private readonly collectionPrefix: string
-  private readonly upsertBatchSize: number
-  private readonly upsertBatchConcurrency: number
-  private readonly fetchImpl: typeof fetch
-  private readonly knownCollections = new Set<string>()
-
   constructor(
     private metadataStore: DocumentEmbeddingMetadataStorePort,
-    config: QdrantConfig
-  ) {
-    this.endpoint = config.endpoint.replace(/\/$/, '')
-    this.apiKey = config.apiKey
-    this.collectionPrefix = config.collectionPrefix
-    this.upsertBatchSize = Math.max(1, config.upsertBatchSize ?? 64)
-    this.upsertBatchConcurrency = Math.max(1, config.upsertBatchConcurrency ?? 2)
-    this.fetchImpl = config.fetchImpl ?? fetch
-  }
-
-  private async request(path: string, init: RequestInit): Promise<Response> {
-    const headers = new Headers(init.headers ?? undefined)
-    if (!headers.has('content-type') && init.body !== undefined) {
-      headers.set('content-type', 'application/json')
-    }
-    if (this.apiKey) {
-      headers.set('api-key', this.apiKey)
-    }
-
-    return this.fetchImpl(`${this.endpoint}${path}`, {
-      ...init,
-      headers,
-    })
-  }
-
-  private async ensureCollection(dimensions: number): Promise<string> {
-    const collection = qdrantCollectionName(dimensions, this.collectionPrefix)
-    if (this.knownCollections.has(collection)) return collection
-
-    const check = await this.request(`/collections/${collection}`, { method: 'GET' })
-    if (check.status === 404) {
-      const create = await this.request(`/collections/${collection}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          vectors: {
-            size: dimensions,
-            distance: 'Cosine',
-          },
-        }),
-      })
-      if (!create.ok) {
-        throw new Error(`Failed to create Qdrant collection ${collection}: HTTP ${create.status}`)
-      }
-    } else if (!check.ok) {
-      throw new Error(`Failed to check Qdrant collection ${collection}: HTTP ${check.status}`)
-    }
-
-    this.knownCollections.add(collection)
-    return collection
-  }
-
-  private async upsertPointBatch(
-    collection: string,
-    points: Array<{ id: string; vector: number[]; payload: Record<string, unknown> }>
-  ): Promise<void> {
-    if (points.length === 0) return
-
-    const response = await this.request(`/collections/${collection}/points?wait=true`, {
-      method: 'PUT',
-      body: JSON.stringify({ points }),
-    })
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to upsert points into Qdrant collection ${collection}: HTTP ${response.status}`
-      )
-    }
-  }
-
-  private async upsertPoints(
-    collection: string,
-    points: Array<{ id: string; vector: number[]; payload: Record<string, unknown> }>
-  ): Promise<void> {
-    if (points.length === 0) return
-
-    const batches: Array<
-      Array<{ id: string; vector: number[]; payload: Record<string, unknown> }>
-    > = []
-    for (let i = 0; i < points.length; i += this.upsertBatchSize) {
-      batches.push(points.slice(i, i + this.upsertBatchSize))
-    }
-
-    const workerCount = Math.max(1, Math.min(this.upsertBatchConcurrency, batches.length))
-    let nextBatchIndex = 0
-    const runWorker = async (): Promise<void> => {
-      while (true) {
-        const index = nextBatchIndex
-        nextBatchIndex += 1
-        if (index >= batches.length) return
-        await this.upsertPointBatch(
-          collection,
-          batches[index] as Array<{
-            id: string
-            vector: number[]
-            payload: Record<string, unknown>
-          }>
-        )
-      }
-    }
-
-    await Promise.all(Array.from({ length: workerCount }, () => runWorker()))
-  }
-
-  private async deletePoints(collection: string, pointIds: string[]): Promise<void> {
-    if (pointIds.length === 0) return
-
-    const response = await this.request(`/collections/${collection}/points/delete?wait=true`, {
-      method: 'POST',
-      body: JSON.stringify({ points: pointIds }),
-    })
-
-    if (!response.ok && response.status !== 404) {
-      throw new Error(
-        `Failed to delete points from Qdrant collection ${collection}: HTTP ${response.status}`
-      )
-    }
-  }
-
-  private async searchPoints(
-    collection: string,
-    vector: number[],
-    limit: number,
-    filter: Record<string, unknown>
-  ): Promise<QdrantSearchPoint[]> {
-    const response = await this.request(`/collections/${collection}/points/search`, {
-      method: 'POST',
-      body: JSON.stringify({
-        vector,
-        limit,
-        with_payload: true,
-        filter,
-      }),
-    })
-
-    if (response.status === 404) {
-      return []
-    }
-
-    if (!response.ok) {
-      throw new Error(`Failed to search Qdrant collection ${collection}: HTTP ${response.status}`)
-    }
-
-    const body = (await response.json()) as QdrantSearchResponse
-    return Array.isArray(body.result) ? body.result : []
-  }
-
-  private async retrievePointIds(collection: string, pointIds: string[]): Promise<Set<string>> {
-    if (pointIds.length === 0) return new Set<string>()
-
-    const result = new Set<string>()
-    const batchSize = 128
-
-    for (let offset = 0; offset < pointIds.length; offset += batchSize) {
-      const batch = pointIds.slice(offset, offset + batchSize)
-      const response = await this.request(`/collections/${collection}/points/retrieve`, {
-        method: 'POST',
-        body: JSON.stringify({
-          ids: batch,
-          with_payload: false,
-          with_vector: false,
-        }),
-      })
-
-      if (response.status === 404) {
-        return new Set<string>()
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to retrieve points from Qdrant collection ${collection}: HTTP ${response.status}`
-        )
-      }
-
-      const body = (await response.json()) as QdrantRetrieveResponse
-      const points = Array.isArray(body.result) ? body.result : []
-      for (const point of points) {
-        result.add(String(point.id))
-      }
-    }
-
-    return result
-  }
+    private client: QdrantClient
+  ) {}
 
   private async upsertNextVersionPoints(
     input: ReplaceDocumentEmbeddingsInput,
@@ -303,32 +77,35 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
     }
 
     for (const [dimensions, points] of groupedUpserts.entries()) {
-      const collection = await this.ensureCollection(dimensions)
-      await this.upsertPoints(collection, points)
+      const collection = await this.client.ensureCollection(
+        dimensions,
+        normalizedBaseURL,
+        normalizedModel
+      )
+      await this.client.upsertPoints(collection, points)
     }
   }
 
   private async deleteExistingPointsBestEffort(
-    rows: Array<{ vectorKey: string; dimensions: number }>
+    rows: Array<{ vectorKey: string; baseURL: string; model: string; dimensions: number }>
   ): Promise<void> {
     if (rows.length === 0) return
 
-    const groupedDeletes = new Map<number, string[]>()
+    const groupedDeletes = new Map<string, { collection: string; pointIds: string[] }>()
     for (const row of rows) {
       const pointId = qdrantPointId(row.vectorKey)
-      const group = groupedDeletes.get(row.dimensions)
-      if (group) group.push(pointId)
-      else groupedDeletes.set(row.dimensions, [pointId])
+      const collection = this.client.collectionName(row.dimensions, row.baseURL, row.model)
+      const group = groupedDeletes.get(collection)
+      if (group) group.pointIds.push(pointId)
+      else groupedDeletes.set(collection, { collection, pointIds: [pointId] })
     }
 
-    for (const [dimensions, pointIds] of groupedDeletes.entries()) {
+    for (const { collection, pointIds } of groupedDeletes.values()) {
       try {
-        const collection = qdrantCollectionName(dimensions, this.collectionPrefix)
-        await this.deletePoints(collection, pointIds)
+        await this.client.deletePoints(collection, pointIds)
       } catch (error) {
-        // Keep serving with the newly upserted vectors even if old vector cleanup fails.
         console.warn(
-          `[vector] Failed to delete stale Qdrant points for dimension ${dimensions}:`,
+          `[vector] Failed to delete stale Qdrant points for collection ${collection}:`,
           error
         )
       }
@@ -340,24 +117,29 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
     if (embeddings.length === 0) return embeddings
 
     const pointIdsByDimensions = new Map<number, string[]>()
+    const collectionsByDimensions = new Map<number, string>()
     for (const embedding of embeddings) {
       const pointId = qdrantPointId(embedding.vectorKey)
       const group = pointIdsByDimensions.get(embedding.dimensions)
       if (group) group.push(pointId)
       else pointIdsByDimensions.set(embedding.dimensions, [pointId])
+      collectionsByDimensions.set(
+        embedding.dimensions,
+        this.client.collectionName(embedding.dimensions, embedding.baseURL, embedding.model)
+      )
     }
 
     const existingPointIdsByDimensions = new Map<number, Set<string>>()
     try {
       for (const [dimensions, pointIds] of pointIdsByDimensions.entries()) {
-        const collection = qdrantCollectionName(dimensions, this.collectionPrefix)
+        const collection = collectionsByDimensions.get(dimensions)
+        if (!collection) continue
         existingPointIdsByDimensions.set(
           dimensions,
-          await this.retrievePointIds(collection, pointIds)
+          await this.client.retrievePointIds(collection, pointIds)
         )
       }
     } catch (error) {
-      // Keep indexing and stale-guard logic available even during transient Qdrant outages.
       console.warn('[vector] Failed to validate Qdrant points while listing embeddings:', error)
       return embeddings
     }
@@ -376,12 +158,14 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
 
     const limit = validateSearchLimit(input.limit)
     const dimensions = input.queryEmbedding.length
-    const collection = qdrantCollectionName(dimensions, this.collectionPrefix)
+    const normalizedBaseURL = normalizeBaseURL(input.baseURL)
+    const normalizedModel = input.model.trim()
+    const collection = this.client.collectionName(dimensions, normalizedBaseURL, normalizedModel)
 
-    const points = await this.searchPoints(collection, input.queryEmbedding, limit, {
+    const points = await this.client.searchPoints(collection, input.queryEmbedding, limit, {
       must: [
-        mustMatch('baseUrl', normalizeBaseURL(input.baseURL)),
-        mustMatch('model', input.model.trim()),
+        mustMatch('baseUrl', normalizedBaseURL),
+        mustMatch('model', normalizedModel),
         mustMatch('documentId', input.documentId),
       ],
     })
@@ -414,13 +198,15 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
 
     const limit = validateSearchLimit(input.limit)
     const dimensions = input.queryEmbedding.length
-    const collection = qdrantCollectionName(dimensions, this.collectionPrefix)
+    const normalizedBaseURL = normalizeBaseURL(input.baseURL)
+    const normalizedModel = input.model.trim()
+    const collection = this.client.collectionName(dimensions, normalizedBaseURL, normalizedModel)
     const normalizedDirectoryPath =
       input.scope.type === 'project' ? '' : normalizeDirectoryPath(input.scope.directoryPath)
 
     const must: Record<string, unknown>[] = [
-      mustMatch('baseUrl', normalizeBaseURL(input.baseURL)),
-      mustMatch('model', input.model.trim()),
+      mustMatch('baseUrl', normalizedBaseURL),
+      mustMatch('model', normalizedModel),
       mustMatch('projectIds', input.projectId),
     ]
 
@@ -430,7 +216,7 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
       must.push(mustMatch('directoryAncestors', normalizedDirectoryPath))
     }
 
-    const points = await this.searchPoints(collection, input.queryEmbedding, limit, { must })
+    const points = await this.client.searchPoints(collection, input.queryEmbedding, limit, { must })
 
     const vectorKeys = points
       .map((point) => point.payload?.vectorKey)
@@ -524,6 +310,10 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
           .filter(
             (reference) =>
               reference.vectorKey &&
+              typeof reference.baseURL === 'string' &&
+              reference.baseURL.length > 0 &&
+              typeof reference.model === 'string' &&
+              reference.model.trim().length > 0 &&
               Number.isInteger(reference.dimensions) &&
               reference.dimensions > 0
           )
@@ -538,6 +328,8 @@ export class QdrantDocumentEmbeddingsRepository implements DocumentEmbeddingsRep
     await this.deleteExistingPointsBestEffort(
       dedupedReferences.map((reference) => ({
         vectorKey: reference.vectorKey,
+        baseURL: reference.baseURL,
+        model: reference.model,
         dimensions: reference.dimensions,
       }))
     )

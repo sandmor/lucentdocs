@@ -466,6 +466,8 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
     const rows = this.connection.all<{
       documentId: string
       vectorKey: string
+      baseURL: string
+      model: string
       dimensions: number
       vectorRowId: number | null
     }>(
@@ -475,6 +477,8 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
        )
        SELECT de.documentId,
               de.vectorKey,
+              de.baseUrl AS baseURL,
+              de.model,
               de.dimensions,
               vr.id AS vectorRowId
          FROM document_embeddings AS de
@@ -487,6 +491,8 @@ export class DocumentEmbeddingsRepository implements DocumentEmbeddingsRepositor
       const reference: DocumentEmbeddingVectorReference = {
         documentId: row.documentId,
         vectorKey: row.vectorKey,
+        baseURL: row.baseURL,
+        model: row.model,
         dimensions: row.dimensions,
       }
       if (typeof row.vectorRowId === 'number') {

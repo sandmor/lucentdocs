@@ -91,6 +91,8 @@ export interface ProjectDocumentEmbeddingSearchMatch {
 export interface DocumentEmbeddingVectorReference {
   documentId: string
   vectorKey: string
+  baseURL: string
+  model: string
   dimensions: number
   /**
    * Backend-specific stable identifier for the stored vector payload.

@@ -5,6 +5,7 @@ import { createConnection } from '../sqlite/connection.js'
 import { DocumentEmbeddingsRepository } from '../sqlite/documentEmbeddings.adapter.js'
 import { SqliteDocumentEmbeddingMetadataStore } from '../sqlite/documentEmbeddingMetadataStore.adapter.js'
 import { QdrantDocumentEmbeddingsRepository } from './qdrantDocumentEmbeddings.adapter.js'
+import { QdrantClient } from './qdrant.client.js'
 
 type BackendKind = 'sqlite' | 'qdrant'
 
@@ -62,6 +63,10 @@ function createQdrantFetchMock(): typeof fetch {
       if (!collections.has(collection)) {
         collections.set(collection, new Map())
       }
+      return new Response(JSON.stringify({ result: true }), { status: 200 })
+    }
+
+    if (url.endsWith(`/collections/${collection}/index`) && method === 'PUT') {
       return new Response(JSON.stringify({ result: true }), { status: 200 })
     }
 
@@ -191,11 +196,11 @@ function createRepository(
 
   return new QdrantDocumentEmbeddingsRepository(
     new SqliteDocumentEmbeddingMetadataStore(connection),
-    {
+    new QdrantClient({
       endpoint: 'http://127.0.0.1:6333',
       collectionPrefix: 'lucentdocs',
       fetchImpl: createQdrantFetchMock(),
-    }
+    })
   )
 }
 

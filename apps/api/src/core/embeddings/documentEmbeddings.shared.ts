@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import type { ReplaceDocumentEmbeddingsInput } from '../ports/documentEmbeddings.port.js'
+import { normalizeBaseURL } from '../ai/provider-types.js'
 
 export const MAX_EMBEDDING_DIMENSIONS = 8192
 
@@ -10,7 +12,21 @@ export function normalizeQdrantCollectionPrefix(prefix: string): string {
     .replace(/^_+|_+$/g, '')
 }
 
-export function qdrantCollectionName(dimensions: number, prefix: string): string {
+function qdrantCollectionNamespace(baseURL: string, model: string): string {
+  const normalizedBaseURL = normalizeBaseURL(baseURL)
+  const normalizedModel = model.trim()
+  return createHash('sha256')
+    .update(`${normalizedBaseURL}\n${normalizedModel}`)
+    .digest('hex')
+    .slice(0, 16)
+}
+
+export function qdrantCollectionName(
+  dimensions: number,
+  prefix: string,
+  baseURL: string,
+  model: string
+): string {
   if (!Number.isInteger(dimensions) || dimensions <= 0 || dimensions > MAX_EMBEDDING_DIMENSIONS) {
     throw new Error(
       `Invalid embedding dimension ${dimensions}. Must be a positive integer <= ${MAX_EMBEDDING_DIMENSIONS}.`
@@ -23,7 +39,7 @@ export function qdrantCollectionName(dimensions: number, prefix: string): string
     throw new Error('Qdrant collection prefix resolves to an empty value.')
   }
 
-  return `${normalizedPrefix}_d${dimensions}`
+  return `${normalizedPrefix}_d${dimensions}_${qdrantCollectionNamespace(baseURL, model)}`
 }
 
 export function validateEmbeddingVector(embedding: number[]): void {

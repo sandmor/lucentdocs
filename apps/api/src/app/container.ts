@@ -21,6 +21,7 @@ import {
   resolveVectorStorageConfig,
 } from '../infrastructure/vector/vector-storage.js'
 import { QdrantDocumentEmbeddingsRepository } from '../infrastructure/vector/qdrantDocumentEmbeddings.adapter.js'
+import { QdrantClient } from '../infrastructure/vector/qdrant.client.js'
 import {
   createMainDatabaseAdapter,
   resolvePrimaryDatabaseConfig,
@@ -66,9 +67,10 @@ export async function createContainer(
     vectorStorage.kind === 'qdrant' ? resolveQdrantRuntimeConfig(process.env) : undefined
 
   if (vectorStorage.kind === 'qdrant') {
+    const qdrantClient = new QdrantClient(qdrantConfig!)
     adapter.repositories.documentEmbeddings = new QdrantDocumentEmbeddingsRepository(
       adapter.metadataStores.documentEmbeddings,
-      qdrantConfig!
+      qdrantClient
     )
   }
 

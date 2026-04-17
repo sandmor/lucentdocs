@@ -7,6 +7,8 @@ import type {
 
 export interface EmbeddingVectorReference {
   vectorKey: string
+  baseURL: string
+  model: string
   dimensions: number
 }
 

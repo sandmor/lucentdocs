@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { createConnection } from '../sqlite/connection.js'
 import { SqliteDocumentEmbeddingMetadataStore } from '../sqlite/documentEmbeddingMetadataStore.adapter.js'
+import { qdrantCollectionName } from '../../core/embeddings/documentEmbeddings.shared.js'
+import { normalizeBaseURL } from '../../core/ai/provider-types.js'
 import { QdrantDocumentEmbeddingsRepository } from './qdrantDocumentEmbeddings.adapter.js'
+import { QdrantClient } from './qdrant.client.js'
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -21,6 +24,12 @@ describe('QdrantDocumentEmbeddingsRepository', () => {
 
     const calls: Array<{ url: string; method: string; body?: string }> = []
     const collections = new Set<string>()
+    const collection = qdrantCollectionName(
+      3,
+      'lucentdocs',
+      normalizeBaseURL('https://openrouter.ai/api/v1'),
+      'test-model'
+    )
 
     const fetchImpl: typeof fetch = (async (input, init) => {
       const url =
@@ -29,21 +38,25 @@ describe('QdrantDocumentEmbeddingsRepository', () => {
       const body = typeof init?.body === 'string' ? init.body : undefined
       calls.push({ url, method, body })
 
-      if (url.endsWith('/collections/lucentdocs_d3') && method === 'GET') {
-        if (collections.has('lucentdocs_d3')) return jsonResponse({ result: {} })
+      if (url.endsWith(`/collections/${collection}`) && method === 'GET') {
+        if (collections.has(collection)) return jsonResponse({ result: {} })
         return jsonResponse({ status: 'not found' }, 404)
       }
 
-      if (url.endsWith('/collections/lucentdocs_d3') && method === 'PUT') {
-        collections.add('lucentdocs_d3')
+      if (url.endsWith(`/collections/${collection}`) && method === 'PUT') {
+        collections.add(collection)
         return jsonResponse({ result: true })
       }
 
-      if (url.includes('/collections/lucentdocs_d3/points?wait=true') && method === 'PUT') {
+      if (url.endsWith(`/collections/${collection}/index`) && method === 'PUT') {
+        return jsonResponse({ result: true })
+      }
+
+      if (url.includes(`/collections/${collection}/points?wait=true`) && method === 'PUT') {
         return jsonResponse({ result: { status: 'acknowledged' } })
       }
 
-      if (url.includes('/collections/lucentdocs_d3/points/retrieve') && method === 'POST') {
+      if (url.includes(`/collections/${collection}/points/retrieve`) && method === 'POST') {
         const payload = JSON.parse(body ?? '{}') as { ids?: string[] }
         const ids = payload.ids ?? []
         return jsonResponse({
@@ -51,7 +64,7 @@ describe('QdrantDocumentEmbeddingsRepository', () => {
         })
       }
 
-      if (url.includes('/collections/lucentdocs_d3/points/search') && method === 'POST') {
+      if (url.includes(`/collections/${collection}/points/search`) && method === 'POST') {
         return jsonResponse({
           result: [
             {
@@ -77,11 +90,11 @@ describe('QdrantDocumentEmbeddingsRepository', () => {
 
     const repo = new QdrantDocumentEmbeddingsRepository(
       new SqliteDocumentEmbeddingMetadataStore(connection),
-      {
+      new QdrantClient({
         endpoint: 'http://127.0.0.1:6333',
         collectionPrefix: 'lucentdocs',
         fetchImpl,
-      }
+      })
     )
 
     const replacement = await repo.replaceEmbeddings({

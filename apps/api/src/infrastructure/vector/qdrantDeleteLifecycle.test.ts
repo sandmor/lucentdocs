@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createSqliteAdapter } from '../sqlite/factory.js'
 import { QdrantDocumentEmbeddingsRepository } from './qdrantDocumentEmbeddings.adapter.js'
+import { QdrantClient } from './qdrant.client.js'
 import { createJobWorkerRuntime } from '../../app/job-worker-runtime.js'
 import {
   createEmbeddingVectorCleanupBatchHandler,
@@ -56,6 +57,10 @@ describe('Qdrant delete lifecycle', () => {
         return new Response(JSON.stringify({ result: true }), { status: 200 })
       }
 
+      if (url.endsWith(`/collections/${collection}/index`) && method === 'PUT') {
+        return new Response(JSON.stringify({ result: true }), { status: 200 })
+      }
+
       if (url.includes(`/collections/${collection}/points?wait=true`) && method === 'PUT') {
         return new Response(JSON.stringify({ result: { status: 'acknowledged' } }), { status: 200 })
       }
@@ -68,12 +73,14 @@ describe('Qdrant delete lifecycle', () => {
     }) as typeof fetch
 
     const adapter = createSqliteAdapter(':memory:', {
-      createDocumentEmbeddings: ({ metadataStore }) =>
-        new QdrantDocumentEmbeddingsRepository(metadataStore, {
+      createDocumentEmbeddings: ({ metadataStore }) => {
+        const client = new QdrantClient({
           endpoint: 'http://127.0.0.1:6333',
           collectionPrefix: 'lucentdocs',
           fetchImpl,
-        }),
+        })
+        return new QdrantDocumentEmbeddingsRepository(metadataStore, client)
+      },
     })
 
     const project = await adapter.services.projects.create('Project', { ownerUserId: 'user_1' })

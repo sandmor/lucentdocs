@@ -173,7 +173,7 @@ export class SqliteDocumentEmbeddingMetadataStore implements DocumentEmbeddingMe
     const normalizedModel = model.trim()
 
     return this.connection.all<EmbeddingVectorReference>(
-      `SELECT vectorKey, dimensions
+      `SELECT vectorKey, baseUrl AS baseURL, model, dimensions
          FROM document_embeddings
         WHERE documentId = ? AND baseUrl = ? AND model = ?`,
       [documentId, normalizedBaseURL, normalizedModel]
@@ -256,24 +256,40 @@ export class SqliteDocumentEmbeddingMetadataStore implements DocumentEmbeddingMe
 
   async listVectorReferencesByDocumentId(documentId: string): Promise<EmbeddingVectorReference[]> {
     return this.connection.all<EmbeddingVectorReference>(
-      'SELECT vectorKey, dimensions FROM document_embeddings WHERE documentId = ?',
+      'SELECT vectorKey, baseUrl AS baseURL, model, dimensions FROM document_embeddings WHERE documentId = ?',
       [documentId]
     )
   }
 
   async listVectorReferencesByDocumentIds(
     documentIds: string[]
-  ): Promise<Array<{ documentId: string; vectorKey: string; dimensions: number }>> {
+  ): Promise<
+    Array<{
+      documentId: string
+      vectorKey: string
+      baseURL: string
+      model: string
+      dimensions: number
+    }>
+  > {
     const uniqueDocumentIds = [...new Set(documentIds)].filter((id) => typeof id === 'string' && id)
     if (uniqueDocumentIds.length === 0) return []
 
-    return this.connection.all<{ documentId: string; vectorKey: string; dimensions: number }>(
+    return this.connection.all<{
+      documentId: string
+      vectorKey: string
+      baseURL: string
+      model: string
+      dimensions: number
+    }>(
       `WITH requested AS (
          SELECT value AS documentId
            FROM json_each(?)
        )
        SELECT de.documentId,
               de.vectorKey,
+              de.baseUrl AS baseURL,
+              de.model,
               de.dimensions
          FROM document_embeddings AS de
          JOIN requested ON requested.documentId = de.documentId`,
