@@ -32,6 +32,62 @@ export async function startInlineGeneration(page: PWPage) {
   })
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function readGenerationIdFromPayload(payload: unknown): string | null {
+  const record = asRecord(payload)
+  if (!record) return null
+
+  const direct = record.generationId
+  if (typeof direct === 'string' && direct.trim().length > 0) {
+    return direct
+  }
+
+  const result = asRecord(record.result)
+  const data = asRecord(result?.data)
+  const json = asRecord(data?.json)
+  const nested = json?.generationId
+  if (typeof nested === 'string' && nested.trim().length > 0) {
+    return nested
+  }
+
+  return null
+}
+
+export async function waitForContinuationStartAck(page: PWPage, timeout = 15_000) {
+  const response = await page.waitForResponse(
+    (candidate) => {
+      if (candidate.request().method() !== 'POST') return false
+      const url = candidate.url()
+      return (
+        url.includes('/trpc/') &&
+        url.includes('inline.startContinuationGeneration') &&
+        candidate.status() >= 200 &&
+        candidate.status() < 300
+      )
+    },
+    { timeout }
+  )
+
+  let generationId: string | null = null
+  try {
+    generationId = readGenerationIdFromPayload(await response.json())
+  } catch {
+    generationId = null
+  }
+
+  if (!generationId) {
+    const payloadText = await response.text()
+    const match = payloadText.match(/"generationId"\s*:\s*"([^"]+)"/)
+    generationId = match?.[1] ?? null
+  }
+
+  expect(generationId).toBeTruthy()
+}
+
 export async function placeCaretInsideZoneMiddle(page: PWPage) {
   await page.evaluate(() => {
     const zone = document.querySelector('.ai-generating-text')

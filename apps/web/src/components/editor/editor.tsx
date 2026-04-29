@@ -13,6 +13,8 @@ import { createAIWriterController, type AIWriterController } from './ai/writer'
 import { InlineAIControls } from './inline/controls'
 import { useAIWriterState } from './inline/hooks'
 import { RemotePresenceOverlay } from './collaboration/remote-presence-overlay'
+import { createAIBubbleNodeViews } from './collaboration/ai-bubble-node-view'
+import { AIBubblePresenceStore } from './collaboration/ai-bubble-presence'
 import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
 import { emitAIStateChange } from './ai/writer-store'
@@ -21,6 +23,7 @@ import { useInlineSessions } from './inline/use-sessions'
 import { emitEditorViewChange } from './prosemirror/view-store'
 import { getLocalPresenceUser, installLocalPresenceUser } from './prosemirror/presence'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
+import { useEditorStore } from '@/lib/editor-store'
 
 export interface EditorHandle {
   startAIContinuation: (at_doc_end: boolean) => void
@@ -139,22 +142,11 @@ interface EditorProps {
   projectId?: string
   documentId: string
   onConnectionChange?: (status: ConnectionStatus) => void
-  onEditorViewReady?: (view: EditorView | null) => void
-  onEditorSelectionChange?: (selection: { from: number; to: number } | null) => void
-  onGeneratingChange?: (generating: boolean) => void
   className?: string
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  {
-    projectId,
-    documentId,
-    onConnectionChange,
-    onEditorViewReady,
-    onEditorSelectionChange,
-    onGeneratingChange,
-    className,
-  },
+  { projectId, documentId, onConnectionChange, className },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -162,24 +154,29 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const selectionToolbarInteractingRef = useRef(false)
   const aiControllerRef = useRef<AIWriterController | null>(null)
   const providerRef = useRef<ReturnType<typeof createYjsProvider> | null>(null)
+  const bubblePresenceRef = useRef<AIBubblePresenceStore | null>(null)
   const hasShownOfflineToastRef = useRef(false)
+
+  const setStoreEditorView = useEditorStore((s) => s.setEditorView)
+  const setStoreConnectionStatus = useEditorStore((s) => s.setConnectionStatus)
+  const setStoreIsGenerating = useEditorStore((s) => s.setIsGenerating)
+  const setStoreEditorSelection = useEditorStore((s) => s.setEditorSelection)
+  const setStoreSelectionRange = useEditorStore((s) => s.setSelectionRange)
+  const setStoreIsEditorFocused = useEditorStore((s) => s.setIsEditorFocused)
 
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
-  const [isEditorFocused, setIsEditorFocused] = useState(false)
   const [providerSessionKey, setProviderSessionKey] = useState(0)
   const [presenceAwareness, setPresenceAwareness] = useState<
     ReturnType<typeof createYjsProvider>['awareness'] | null
   >(null)
 
-  useEffect(() => {
-    onGeneratingChange?.(isGenerating)
-  }, [isGenerating, onGeneratingChange])
+  // Selection range also needed as local state for overlay components
+  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
+  const [isEditorFocused, setIsEditorFocused] = useState(false)
 
   const aiState = useAIWriterState(editorView)
-  const { inlineSessionsById, inlineSessionsRef, setInlineSessionsById } = useInlineSessions({
+  useInlineSessions({
     projectId,
     documentId,
     aiState,
@@ -203,52 +200,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   useEffect(() => {
     if (!containerRef.current) return
 
-    const aiController = createAIWriterController({
-      onStreamingChange(streaming) {
-        setIsGenerating(streaming)
-      },
-      getToolScope() {
-        return {
-          projectId,
-          documentId,
-        }
-      },
-      getRequesterClientName() {
-        const clientId = providerRef.current?.doc.clientID
-        if (typeof clientId !== 'number') return null
-        return `yjs_client_${clientId}`
-      },
-      getSessionById(sessionId) {
-        return inlineSessionsRef.current[sessionId] ?? null
-      },
-      setSessionById(sessionId, session) {
-        setInlineSessionsById((previous) => {
-          const current = previous[sessionId]
-          if (session === null) {
-            if (current === undefined) return previous
-            const next = { ...previous }
-            delete next[sessionId]
-            inlineSessionsRef.current = next
-            return next
-          }
-
-          if (current === session) return previous
-          const next = {
-            ...previous,
-            [sessionId]: session,
-          }
-          inlineSessionsRef.current = next
-          return next
-        })
-      },
-    })
-    aiControllerRef.current = aiController
-
     let destroyed = false
 
     const handleConnectionChange = (status: ConnectionStatus) => {
       if (destroyed) return
       onConnectionChange?.(status)
+      setStoreConnectionStatus(status)
 
       if (status === 'connected') {
         dismissOfflineToast()
@@ -270,7 +227,34 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       }
     )
     providerRef.current = provider
+    const bubblePresence = new AIBubblePresenceStore(provider.awareness)
+    bubblePresenceRef.current = bubblePresence
     installLocalPresenceUser(provider.awareness, getLocalPresenceUser(provider.doc.clientID))
+
+    const aiController = createAIWriterController({
+      onStreamingChange(streaming) {
+        setStoreIsGenerating(streaming)
+      },
+      getToolScope() {
+        return {
+          projectId,
+          documentId,
+        }
+      },
+      getRequesterClientName() {
+        const clientId = providerRef.current?.doc.clientID
+        if (typeof clientId !== 'number') return null
+        return `yjs_client_${clientId}`
+      },
+      getSessionById(sessionId) {
+        return useEditorStore.getState().inlineSessionsById[sessionId] ?? null
+      },
+      setSessionById(sessionId, session) {
+        useEditorStore.getState().setSessionById(sessionId, session)
+      },
+      bubblePresence,
+    })
+    aiControllerRef.current = aiController
 
     const type = provider.type
     const { doc: pmDoc, mapping } = initProseMirrorDoc(type, schema)
@@ -299,55 +283,65 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
     const view = new EditorView(containerRef.current, {
       state,
+      nodeViews: createAIBubbleNodeViews(bubblePresence),
       dispatchTransaction(tr) {
         const newState = view.state.apply(tr)
         view.updateState(newState)
 
         emitEditorViewChange(view)
         emitAIStateChange(view)
-        onEditorSelectionChange?.({
-          from: newState.selection.from,
-          to: newState.selection.to,
-        })
 
         const { from, to, empty } = newState.selection
         const viewIsFocused = view.hasFocus()
         const interacting = selectionToolbarInteractingRef.current
 
-        setIsEditorFocused((previous) => (previous === viewIsFocused ? previous : viewIsFocused))
-        setSelectionRange((previous) => {
+        // Only update store if selection actually changed (not just on every transaction)
+        if (tr.selectionSet || !useEditorStore.getState().editorSelection) {
+          setStoreEditorSelection({ from, to })
+        }
+
+        // Only update focus state if it changed
+        if (viewIsFocused !== useEditorStore.getState().isEditorFocused) {
+          setStoreIsEditorFocused(viewIsFocused)
+          setIsEditorFocused(viewIsFocused)
+        }
+
+        // Compute selection range for inline AI controls
+        const nextSelectionRange = ((): SelectionRange | null => {
           if (!empty) {
             if (!viewIsFocused && !interacting) {
               return null
             }
-
-            if (previous && previous.from === from && previous.to === to) {
-              return previous
-            }
             return { from, to }
           }
 
-          if (previous && !tr.docChanged) {
-            return previous
-          }
-
-          if (interacting && previous) {
-            if (!tr.docChanged) {
-              return previous
-            }
-
-            const mappedFrom = tr.mapping.map(previous.from, 1)
-            const mappedTo = tr.mapping.map(previous.to, -1)
-            if (mappedFrom < mappedTo) {
-              if (previous.from === mappedFrom && previous.to === mappedTo) {
+          if (interacting) {
+            const previous = useEditorStore.getState().selectionRange
+            if (previous) {
+              if (!tr.docChanged) {
                 return previous
               }
-              return { from: mappedFrom, to: mappedTo }
+              const mappedFrom = tr.mapping.map(previous.from, 1)
+              const mappedTo = tr.mapping.map(previous.to, -1)
+              if (mappedFrom < mappedTo) {
+                return { from: mappedFrom, to: mappedTo }
+              }
             }
           }
 
           return null
-        })
+        })()
+
+        const prevRange = useEditorStore.getState().selectionRange
+        if (
+          !prevRange ||
+          !nextSelectionRange ||
+          prevRange.from !== nextSelectionRange.from ||
+          prevRange.to !== nextSelectionRange.to
+        ) {
+          setStoreSelectionRange(nextSelectionRange)
+          setSelectionRange(nextSelectionRange)
+        }
       },
     })
 
@@ -358,11 +352,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       }
     })
     setEditorView(view)
-    onEditorViewReady?.(view)
-    onEditorSelectionChange?.({
+    setStoreEditorView(view)
+    setStoreEditorSelection({
       from: view.state.selection.from,
       to: view.state.selection.to,
     })
+    setStoreIsEditorFocused(view.hasFocus())
     setIsEditorFocused(view.hasFocus())
 
     const syncSelectionFromDOM = () => {
@@ -371,24 +366,33 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       const selection = getSelectionRangeInView(view)
       if (!selection || selection.empty) {
         if (view.hasFocus() && !selectionToolbarInteractingRef.current) {
-          setSelectionRange(null)
+          const prevRange = useEditorStore.getState().selectionRange
+          if (prevRange !== null) {
+            setStoreSelectionRange(null)
+            setSelectionRange(null)
+          }
         }
         return
       }
 
-      setSelectionRange((previous) => {
-        if (previous && previous.from === selection.from && previous.to === selection.to) {
-          return previous
-        }
-        return { from: selection.from, to: selection.to }
-      })
+      const prevRange = useEditorStore.getState().selectionRange
+      if (!prevRange || prevRange.from !== selection.from || prevRange.to !== selection.to) {
+        setStoreSelectionRange({ from: selection.from, to: selection.to })
+        setSelectionRange({ from: selection.from, to: selection.to })
+      }
     }
 
     const handleViewFocusIn = () => {
-      setIsEditorFocused(true)
+      if (!useEditorStore.getState().isEditorFocused) {
+        setStoreIsEditorFocused(true)
+        setIsEditorFocused(true)
+      }
     }
     const handleViewFocusOut = () => {
-      setIsEditorFocused(false)
+      if (useEditorStore.getState().isEditorFocused) {
+        setStoreIsEditorFocused(false)
+        setIsEditorFocused(false)
+      }
     }
     view.dom.addEventListener('focusin', handleViewFocusIn)
     view.dom.addEventListener('focusout', handleViewFocusOut)
@@ -407,6 +411,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
       aiController.detachAI()
       aiControllerRef.current = null
+      bubblePresenceRef.current?.destroy()
+      bubblePresenceRef.current = null
 
       if (providerRef.current) {
         providerRef.current.disconnect()
@@ -421,27 +427,28 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       viewRef.current = null
       setPresenceAwareness(null)
       setEditorView(null)
-      onEditorViewReady?.(null)
-      onEditorSelectionChange?.(null)
+      setStoreEditorView(null)
+      setStoreEditorSelection(null)
+      setStoreSelectionRange(null)
+      setStoreIsEditorFocused(false)
       setIsLoading(true)
-      setIsGenerating(false)
-      setSelectionRange(null)
-      setIsEditorFocused(false)
-      inlineSessionsRef.current = {}
-      setInlineSessionsById({})
+      setStoreIsGenerating(false)
+      useEditorStore.getState().setSessions(() => ({}))
       selectionToolbarInteractingRef.current = false
     }
   }, [
     projectId,
     documentId,
     providerSessionKey,
-    inlineSessionsRef,
-    setInlineSessionsById,
     showOfflineToast,
     dismissOfflineToast,
     onConnectionChange,
-    onEditorSelectionChange,
-    onEditorViewReady,
+    setStoreEditorView,
+    setStoreConnectionStatus,
+    setStoreIsGenerating,
+    setStoreEditorSelection,
+    setStoreSelectionRange,
+    setStoreIsEditorFocused,
   ])
 
   useImperativeHandle(ref, () => ({
@@ -482,18 +489,24 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     },
   }))
 
-  const handleToolbarInteractionChange = useCallback((interacting: boolean) => {
-    selectionToolbarInteractingRef.current = interacting
-    if (interacting || !viewRef.current) return
+  const handleToolbarInteractionChange = useCallback(
+    (interacting: boolean) => {
+      selectionToolbarInteractingRef.current = interacting
+      if (interacting || !viewRef.current) return
 
-    if (!hasActiveDomSelection(viewRef.current)) {
-      setSelectionRange(null)
-      return
-    }
+      if (!hasActiveDomSelection(viewRef.current)) {
+        setStoreSelectionRange(null)
+        setSelectionRange(null)
+        return
+      }
 
-    const { from, to, empty } = viewRef.current.state.selection
-    setSelectionRange(empty ? null : { from, to })
-  }, [])
+      const { from, to, empty } = viewRef.current.state.selection
+      const next = empty ? null : { from, to }
+      setStoreSelectionRange(next)
+      setSelectionRange(next)
+    },
+    [setStoreSelectionRange]
+  )
 
   return (
     <div className="relative">
@@ -551,7 +564,6 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           return aiControllerRef.current.dismissChoicesForZone(viewRef.current, zoneId)
         }}
         onInteractionChange={handleToolbarInteractionChange}
-        sessionsById={inlineSessionsById}
       />
       <RemotePresenceOverlay view={editorView} awareness={presenceAwareness} />
       <SelectionFakeOverlay

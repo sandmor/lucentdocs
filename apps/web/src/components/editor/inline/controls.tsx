@@ -3,7 +3,7 @@ import type { EditorView } from 'prosemirror-view'
 import { AIZoneFloatingControl, SelectionComposeFloatingControl } from './desktop-controls'
 import { useAIWriterState, useIsCoarsePointer } from './hooks'
 import { MobileInlineAIDock } from './mobile-dock'
-import type { InlineZoneSession } from '@lucentdocs/shared'
+
 import type { ReviewZone } from './types'
 import {
   resolveActiveLoadingAnchor,
@@ -11,6 +11,7 @@ import {
   resolveReviewZones,
 } from './state-selectors'
 import type { SelectionRange } from '../selection/types'
+import { useEditorStore } from '@/lib/editor-store'
 
 interface InlineAIControlsProps {
   view: EditorView | null
@@ -22,7 +23,6 @@ interface InlineAIControlsProps {
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
   onInteractionChange: (interacting: boolean) => void
-  sessionsById: Record<string, InlineZoneSession>
 }
 
 export function InlineAIControls({
@@ -35,9 +35,9 @@ export function InlineAIControls({
   onContinuePrompt,
   onDismissChoices,
   onInteractionChange,
-  sessionsById,
 }: InlineAIControlsProps) {
   const state = useAIWriterState(view)
+  const sessionsById = useEditorStore((s) => s.inlineSessionsById)
   const isCoarsePointer = useIsCoarsePointer()
   const hasSelection = Boolean(selection && selection.from < selection.to)
 

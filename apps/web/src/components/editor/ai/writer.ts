@@ -24,6 +24,7 @@ import {
   wrapSliceWithZoneNodes,
 } from './writer/zone-marks'
 import type {
+  AIBubblePresenceFrame,
   AIWriterController,
   AIWriterControllerOptions,
   InlineStreamPayload,
@@ -47,6 +48,7 @@ export function createAIWriterController(
   const getRequesterClientName = options.getRequesterClientName ?? (() => null)
   const getSessionById = options.getSessionById ?? (() => null)
   const setSessionById = options.setSessionById ?? (() => {})
+  const bubblePresence = options.bubblePresence ?? null
   let currentView: EditorView | null = null
   const trpcClient = getTrpcProxyClient()
 
@@ -182,6 +184,35 @@ export function createAIWriterController(
       role: 'assistant',
       parts: [{ type: 'text', text: latestAssistant.text }],
     }
+  }
+
+  const resolveZoneIdForSession = (view: EditorView, sessionId: string): string | null => {
+    const zone = getAIZones(view).find((entry) => entry.sessionId === sessionId)
+    if (zone) return zone.id
+
+    const pluginState = aiWriterPluginKey.getState(view.state)
+    if (pluginState?.sessionId === sessionId && pluginState.zoneId) {
+      return pluginState.zoneId
+    }
+
+    return null
+  }
+
+  const publishBubblePresence = (bubble: Omit<AIBubblePresenceFrame, 'ownerClientId'>): void => {
+    if (!bubblePresence) return
+    bubblePresence.publish(bubble)
+  }
+
+  const clearBubblePresence = (sessionId: string): void => {
+    bubblePresence?.clear(sessionId)
+  }
+
+  const clearBubblePresenceForView = (view?: EditorView | null): void => {
+    const targetView = view ?? currentView
+    if (!targetView) return
+    const pluginState = aiWriterPluginKey.getState(targetView.state)
+    if (!pluginState?.sessionId) return
+    clearBubblePresence(pluginState.sessionId)
   }
 
   const stuckDetector = new StuckDetector({
@@ -341,6 +372,22 @@ export function createAIWriterController(
             }
 
             setSessionById(sessionId, nextSession)
+            if (event.generating && event.generationId) {
+              const zoneId = resolveZoneIdForSession(view, sessionId)
+              if (zoneId) {
+                publishBubblePresence({
+                  sessionId,
+                  zoneId,
+                  generationId: event.generationId,
+                  seq: event.seq,
+                  text: event.draftText ?? '',
+                  updatedAt: Date.now(),
+                })
+              }
+            } else {
+              clearBubblePresence(sessionId)
+            }
+
             if (event.generating) {
               stuckDetector.onChunk()
             } else {
@@ -419,6 +466,7 @@ export function createAIWriterController(
     } finally {
       observeUnsubscribe?.unsubscribe()
       chunkPump.stop()
+      clearBubblePresence(sessionId)
 
       if (requestId === currentRequestId && abortController === requestAbortController) {
         abortController = null
@@ -429,6 +477,7 @@ export function createAIWriterController(
 
   function handleAIError(view: EditorView, message: string): void {
     toast.error('AI generation failed', { description: message })
+    clearBubblePresenceForView(view)
 
     const pluginState = aiWriterPluginKey.getState(view.state)
     const isEmpty = !pluginState?.active || pluginState.from === pluginState.to
@@ -446,6 +495,7 @@ export function createAIWriterController(
   function stopAI(view: EditorView): void {
     stuckDetector.reset()
     currentView = null
+    clearBubblePresenceForView(view)
     setStreamingState(false)
     const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'stop' })
     view.dispatch(tr)
@@ -675,6 +725,9 @@ export function createAIWriterController(
     abortController = null
     stuckDetector.reset()
     currentView = null
+    if (pluginState?.sessionId) {
+      clearBubblePresence(pluginState.sessionId)
+    }
     onStreamingChange?.(false)
 
     const zone = getTargetZone(view, zoneId)
@@ -699,6 +752,9 @@ export function createAIWriterController(
     abortController = null
     stuckDetector.reset()
     currentView = null
+    if (pluginState?.sessionId) {
+      clearBubblePresence(pluginState.sessionId)
+    }
     onStreamingChange?.(false)
 
     const zone = getTargetZone(view, zoneId)
@@ -753,6 +809,7 @@ export function createAIWriterController(
     abortActiveRequest({ cancelServerOnAbort: true })
     abortController = null
     stuckDetector.reset()
+    clearBubblePresenceForView(targetView)
     currentView = null
     if (options.preserveDoc && targetView) {
       onStreamingChange?.(false)
@@ -785,6 +842,7 @@ export function createAIWriterController(
     abortController = null
 
     stuckDetector.reset()
+    clearBubblePresenceForView(currentView)
     currentView = null
     onStreamingChange?.(false)
   }

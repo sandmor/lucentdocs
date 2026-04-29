@@ -287,30 +287,31 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
   async lease(input: LeaseJobsInput): Promise<Array<QueueJobEnvelope<unknown>>> {
     if (input.limit <= 0) return []
 
-    return this.transaction.run(async () => {
-      const typeFilterSql =
-        input.types && input.types.length > 0
-          ? 'AND type IN (' + input.types.map(() => '?').join(', ') + ')'
-          : ''
-      const typeFilterParams = input.types && input.types.length > 0 ? input.types : []
+    return this.withLockRetry(() =>
+      this.transaction.run(async () => {
+        const typeFilterSql =
+          input.types && input.types.length > 0
+            ? 'AND type IN (' + input.types.map(() => '?').join(', ') + ')'
+            : ''
+        const typeFilterParams = input.types && input.types.length > 0 ? input.types : []
 
-      const candidates = this.connection.all<{ id: string }>(
-        `SELECT id
+        const candidates = this.connection.all<{ id: string }>(
+          `SELECT id
            FROM job_queue
           WHERE availableAt <= ?
             AND (leaseUntil IS NULL OR leaseUntil <= ?)
             ${typeFilterSql}
           ORDER BY priority DESC, availableAt ASC, createdAt ASC
           LIMIT ?`,
-        [input.now, input.now, ...typeFilterParams, input.limit]
-      )
+          [input.now, input.now, ...typeFilterParams, input.limit]
+        )
 
-      if (candidates.length === 0) return []
+        if (candidates.length === 0) return []
 
-      const leased: Array<QueueJobEnvelope<unknown>> = []
-      for (const candidate of candidates) {
-        const result = this.connection.run(
-          `UPDATE job_queue
+        const leased: Array<QueueJobEnvelope<unknown>> = []
+        for (const candidate of candidates) {
+          const result = this.connection.run(
+            `UPDATE job_queue
               SET leaseOwner = ?,
                   leaseUntil = ?,
                   attempt = attempt + 1,
@@ -318,123 +319,130 @@ export class SqliteJobQueueAdapter implements JobQueuePort {
             WHERE id = ?
               AND availableAt <= ?
               AND (leaseUntil IS NULL OR leaseUntil <= ?)`,
-          [
-            input.workerId,
-            input.now + input.leaseDurationMs,
-            input.now,
+            [
+              input.workerId,
+              input.now + input.leaseDurationMs,
+              input.now,
+              candidate.id,
+              input.now,
+              input.now,
+            ]
+          )
+
+          if (result.changes === 0) continue
+
+          const row = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [
             candidate.id,
-            input.now,
-            input.now,
-          ]
-        )
-
-        if (result.changes === 0) continue
-
-        const row = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [
-          candidate.id,
-        ])
-        if (row) {
-          leased.push(toEnvelope(row))
+          ])
+          if (row) {
+            leased.push(toEnvelope(row))
+          }
         }
-      }
 
-      return leased
-    })
+        return leased
+      })
+    )
   }
 
   async complete(input: CompleteLeasedJobInput): Promise<CompleteLeasedJobResult> {
-    return this.transaction.run(async () => {
-      const row = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [input.id])
+    return this.withLockRetry(() =>
+      this.transaction.run(async () => {
+        const row = this.connection.get<QueueRow>('SELECT * FROM job_queue WHERE id = ?', [
+          input.id,
+        ])
 
-      if (!row) {
-        return 'missing'
-      }
+        if (!row) {
+          return 'missing'
+        }
 
-      if (row.leaseOwner !== input.workerId) {
+        if (row.leaseOwner !== input.workerId) {
+          if (
+            input.expectedUpdatedAt !== undefined &&
+            Number.isFinite(input.expectedUpdatedAt) &&
+            row.updatedAt !== input.expectedUpdatedAt
+          ) {
+            return 'released'
+          }
+
+          return 'missing'
+        }
+
         if (
           input.expectedUpdatedAt !== undefined &&
           Number.isFinite(input.expectedUpdatedAt) &&
           row.updatedAt !== input.expectedUpdatedAt
         ) {
-          return 'released'
-        }
-
-        return 'missing'
-      }
-
-      if (
-        input.expectedUpdatedAt !== undefined &&
-        Number.isFinite(input.expectedUpdatedAt) &&
-        row.updatedAt !== input.expectedUpdatedAt
-      ) {
-        this.connection.run(
-          `UPDATE job_queue
+          this.connection.run(
+            `UPDATE job_queue
               SET leaseOwner = NULL,
                   leaseUntil = NULL
             WHERE id = ? AND leaseOwner = ?`,
-          [input.id, input.workerId]
-        )
-        this.notifyWaiters(row.type, row.availableAt)
-        return 'released'
-      }
+            [input.id, input.workerId]
+          )
+          this.notifyWaiters(row.type, row.availableAt)
+          return 'released'
+        }
 
-      this.connection.run(`DELETE FROM job_queue WHERE id = ? AND leaseOwner = ?`, [
-        input.id,
-        input.workerId,
-      ])
-      return 'completed'
-    })
+        this.connection.run(`DELETE FROM job_queue WHERE id = ? AND leaseOwner = ?`, [
+          input.id,
+          input.workerId,
+        ])
+        return 'completed'
+      })
+    )
   }
 
   async fail(input: FailLeasedJobInput): Promise<'retrying' | 'dead' | 'missing'> {
-    return this.transaction.run(async () => {
-      const row = this.connection.get<QueueRow>(
-        `SELECT * FROM job_queue WHERE id = ? AND leaseOwner = ?`,
-        [input.id, input.workerId]
-      )
+    return this.withLockRetry(() =>
+      this.transaction.run(async () => {
+        const row = this.connection.get<QueueRow>(
+          `SELECT * FROM job_queue WHERE id = ? AND leaseOwner = ?`,
+          [input.id, input.workerId]
+        )
 
-      if (!row) {
-        return 'missing'
-      }
+        if (!row) {
+          return 'missing'
+        }
 
-      if (row.attempt >= row.maxAttempts) {
-        this.connection.run(
-          `INSERT INTO job_queue_dead_letters (
+        if (row.attempt >= row.maxAttempts) {
+          this.connection.run(
+            `INSERT INTO job_queue_dead_letters (
              id, type, dedupeKey, payloadJson, attempt, maxAttempts,
              lastError, failedAt, createdAt
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            row.id,
-            row.type,
-            row.dedupeKey,
-            row.payloadJson,
-            row.attempt,
-            row.maxAttempts,
-            input.error,
-            input.now,
-            row.createdAt,
-          ]
-        )
+            [
+              row.id,
+              row.type,
+              row.dedupeKey,
+              row.payloadJson,
+              row.attempt,
+              row.maxAttempts,
+              input.error,
+              input.now,
+              row.createdAt,
+            ]
+          )
 
-        this.connection.run('DELETE FROM job_queue WHERE id = ?', [row.id])
-        return 'dead'
-      }
+          this.connection.run('DELETE FROM job_queue WHERE id = ?', [row.id])
+          return 'dead'
+        }
 
-      this.connection.run(
-        `UPDATE job_queue
+        this.connection.run(
+          `UPDATE job_queue
             SET leaseOwner = NULL,
                 leaseUntil = NULL,
                 availableAt = ?,
                 updatedAt = ?,
                 lastError = ?
           WHERE id = ?`,
-        [input.now + input.retryDelayMs, input.now, input.error, row.id]
-      )
+          [input.now + input.retryDelayMs, input.now, input.error, row.id]
+        )
 
-      this.notifyWaiters(row.type, input.now + input.retryDelayMs)
+        this.notifyWaiters(row.type, input.now + input.retryDelayMs)
 
-      return 'retrying'
-    })
+        return 'retrying'
+      })
+    )
   }
 
   async getByTypeAndDedupeKey<TPayload>(

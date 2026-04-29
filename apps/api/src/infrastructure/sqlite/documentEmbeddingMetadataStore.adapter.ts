@@ -261,9 +261,7 @@ export class SqliteDocumentEmbeddingMetadataStore implements DocumentEmbeddingMe
     )
   }
 
-  async listVectorReferencesByDocumentIds(
-    documentIds: string[]
-  ): Promise<
+  async listVectorReferencesByDocumentIds(documentIds: string[]): Promise<
     Array<{
       documentId: string
       vectorKey: string

@@ -1,5 +1,9 @@
 import type { EditorView } from 'prosemirror-view'
 import type { InlineZoneSession, AIZoneAttrs } from '@lucentdocs/shared'
+import type {
+  AIBubblePresenceFrame,
+  AIBubblePresenceStore,
+} from '../../collaboration/ai-bubble-presence'
 
 export type StreamingHandler = (streaming: boolean) => void
 
@@ -9,6 +13,7 @@ export interface AIWriterControllerOptions {
   getRequesterClientName?: () => string | null
   getSessionById?: (sessionId: string) => InlineZoneSession | null
   setSessionById?: (sessionId: string, session: InlineZoneSession | null) => void
+  bubblePresence?: AIBubblePresenceStore | null
 }
 
 export type AIZoneNodeAttrs = AIZoneAttrs
@@ -49,3 +54,5 @@ export interface ContinuationStreamPayload {
 }
 
 export type InlineStreamPayload = PromptStreamPayload | ContinuationStreamPayload
+
+export type { AIBubblePresenceFrame }

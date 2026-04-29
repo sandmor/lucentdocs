@@ -25,7 +25,7 @@ import type { ConnectionStatus } from '@/lib/yjs-provider'
 import { parseProjectSyncEvent } from '@/lib/project-sync-events'
 import type { PanelImperativeHandle } from 'react-resizable-panels'
 import { cn } from '@/lib/utils'
-import type { EditorView } from 'prosemirror-view'
+import { useEditorStore } from '@/lib/editor-store'
 
 const DESKTOP_SIDEBAR_STORAGE_KEY_PREFIX = 'lucentdocs:editor:desktop-sidebar:'
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH_PERCENTAGE = 25
@@ -120,8 +120,7 @@ export function EditorPage() {
   const lastHandledSyncEventIdRef = useRef<string | null>(null)
   const initialDesktopSidebarState = useMemo(() => resolveDesktopSidebarState(id), [id])
 
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
-  const [isGenerating, setIsGenerating] = useState(false)
+  const connectionStatus = useEditorStore((s) => s.connectionStatus)
   const [titleInput, setTitleInput] = useState('')
   const [editorSessionKey, setEditorSessionKey] = useState(0)
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>('explorer')
@@ -142,12 +141,7 @@ export function EditorPage() {
     if (typeof window === 'undefined') return true
     return window.matchMedia('(min-width: 768px)').matches
   })
-  const [editorSelectionForChat, setEditorSelectionForChat] = useState<{
-    from: number
-    to: number
-  } | null>(null)
   const sidebarPanelRef = useRef<PanelImperativeHandle | null>(null)
-  const editorViewRef = useRef<EditorView | null>(null)
   const appliedSearchSelectionRef = useRef<string | null>(null)
 
   const updateCurrentSidebarState = useCallback(
@@ -381,7 +375,7 @@ export function EditorPage() {
     queueMicrotask(() => {
       if (cancelled) return
       setTitleInput('')
-      setConnectionStatus('connecting')
+      useEditorStore.getState().setConnectionStatus('connecting')
     })
 
     return () => {
@@ -502,6 +496,10 @@ export function EditorPage() {
     [commitTitle, documentPath]
   )
 
+  const bumpEditorSessionKey = useCallback(() => {
+    setEditorSessionKey((v) => v + 1)
+  }, [])
+
   const handleRestore = useCallback(
     (snapshotId: string) => {
       if (!id || !currentDocumentId) return
@@ -509,7 +507,7 @@ export function EditorPage() {
         { projectId: id, id: currentDocumentId, snapshotId },
         {
           onSuccess: () => {
-            setEditorSessionKey((value) => value + 1)
+            bumpEditorSessionKey()
             utils.documents.get.invalidate({ projectId: id, id: currentDocumentId })
             utils.documents.versions.invalidate({ projectId: id, id: currentDocumentId })
             utils.documents.list.invalidate({ projectId: id })
@@ -523,7 +521,7 @@ export function EditorPage() {
         }
       )
     },
-    [currentDocumentId, id, restoreMutation, utils]
+    [currentDocumentId, id, bumpEditorSessionKey, restoreMutation, utils]
   )
 
   const handleCreateSnapshot = useCallback(() => {
@@ -604,14 +602,7 @@ export function EditorPage() {
   }, [desktopSidebarWidthPercentage, id, isDesktop, isSidebarOpen])
 
   const handleConnectionChange = useCallback((status: ConnectionStatus) => {
-    setConnectionStatus(status)
-  }, [])
-
-  const handleEditorViewReady = useCallback((view: EditorView | null) => {
-    editorViewRef.current = view
-    if (!view) {
-      appliedSearchSelectionRef.current = null
-    }
+    useEditorStore.getState().setConnectionStatus(status)
   }, [])
 
   const buildDocumentSearchParams = useCallback(
@@ -657,7 +648,7 @@ export function EditorPage() {
     if (connectionStatus !== 'connected') return
     if (!currentDocumentId || documentQuery.data?.id !== currentDocumentId) return
     if (!requestedSearchRange) return
-    if (!editorViewRef.current || !editorRef.current) return
+    if (!editorRef.current) return
 
     const signature = `${currentDocumentId}:${requestedSearchRange.from}:${requestedSearchRange.to}`
     if (appliedSearchSelectionRef.current === signature) return
@@ -877,13 +868,7 @@ export function EditorPage() {
           onOpenDocument={handleMobileOpenDocument}
         />
       </div>
-      {sidebarPanel === 'chat' && (
-        <ChatPanel
-          editorSelection={editorSelectionForChat}
-          projectId={id}
-          documentId={currentDocumentId}
-        />
-      )}
+      {sidebarPanel === 'chat' && <ChatPanel projectId={id} documentId={currentDocumentId} />}
       {sidebarPanel === 'project-settings' && <ProjectSettings projectId={id} />}
     </>
   )
@@ -935,7 +920,6 @@ export function EditorPage() {
         currentDocumentId && (
           <div className="mx-auto max-w-3xl px-4 sm:px-8 py-6 sm:py-10">
             <EditorToolbar
-              isGenerating={isGenerating}
               onContinueWriting={() => editorRef.current?.startAIContinuation(true)}
               titleInput={titleInput}
               onTitleChange={setTitleInput}
@@ -954,9 +938,6 @@ export function EditorPage() {
               projectId={id}
               documentId={currentDocumentId}
               onConnectionChange={handleConnectionChange}
-              onEditorViewReady={handleEditorViewReady}
-              onEditorSelectionChange={setEditorSelectionForChat}
-              onGeneratingChange={setIsGenerating}
               className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
             />
           </div>

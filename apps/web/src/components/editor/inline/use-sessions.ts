@@ -1,15 +1,7 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type MutableRefObject,
-  type Dispatch,
-  type SetStateAction,
-} from 'react'
-import type { InlineZoneSession } from '@lucentdocs/shared'
+import { useEffect, useMemo } from 'react'
 import type { AIWriterState } from '../ai/writer-plugin'
 import { getTrpcProxyClient, trpc } from '@/lib/trpc'
+import { useEditorStore } from '@/lib/editor-store'
 
 interface UseInlineSessionsOptions {
   projectId?: string
@@ -17,22 +9,11 @@ interface UseInlineSessionsOptions {
   aiState: AIWriterState | null
 }
 
-interface UseInlineSessionsResult {
-  inlineSessionsById: Record<string, InlineZoneSession>
-  inlineSessionsRef: MutableRefObject<Record<string, InlineZoneSession>>
-  setInlineSessionsById: Dispatch<SetStateAction<Record<string, InlineZoneSession>>>
-}
-
 export function useInlineSessions({
   projectId,
   documentId,
   aiState,
-}: UseInlineSessionsOptions): UseInlineSessionsResult {
-  const [inlineSessionsById, setInlineSessionsById] = useState<Record<string, InlineZoneSession>>(
-    {}
-  )
-  const inlineSessionsRef = useRef<Record<string, InlineZoneSession>>({})
-
+}: UseInlineSessionsOptions): void {
   const inlineSessionIds = useMemo(() => {
     if (!aiState) return []
 
@@ -68,14 +49,11 @@ export function useInlineSessions({
 
   useEffect(() => {
     if (!inlineSessionsQuery.data) return
-    setInlineSessionsById((previous) => {
-      const next = {
-        ...previous,
-        ...inlineSessionsQuery.data.sessions,
-      }
-      inlineSessionsRef.current = next
-      return next
-    })
+    const sessions = inlineSessionsQuery.data.sessions
+    useEditorStore.getState().setSessions((previous) => ({
+      ...previous,
+      ...sessions,
+    }))
   }, [inlineSessionsQuery.data])
 
   useEffect(() => {
@@ -111,24 +89,7 @@ export function useInlineSessions({
             current.lastSeq = event.seq
             if (event.type !== 'snapshot') return
 
-            setInlineSessionsById((previous) => {
-              if (event.session === null) {
-                if (previous[sessionId] === undefined) return previous
-                const next = { ...previous }
-                delete next[sessionId]
-                inlineSessionsRef.current = next
-                return next
-              }
-
-              const previousSession = previous[sessionId]
-              if (previousSession === event.session) return previous
-              const next = {
-                ...previous,
-                [sessionId]: event.session,
-              }
-              inlineSessionsRef.current = next
-              return next
-            })
+            useEditorStore.getState().setSessionById(sessionId, event.session)
 
             if (!event.generating) {
               current.unsubscribe()
@@ -148,11 +109,5 @@ export function useInlineSessions({
       }
       subscriptions.clear()
     }
-  }, [documentId, projectId, setInlineSessionsById, streamingSessionIds])
-
-  return {
-    inlineSessionsById,
-    inlineSessionsRef,
-    setInlineSessionsById,
-  }
+  }, [documentId, projectId, streamingSessionIds])
 }

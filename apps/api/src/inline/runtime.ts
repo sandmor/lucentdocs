@@ -45,6 +45,7 @@ export interface InlineObserveState extends InlineScope {
   deleted: boolean
   generating: boolean
   generationId: string | null
+  draftText: string | null
   error: string | null
   session: InlineZoneSession | null
 }
@@ -199,6 +200,7 @@ function createObserveState(
     session: InlineZoneSession | null
     generating: boolean
     generationId: string | null
+    draftText?: string | null
     error?: string | null
   }
 ): InlineObserveState {
@@ -210,6 +212,7 @@ function createObserveState(
     deleted: options.session === null,
     generating: options.generating,
     generationId: options.generationId,
+    draftText: options.draftText ?? null,
     error: options.error ?? null,
     session: options.session,
   }
@@ -857,6 +860,7 @@ export class InlineRuntime {
       session: sessionForGeneration,
       generating: true,
       generationId,
+      draftText: null,
       error: null,
     })
     const startedSnapshot = this.#toSnapshotEvent(startedState)
@@ -956,21 +960,6 @@ export class InlineRuntime {
     }
   }
 
-  async #readZoneText(scope: InlineScope & { sessionId: string }): Promise<string | null> {
-    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
-      transform: (currentDoc) => {
-        const zone = getInlineZoneTextFromDoc(currentDoc, scope.sessionId)
-        return {
-          changed: false,
-          nextDoc: currentDoc,
-          result: zone,
-        }
-      },
-    })
-
-    return transformed.result.zoneFound ? transformed.result.text : null
-  }
-
   async #setZoneStreaming(
     scope: InlineScope & { sessionId: string },
     streaming: boolean,
@@ -993,6 +982,21 @@ export class InlineRuntime {
         `AI zone for inline session ${scope.sessionId} was not found while setting streaming=${String(streaming)}`
       )
     }
+  }
+
+  async #readZoneText(scope: InlineScope & { sessionId: string }): Promise<string | null> {
+    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+      transform: (currentDoc) => {
+        const zone = getInlineZoneTextFromDoc(currentDoc, scope.sessionId)
+        return {
+          changed: false,
+          nextDoc: currentDoc,
+          result: zone,
+        }
+      },
+    })
+
+    return transformed.result.zoneFound ? transformed.result.text : null
   }
 
   /**
@@ -1071,16 +1075,22 @@ export class InlineRuntime {
     let finalSession = generationSession
     let zoneDraftText = input.mode === 'prompt' ? (input.selectedText ?? '') : ''
     let generationError: string | null = null
+    let generationAborted = false
 
     try {
       if (isTestRuntime()) {
-        finalSession = await this.#runTestGeneration(
+        const testResult = await this.#runTestGeneration(
           input,
           generationId,
           controller,
-          generationSession,
-          documentVersion
+          generationSession
         )
+        finalSession = testResult.session
+        zoneDraftText = testResult.draftText
+        if (controller.signal.aborted) {
+          generationAborted = true
+          finalSession = baselineSession
+        }
         return
       }
 
@@ -1108,38 +1118,6 @@ export class InlineRuntime {
           generatedText += rawText
           zoneDraftText = generatedText
 
-          const fullReplaceAction: InlineZoneWriteAction = {
-            type: 'replace_range',
-            fromOffset: 0,
-            toOffset: Number.MAX_SAFE_INTEGER,
-            content: zoneDraftText,
-          }
-
-          await this.#enqueueSessionWrite(input, async () => {
-            try {
-              await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
-            } catch (error) {
-              // Only terminal continuation generations are allowed to recreate a
-              // missing zone, and only after the underlying document instance has
-              // changed since generation start.
-              if (
-                !(error instanceof InlineRuntimeError) ||
-                error.code !== 'NOT_FOUND' ||
-                !(await this.#ensureTerminalContinuationZone(
-                  input,
-                  input.continuationTailAnchor,
-                  input.contextAfter,
-                  requesterClientName,
-                  documentVersion
-                ))
-              ) {
-                throw error
-              }
-
-              await this.#applyWriteActionToDocument(input, fullReplaceAction, requesterClientName)
-            }
-          })
-
           const active = this.#activeGenerations.get(key)
           this.#emitSnapshot(
             createObserveState(input, {
@@ -1147,6 +1125,7 @@ export class InlineRuntime {
               session: finalSession,
               generating: true,
               generationId,
+              draftText: generatedText.length > 0 ? generatedText : null,
             }),
             {
               recordInGeneration: active?.id === generationId ? generationId : null,
@@ -1192,22 +1171,9 @@ export class InlineRuntime {
             await this.#enqueueSessionWrite(input, async () => {
               if (action.type === 'replace_range') {
                 zoneDraftText = applyReplaceRangeToText(zoneDraftText, action)
-                const fullReplaceAction: InlineZoneWriteAction = {
-                  type: 'replace_range',
-                  fromOffset: 0,
-                  toOffset: Number.MAX_SAFE_INTEGER,
-                  content: zoneDraftText,
-                }
-                await this.#applyWriteActionToDocument(
-                  input,
-                  fullReplaceAction,
-                  requesterClientName
-                )
               }
 
               const nextSession = applyWriteActionToSession(finalSession, action)
-              if (nextSession === finalSession) return
-
               finalSession = nextSession
               const active = this.#activeGenerations.get(key)
               const seq = this.#nextSeq(key)
@@ -1217,6 +1183,7 @@ export class InlineRuntime {
                   session: finalSession,
                   generating: true,
                   generationId,
+                  draftText: zoneDraftText.length > 0 ? zoneDraftText : null,
                 }),
                 {
                   recordInGeneration: active?.id === generationId ? generationId : null,
@@ -1299,6 +1266,7 @@ export class InlineRuntime {
               session: finalSession,
               generating: true,
               generationId,
+              draftText: zoneDraftText.length > 0 ? zoneDraftText : null,
             }),
             {
               recordInGeneration: active?.id === generationId ? generationId : null,
@@ -1317,33 +1285,100 @@ export class InlineRuntime {
         await chunkForwardTask
       }
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') return
-      if (!shouldSilenceInlineGenerationError(error)) {
-        console.error('Inline generation failed', error)
+      if (error instanceof Error && error.name === 'AbortError') {
+        generationAborted = true
+        finalSession = baselineSession
       }
-      generationError = error instanceof Error ? error.message : 'Inline AI generation failed.'
-      finalSession = baselineSession
+      if (!shouldSilenceInlineGenerationError(error)) {
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          console.error('Inline generation failed', error)
+        }
+      }
+      if (!(error instanceof Error && error.name === 'AbortError')) {
+        generationError = error instanceof Error ? error.message : 'Inline AI generation failed.'
+        finalSession = baselineSession
+      }
     } finally {
-      if (generationError !== null) {
+      if (input.mode === 'continue' && (generationAborted || generationError !== null)) {
         try {
           await this.#enqueueSessionWrite(input, async () => {
-            // Roll back the zone text on hard failures so the document matches the
-            // reverted session state that will be emitted below.
-            await this.#applyWriteActionToDocument(
-              input,
-              {
-                type: 'replace_range',
-                fromOffset: 0,
-                toOffset: Number.MAX_SAFE_INTEGER,
-                content: rollbackZoneText,
-              },
-              requesterClientName
+            const rollbackAction: InlineZoneWriteAction = {
+              type: 'replace_range',
+              fromOffset: 0,
+              toOffset: Number.MAX_SAFE_INTEGER,
+              content: rollbackZoneText,
+            }
+
+            try {
+              await this.#applyWriteActionToDocument(input, rollbackAction, requesterClientName)
+            } catch (error) {
+              if (
+                !(error instanceof InlineRuntimeError) ||
+                error.code !== 'NOT_FOUND' ||
+                !(await this.#ensureTerminalContinuationZone(
+                  input,
+                  input.continuationTailAnchor,
+                  input.contextAfter,
+                  requesterClientName,
+                  documentVersion
+                ))
+              ) {
+                throw error
+              }
+
+              await this.#applyWriteActionToDocument(input, rollbackAction, requesterClientName)
+            }
+          })
+        } catch (rollbackError) {
+          if (!shouldSilenceInlineGenerationError(rollbackError)) {
+            console.error(
+              'Failed to restore inline zone content after interrupted generation',
+              rollbackError
             )
+          }
+        }
+      }
+
+      if (!generationAborted && generationError === null) {
+        try {
+          await this.#enqueueSessionWrite(input, async () => {
+            const action: InlineZoneWriteAction = {
+              type: 'replace_range',
+              fromOffset: 0,
+              toOffset: Number.MAX_SAFE_INTEGER,
+              content: zoneDraftText,
+            }
+
+            try {
+              await this.#applyWriteActionToDocument(input, action, requesterClientName)
+            } catch (error) {
+              if (
+                input.mode !== 'continue' ||
+                !(error instanceof InlineRuntimeError) ||
+                error.code !== 'NOT_FOUND' ||
+                !(await this.#ensureTerminalContinuationZone(
+                  input,
+                  input.continuationTailAnchor,
+                  input.contextAfter,
+                  requesterClientName,
+                  documentVersion
+                ))
+              ) {
+                throw error
+              }
+
+              await this.#applyWriteActionToDocument(input, action, requesterClientName)
+            }
           })
         } catch (error) {
           if (!shouldSilenceInlineGenerationError(error)) {
-            console.error('Failed to rollback inline zone content after generation error', error)
+            console.error('Failed to commit inline zone content after generation finished', error)
+            generationError =
+              error instanceof Error
+                ? error.message
+                : 'Inline generation finished but failed to apply the generated content.'
           }
+          finalSession = baselineSession
         }
       }
 
@@ -1382,6 +1417,7 @@ export class InlineRuntime {
           session: sessionForSnapshot,
           generating: false,
           generationId: null,
+          draftText: null,
           error: generationError,
         })
       )
@@ -1392,17 +1428,26 @@ export class InlineRuntime {
     input: ResolvedInlineGenerationInput,
     generationId: string,
     controller: AbortController,
-    baseSession: InlineZoneSession,
-    documentVersion: YjsDocumentVersion
-  ): Promise<InlineZoneSession> {
-    if (controller.signal.aborted) return baseSession
+    baseSession: InlineZoneSession
+  ): Promise<{ session: InlineZoneSession; draftText: string }> {
+    if (controller.signal.aborted) {
+      return {
+        session: baseSession,
+        draftText: input.mode === 'prompt' ? (input.selectedText ?? '') : '',
+      }
+    }
 
     const messageId = `test-inline-${generationId}`
     const testPromptSeed = input.mode === 'prompt' ? input.prompt : 'continue'
     const generated = resolveTestInlineResponse(testPromptSeed)
     const delayMs = resolveTestInlineDelayMs(testPromptSeed)
     await waitForAbortableDelay(controller, delayMs)
-    if (controller.signal.aborted) return baseSession
+    if (controller.signal.aborted) {
+      return {
+        session: baseSession,
+        draftText: input.mode === 'prompt' ? (input.selectedText ?? '') : '',
+      }
+    }
 
     const assistantMessage: InlineChatMessage = {
       id: messageId,
@@ -1412,41 +1457,32 @@ export class InlineRuntime {
     }
 
     if (input.mode === 'continue') {
-      const action: InlineZoneWriteAction = {
-        type: 'replace_range',
-        fromOffset: 0,
-        toOffset: Number.MAX_SAFE_INTEGER,
-        content: generated,
-      }
-
-      await this.#enqueueSessionWrite(input, async () => {
-        try {
-          await this.#applyWriteActionToDocument(input, action, 'inline-test-runtime')
-        } catch (error) {
-          if (
-            !(error instanceof InlineRuntimeError) ||
-            error.code !== 'NOT_FOUND' ||
-            !(await this.#ensureTerminalContinuationZone(
-              input,
-              input.continuationTailAnchor,
-              input.contextAfter,
-              'inline-test-runtime',
-              documentVersion
-            ))
-          ) {
-            throw error
-          }
-
-          await this.#applyWriteActionToDocument(input, action, 'inline-test-runtime')
+      const active = this.#activeGenerations.get(toInlineKey(input))
+      this.#emitSnapshot(
+        createObserveState(input, {
+          seq: this.#nextSeq(toInlineKey(input)),
+          session: baseSession,
+          generating: true,
+          generationId,
+          draftText: generated,
+        }),
+        {
+          recordInGeneration: active?.id === generationId ? generationId : null,
         }
-      })
+      )
 
-      return baseSession
+      return {
+        session: baseSession,
+        draftText: generated,
+      }
     }
 
     return {
-      ...baseSession,
-      messages: [...baseSession.messages, assistantMessage],
+      session: {
+        ...baseSession,
+        messages: [...baseSession.messages, assistantMessage],
+      },
+      draftText: input.selectedText ?? '',
     }
   }
 

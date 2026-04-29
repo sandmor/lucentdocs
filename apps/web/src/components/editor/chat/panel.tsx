@@ -10,15 +10,16 @@ import { asUIMessageArray, getTrailingAssistantMessage } from './message-utils'
 import type { ChatThreadSummary } from './types'
 import { ChatBubble, EmptyChatState, ThreadRow } from './ui'
 import { useChatStreamPump } from './use-stream-pump'
+import { useEditorStore } from '@/lib/editor-store'
 
 interface ChatPanelProps {
-  editorSelection: { from: number; to: number } | null
   projectId?: string
   documentId: string | null
   className?: string
 }
 
-export function ChatPanel({ editorSelection, projectId, documentId, className }: ChatPanelProps) {
+export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) {
+  const editorSelection = useEditorStore((s) => s.editorSelection)
   const utils = trpc.useUtils()
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [input, setInput] = useState('')

@@ -479,6 +479,22 @@
   border-radius: 2px;
 }
 
+.ai-generating-text[data-ai-zone-overlay-active='true'] {
+  background: transparent;
+}
+
+.ai-generating-text__overlay > *:first-child {
+  display: inline;
+}
+
+.ai-generating-text__overlay > *:not(:first-child) {
+  margin-top: 0.8em;
+}
+
+[data-ai-zone-overlay-active='true'] > .ai-generating-text__content {
+  display: none;
+}
+
 .dark .ai-generating-text {
   background: oklch(0.65 0.12 75 / 0.2);
 }

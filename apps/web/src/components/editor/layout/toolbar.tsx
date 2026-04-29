@@ -2,9 +2,9 @@ import { ArrowRight, Loader2 } from 'lucide-react'
 import type { KeyboardEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useEditorStore } from '@/lib/editor-store'
 
 interface EditorToolbarProps {
-  isGenerating: boolean
   onContinueWriting: () => void
   titleInput: string
   onTitleChange: (value: string) => void
@@ -14,7 +14,6 @@ interface EditorToolbarProps {
 }
 
 export function EditorToolbar({
-  isGenerating,
   onContinueWriting,
   titleInput,
   onTitleChange,
@@ -22,6 +21,7 @@ export function EditorToolbar({
   onTitleKeyDown,
   titleDisabled,
 }: EditorToolbarProps) {
+  const isGenerating = useEditorStore((s) => s.isGenerating)
   return (
     <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card/70 px-3 py-2 shadow-sm backdrop-blur">
       <Input
