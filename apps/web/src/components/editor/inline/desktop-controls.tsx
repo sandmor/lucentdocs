@@ -233,17 +233,7 @@ export function AIZoneFloatingControl({
 
     const applyComputedPosition = (x: number, y: number) => {
       if (cancelled) return
-      const roundedX = Math.round(x)
-      const roundedY = Math.round(y)
-      const nextLeft = `${roundedX}px`
-      const nextTop = `${roundedY}px`
-
-      if (el.style.left === nextLeft && el.style.top === nextTop) {
-        return
-      }
-
-      el.style.left = nextLeft
-      el.style.top = nextTop
+      applyPosition(el, x, y)
       queueLayoutNotification()
     }
 

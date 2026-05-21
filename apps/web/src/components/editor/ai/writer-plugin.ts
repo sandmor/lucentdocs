@@ -41,7 +41,44 @@ export interface AIWriterActionHandlers {
 
 export const aiWriterPluginKey = new PluginKey<AIWriterState>('ai_writer')
 
-function collectInvalidAIZoneNodePositions(doc: ProseMirrorNode): number[] {
+function isAIZoneEqual(a: AIZone, b: AIZone): boolean {
+  if (a.id !== b.id) return false
+  if (a.nodeFrom !== b.nodeFrom) return false
+  if (a.nodeTo !== b.nodeTo) return false
+  if (a.streaming !== b.streaming) return false
+  if (a.sessionId !== b.sessionId) return false
+  if (a.originalSlice !== b.originalSlice) return false
+  if (a.segments.length !== b.segments.length) return false
+  for (let i = 0; i < a.segments.length; i++) {
+    if (a.segments[i].nodeFrom !== b.segments[i].nodeFrom) return false
+    if (a.segments[i].nodeTo !== b.segments[i].nodeTo) return false
+  }
+  return true
+}
+
+function isAIWriterStateEqual(a: AIWriterState, b: AIWriterState): boolean {
+  if (a.active !== b.active) return false
+  if (a.zoneId !== b.zoneId) return false
+  if (a.sessionId !== b.sessionId) return false
+  if (a.from !== b.from) return false
+  if (a.to !== b.to) return false
+  if (a.streaming !== b.streaming) return false
+  if (a.stuck !== b.stuck) return false
+  if (a.originalSlice !== b.originalSlice) return false
+  if (a.originalFrom !== b.originalFrom) return false
+  if (a.originalSelectionFrom !== b.originalSelectionFrom) return false
+  if (a.originalSelectionTo !== b.originalSelectionTo) return false
+  if (a.zones.length !== b.zones.length) return false
+  for (let i = 0; i < a.zones.length; i++) {
+    if (!isAIZoneEqual(a.zones[i], b.zones[i])) return false
+  }
+  return true
+}
+
+function collectInvalidAIZoneNodePositions(
+  doc: ProseMirrorNode,
+  activeZoneId: string | null
+): number[] {
   const zoneType = doc.type.schema.nodes.ai_zone
   if (!zoneType) return []
 
@@ -52,6 +89,11 @@ function collectInvalidAIZoneNodePositions(doc: ProseMirrorNode): number[] {
     const parsed = parseZoneNodeAttrs(node.attrs)
     if (!parsed) {
       positions.push(pos)
+      return false
+    }
+
+    if (activeZoneId !== null && parsed.id === activeZoneId) {
+      lastNodeToById.set(parsed.id, pos + node.nodeSize)
       return false
     }
 
@@ -247,7 +289,7 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
           }
         }
 
-        return next
+        return isAIWriterStateEqual(value, next) ? value : next
       },
     },
     appendTransaction(transactions, _oldState, newState) {
@@ -255,7 +297,9 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
         return null
       }
 
-      const invalidPositions = collectInvalidAIZoneNodePositions(newState.doc)
+      const pluginState = aiWriterPluginKey.getState(newState)
+      const activeZoneId = pluginState?.zoneId ?? null
+      const invalidPositions = collectInvalidAIZoneNodePositions(newState.doc, activeZoneId)
       if (invalidPositions.length === 0) {
         return null
       }

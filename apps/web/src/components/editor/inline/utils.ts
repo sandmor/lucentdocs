@@ -68,8 +68,24 @@ export function selectChoice(
 }
 
 export function applyPosition(element: HTMLElement, x: number, y: number): void {
-  element.style.left = `${Math.round(x)}px`
-  element.style.top = `${Math.round(y)}px`
+  const nextLeft = `${Math.round(x)}px`
+  const nextTop = `${Math.round(y)}px`
+
+  if (element.style.left === nextLeft && element.style.top === nextTop) {
+    return
+  }
+
+  if (!element.dataset.positioned) {
+    element.dataset.positioned = 'true'
+    element.style.transition = 'none'
+    element.style.left = nextLeft
+    element.style.top = nextTop
+    void element.offsetHeight // Force reflow
+    element.style.transition = 'left 150ms ease-out, top 150ms ease-out'
+  } else {
+    element.style.left = nextLeft
+    element.style.top = nextTop
+  }
 }
 
 export function getSelectionRect(view: EditorView, selection: SelectionRange): DOMRect {

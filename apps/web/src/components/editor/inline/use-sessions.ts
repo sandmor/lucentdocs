@@ -14,7 +14,7 @@ export function useInlineSessions({
   documentId,
   aiState,
 }: UseInlineSessionsOptions): void {
-  const inlineSessionIds = useMemo(() => {
+  const inlineSessionIdsRaw = useMemo(() => {
     if (!aiState) return []
 
     const sessionIds = new Set<string>()
@@ -25,7 +25,10 @@ export function useInlineSessions({
     return [...sessionIds].sort((left, right) => left.localeCompare(right))
   }, [aiState])
 
-  const streamingSessionIds = useMemo(() => {
+  const inlineSessionIdsStr = JSON.stringify(inlineSessionIdsRaw)
+  const inlineSessionIds = useMemo(() => JSON.parse(inlineSessionIdsStr), [inlineSessionIdsStr])
+
+  const streamingSessionIdsRaw = useMemo(() => {
     if (!aiState) return []
     const sessionIds = new Set<string>()
     for (const zone of aiState.zones) {
@@ -34,6 +37,12 @@ export function useInlineSessions({
     }
     return [...sessionIds].sort((left, right) => left.localeCompare(right))
   }, [aiState])
+
+  const streamingSessionIdsStr = JSON.stringify(streamingSessionIdsRaw)
+  const streamingSessionIds = useMemo(
+    () => JSON.parse(streamingSessionIdsStr),
+    [streamingSessionIdsStr]
+  )
 
   const inlineSessionsQuery = trpc.inline.getSessions.useQuery(
     {

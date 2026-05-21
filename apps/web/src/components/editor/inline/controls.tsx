@@ -89,41 +89,51 @@ export function InlineAIControls({
         onInteractionChange={onInteractionChange}
       />
 
-      {activeLoadingAnchor ? (
-        <AIZoneFloatingControl
-          key={`loading-${activeLoadingAnchor.zoneId ?? `${activeLoadingAnchor.from}-${activeLoadingAnchor.to}`}`}
-          view={view}
-          zoneId={activeLoadingAnchor.zoneId}
-          from={activeLoadingAnchor.from}
-          to={activeLoadingAnchor.to}
-          state="processing"
-          stuck={Boolean(state?.stuck)}
-          session={activeLoadingAnchor.session}
-          onAccept={onAccept}
-          onReject={onReject}
-          onStop={onStop}
-          onContinuePrompt={onContinuePrompt}
-          onDismissChoices={onDismissChoices}
-        />
-      ) : null}
+      {(() => {
+        const activeZone = activeLoadingAnchor
+          ? {
+              key:
+                activeLoadingAnchor.zoneId ??
+                `loading-${activeLoadingAnchor.from}-${activeLoadingAnchor.to}`,
+              zoneId: activeLoadingAnchor.zoneId,
+              from: activeLoadingAnchor.from,
+              to: activeLoadingAnchor.to,
+              state: 'processing' as const,
+              stuck: Boolean(state?.stuck),
+              session: activeLoadingAnchor.session,
+            }
+          : activeReviewZone
+            ? {
+                key: activeReviewZone.id,
+                zoneId: activeReviewZone.id,
+                from: activeReviewZone.from,
+                to: activeReviewZone.to,
+                state: activeReviewZone.streaming ? ('processing' as const) : ('review' as const),
+                stuck: false,
+                session: activeReviewZone.session,
+              }
+            : null
 
-      {activeReviewZone ? (
-        <AIZoneFloatingControl
-          key={activeReviewZone.id}
-          view={view}
-          zoneId={activeReviewZone.id}
-          from={activeReviewZone.from}
-          to={activeReviewZone.to}
-          state={activeReviewZone.streaming ? 'processing' : 'review'}
-          stuck={false}
-          session={activeReviewZone.session}
-          onAccept={onAccept}
-          onReject={onReject}
-          onStop={onStop}
-          onContinuePrompt={onContinuePrompt}
-          onDismissChoices={onDismissChoices}
-        />
-      ) : null}
+        if (!activeZone) return null
+
+        return (
+          <AIZoneFloatingControl
+            key={activeZone.key}
+            view={view}
+            zoneId={activeZone.zoneId}
+            from={activeZone.from}
+            to={activeZone.to}
+            state={activeZone.state}
+            stuck={activeZone.stuck}
+            session={activeZone.session}
+            onAccept={onAccept}
+            onReject={onReject}
+            onStop={onStop}
+            onContinuePrompt={onContinuePrompt}
+            onDismissChoices={onDismissChoices}
+          />
+        )
+      })()}
     </>
   )
 }

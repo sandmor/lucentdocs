@@ -119,7 +119,16 @@ export function RemotePresenceOverlay({
       rafId = requestAnimationFrame(recompute)
     }
 
-    const unsubscribeView = subscribeEditorView(view, scheduleRecompute)
+    let debounceTimeoutId: ReturnType<typeof setTimeout>
+    const scheduleRecomputeDebounced = () => {
+      if (cancelled) return
+      clearTimeout(debounceTimeoutId)
+      debounceTimeoutId = setTimeout(() => {
+        scheduleRecompute()
+      }, 100)
+    }
+
+    const unsubscribeView = subscribeEditorView(view, scheduleRecomputeDebounced)
     const awarenessListener = () => {
       scheduleRecompute()
     }
@@ -143,6 +152,7 @@ export function RemotePresenceOverlay({
     return () => {
       cancelled = true
       cancelAnimationFrame(rafId)
+      clearTimeout(debounceTimeoutId)
       unsubscribeView()
       resizeObserver.disconnect()
       awareness.off('change', awarenessListener)
