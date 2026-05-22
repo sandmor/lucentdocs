@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
+import { PageLoader } from '@/components/ui/page-loader'
 import {
   Dialog,
   DialogContent,
@@ -249,7 +250,9 @@ export function HomePage() {
           </div>
         </div>
 
-        {projectsQuery.isLoading && <p className="text-muted-foreground">Loading projects...</p>}
+        {(projectsQuery.isLoading || (projectsQuery.isFetching && !projectsQuery.data)) && (
+          <PageLoader variant="inline" message="Loading projects…" />
+        )}
 
         {projectsQuery.data?.length === 0 && (
           <div className="flex flex-col items-center gap-4 py-24 text-center">

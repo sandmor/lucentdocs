@@ -16,6 +16,7 @@ import {
 import { ArrowLeft, FilePlus2, Save, Trash2, WandSparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { trpc } from '@/lib/trpc'
+import { PageLoader } from '@/components/ui/page-loader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -433,11 +434,7 @@ export function AdminPromptsPage() {
   }
 
   if (listQuery.isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading prompts...</p>
-      </div>
-    )
+    return <PageLoader message="Loading prompts…" />
   }
 
   return (

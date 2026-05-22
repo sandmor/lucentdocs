@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Outlet, useNavigate } from 'react-router'
 import { trpc } from '@/lib/trpc'
+import { PageLoader } from '@/components/ui/page-loader'
 
 export function AuthGuard() {
   const navigate = useNavigate()
@@ -21,11 +22,7 @@ export function AuthGuard() {
   }, [authEnabled, configQuery.isLoading, meQuery.data, meQuery.isLoading, navigate])
 
   if (configQuery.isLoading || (authEnabled && meQuery.isLoading)) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-        Loading...
-      </div>
-    )
+    return <PageLoader message="Authenticating…" />
   }
 
   if (authEnabled && !meQuery.data) {

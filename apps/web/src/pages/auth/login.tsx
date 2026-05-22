@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
+import { PageLoader } from '@/components/ui/page-loader'
 import { AuthLayout } from './layout'
 
 const loginSchema = z.object({
@@ -52,7 +53,7 @@ export function LoginPage() {
   }
 
   if (configQuery.isLoading || !authEnabled) {
-    return null
+    return <PageLoader variant="fullscreen" />
   }
 
   return (

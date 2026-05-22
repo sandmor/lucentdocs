@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { ArrowLeft, Copy, Trash2, UserRoundPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { trpc } from '@/lib/trpc'
+import { PageLoader } from '@/components/ui/page-loader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -115,7 +116,9 @@ export function AdminUsersPage() {
     toast.success('Invitation link copied')
   }
 
-  if (configQuery.isLoading || !authEnabled) return null
+  if (configQuery.isLoading || !authEnabled) {
+    return <PageLoader message="Loading users…" />
+  }
 
   return (
     <div className="min-h-screen bg-background">

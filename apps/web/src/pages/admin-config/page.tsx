@@ -7,6 +7,7 @@ import { editableConfigSchema } from '@lucentdocs/shared'
 import { AlertTriangle, ArrowLeft, Plus, RotateCcw, Save } from 'lucide-react'
 
 import { getTrpcProxyClient, trpc } from '@/lib/trpc'
+import { PageLoader } from '@/components/ui/page-loader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -582,11 +583,7 @@ export function AdminConfigPage() {
   }, [embeddingDraft, generationDraft])
 
   if (configQuery.isLoading || aiSettingsQuery.isLoading || globalAiModelQuery.isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading configuration…</p>
-      </div>
-    )
+    return <PageLoader message="Loading configuration…" />
   }
 
   if (

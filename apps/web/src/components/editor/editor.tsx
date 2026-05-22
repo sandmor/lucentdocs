@@ -1,4 +1,5 @@
 import { useRef, useEffect, forwardRef, useImperativeHandle, useState, useCallback } from 'react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { initProseMirrorDoc } from 'y-prosemirror'
@@ -513,10 +514,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       <div ref={containerRef} className={className} />
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
-          <div className="animate-pulse space-y-4 w-3/4">
-            <div className="bg-muted h-4 w-3/4 rounded" />
-            <div className="bg-muted h-4 w-1/2 rounded" />
-            <div className="bg-muted h-4 w-5/6 rounded" />
+          <div className="w-3/4 space-y-4">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-5/6" />
           </div>
         </div>
       )}

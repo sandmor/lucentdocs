@@ -20,6 +20,7 @@ import { ProjectSettings } from '@/components/editor/project-settings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
+import { PageLoader } from '@/components/ui/page-loader'
 import { ArrowLeft, Loader2, Wifi, WifiOff, PanelLeftClose, PanelLeft, Menu, X } from 'lucide-react'
 import type { ConnectionStatus } from '@/lib/yjs-provider'
 import { parseProjectSyncEvent } from '@/lib/project-sync-events'
@@ -825,11 +826,7 @@ export function EditorPage() {
   )
 
   if (projectQuery.isLoading || (projectQuery.isFetching && !projectQuery.data)) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <Loader2 className="text-muted-foreground size-8 animate-spin" />
-      </div>
-    )
+    return <PageLoader message="Loading project…" />
   }
 
   if ((projectQuery.error || !projectQuery.data || !id) && !projectQuery.isFetching) {
@@ -844,11 +841,7 @@ export function EditorPage() {
   }
 
   if (!id || !projectQuery.data) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <Loader2 className="text-muted-foreground size-8 animate-spin" />
-      </div>
-    )
+    return <PageLoader message="Loading project…" />
   }
 
   const project = projectQuery.data
@@ -885,15 +878,11 @@ export function EditorPage() {
         )}
 
       {(documentsQuery.isLoading || openOrCreateDefaultDocumentMutation.isPending) && (
-        <div className="flex h-full items-center justify-center">
-          <Loader2 className="text-muted-foreground size-8 animate-spin" />
-        </div>
+        <PageLoader variant="inline" message="Loading document…" />
       )}
 
       {hasDocumentSelection && documentQuery.isLoading && (
-        <div className="flex h-full items-center justify-center">
-          <Loader2 className="text-muted-foreground size-8 animate-spin" />
-        </div>
+        <PageLoader variant="inline" message="Loading document…" />
       )}
 
       {hasDocumentSelection &&

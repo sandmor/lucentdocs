@@ -1,4 +1,4 @@
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
 import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 import { trpc } from '@/lib/trpc'
+import { PageLoader } from '@/components/ui/page-loader'
 
 export function UserSettingsPage() {
   const navigate = useNavigate()
@@ -63,21 +64,18 @@ export function UserSettingsPage() {
           </p>
         </div>
 
-        <div className="grid gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>AI model</CardTitle>
-              <CardDescription>
-                This applies to your projects unless a project or document override is set.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoading || !aiModelQuery.data || !aiProvidersQuery.data ? (
-                <div className="text-muted-foreground flex items-center gap-2 text-sm">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading settings…
-                </div>
-              ) : (
+        {isLoading || !aiModelQuery.data || !aiProvidersQuery.data ? (
+          <PageLoader variant="inline" message="Loading settings…" />
+        ) : (
+          <div className="grid gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>AI model</CardTitle>
+                <CardDescription>
+                  This applies to your projects unless a project or document override is set.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
                 <AiModelSelectionForm
                   allowInherit
                   directSelection={aiModelQuery.data.user?.providerConfigId ?? null}
@@ -88,24 +86,17 @@ export function UserSettingsPage() {
                   saveLabel="Save user override"
                   onSave={(providerConfigId) => aiModelMutation.mutate({ providerConfigId })}
                 />
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Indexing strategy</CardTitle>
-              <CardDescription>
-                This applies to your projects unless a project or document override is set.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoading || !query.data ? (
-                <div className="text-muted-foreground flex items-center gap-2 text-sm">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading settings…
-                </div>
-              ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>Indexing strategy</CardTitle>
+                <CardDescription>
+                  This applies to your projects unless a project or document override is set.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
                 <IndexingStrategyForm
                   allowInherit
                   directStrategy={query.data.user?.strategy ?? null}
@@ -115,10 +106,10 @@ export function UserSettingsPage() {
                   saveLabel="Save user override"
                   onSave={(strategy) => mutation.mutate({ strategy })}
                 />
-              )}
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
     </div>
   )
