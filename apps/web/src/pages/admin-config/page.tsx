@@ -10,6 +10,15 @@ import { getTrpcProxyClient, trpc } from '@/lib/trpc'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from '@/components/ui/combobox'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
@@ -35,6 +44,7 @@ import {
   VISIBLE_FIELD_META,
   createProviderDraft,
   formatDisplayValue,
+  formatInternalModelName,
   getUniqueProviderBaseURLs,
   isValidHttpBaseURL,
   normalizeProvider,
@@ -63,6 +73,7 @@ export function AdminConfigPage() {
   // AI provider draft state
   const [generationDraft, setGenerationDraft] = useState<AiDraftState | null>(null)
   const [embeddingDraft, setEmbeddingDraft] = useState<AiDraftState | null>(null)
+  const [activeModelAnchor, setActiveModelAnchor] = useState<HTMLButtonElement | null>(null)
 
   const configQuery = trpc.config.get.useQuery()
   const globalIndexingQuery = trpc.indexing.getGlobal.useQuery()
@@ -221,6 +232,7 @@ export function AdminConfigPage() {
         usage: kind,
         providers: draft.providers.map((provider) => ({
           id: provider.id,
+          name: provider.name ?? undefined,
           providerId: provider.providerId,
           type: provider.type,
           baseURL: provider.baseURL,
@@ -641,90 +653,158 @@ export function AdminConfigPage() {
     providerOptions: ProviderOption[]
     isDirty: boolean
     isSaving: boolean
-  }) => (
-    <Card>
-      <CardHeader>
-        <CardTitle>{options.title}</CardTitle>
-        <CardDescription>{options.description}</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-sm text-muted-foreground">
-            {options.draft.providers.length === 0
-              ? 'No providers configured.'
-              : `${options.draft.providers.length} provider${options.draft.providers.length === 1 ? '' : 's'} configured`}
-          </div>
-          <div className="flex items-center gap-2">
-            {options.isDirty && (
+  }) => {
+    const isGeneration = options.kind === 'generation'
+
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{options.title}</CardTitle>
+          <CardDescription>{options.description}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-6">
+          {isGeneration && options.draft.providers.length > 0 && (
+            <div className="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
+              <span className="text-sm font-medium shrink-0">Active model</span>
+              <div className="flex-1 min-w-0">
+                <Combobox
+                  items={options.draft.providers}
+                  itemToStringLabel={(item) =>
+                    item.name || formatInternalModelName(item.providerId, item.model)
+                  }
+                  itemToStringValue={(item) => item.id}
+                  isItemEqualToValue={(item, value) => item.id === value.id}
+                  value={
+                    options.draft.providers.find((p) => p.id === options.draft.activeProviderId) ??
+                    options.draft.providers[0]
+                  }
+                  onValueChange={(value) => {
+                    if (!value) return
+                    setActiveProvider(options.kind, value.id)
+                  }}
+                >
+                  <ComboboxTrigger
+                    render={
+                      <Button
+                        ref={setActiveModelAnchor}
+                        variant="outline"
+                        className="w-full justify-between overflow-hidden"
+                      />
+                    }
+                  >
+                    <span className="truncate">
+                      {(() => {
+                        const active = options.draft.providers.find(
+                          (p) => p.id === options.draft.activeProviderId
+                        )
+                        if (!active) return 'Select active model…'
+                        return (
+                          active.name || formatInternalModelName(active.providerId, active.model)
+                        )
+                      })()}
+                    </span>
+                  </ComboboxTrigger>
+                  <ComboboxContent anchor={activeModelAnchor}>
+                    <ComboboxInput placeholder="Search models…" showClear />
+                    <ComboboxEmpty>No models found.</ComboboxEmpty>
+                    <ComboboxList>
+                      {(item: AiProviderDraft) => (
+                        <ComboboxItem value={item}>
+                          <span className="flex flex-col items-start">
+                            <span>
+                              {item.name || formatInternalModelName(item.providerId, item.model)}
+                            </span>
+                            <span className="text-muted-foreground text-xs">
+                              {formatInternalModelName(item.providerId, item.model)}
+                            </span>
+                          </span>
+                        </ComboboxItem>
+                      )}
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm text-muted-foreground">
+              {options.draft.providers.length === 0
+                ? 'No providers configured.'
+                : `${options.draft.providers.length} provider${options.draft.providers.length === 1 ? '' : 's'} configured`}
+            </div>
+            <div className="flex items-center gap-2">
+              {options.isDirty && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={options.isSaving}
+                  onClick={() => handleDiscardDraft(options.kind)}
+                >
+                  <RotateCcw data-icon="inline-start" />
+                  Discard
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={options.isSaving}
-                onClick={() => handleDiscardDraft(options.kind)}
+                onClick={() => addProvider(options.kind, options.providerOptions)}
               >
-                <RotateCcw data-icon="inline-start" />
-                Discard
+                <Plus data-icon="inline-start" />
+                Add provider
               </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => addProvider(options.kind, options.providerOptions)}
-            >
-              <Plus data-icon="inline-start" />
-              Add provider
-            </Button>
-            {options.isDirty && (
+              {options.isDirty && (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={options.isSaving}
+                  onClick={() => saveDraft(options.kind)}
+                >
+                  <Save data-icon="inline-start" />
+                  {options.isSaving ? 'Saving…' : 'Save providers'}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {options.draft.providers.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-12 text-center">
+              <p className="text-muted-foreground text-sm">No providers configured yet.</p>
               <Button
                 type="button"
-                size="sm"
-                disabled={options.isSaving}
-                onClick={() => saveDraft(options.kind)}
+                variant="outline"
+                onClick={() => addProvider(options.kind, options.providerOptions)}
               >
-                <Save data-icon="inline-start" />
-                {options.isSaving ? 'Saving…' : 'Save providers'}
+                <Plus data-icon="inline-start" />
+                Add your first provider
               </Button>
-            )}
-          </div>
-        </div>
+            </div>
+          )}
 
-        {options.draft.providers.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-12 text-center">
-            <p className="text-muted-foreground text-sm">No providers configured yet.</p>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => addProvider(options.kind, options.providerOptions)}
-            >
-              <Plus data-icon="inline-start" />
-              Add your first provider
-            </Button>
-          </div>
-        )}
-
-        {options.entries.map((entry, index) => (
-          <ProviderCard
-            key={entry.provider.id}
-            kind={options.kind}
-            entry={entry}
-            index={index}
-            providerOptions={options.providerOptions}
-            apiKeys={aiSettingsQuery.data.apiKeys}
-            isActive={options.draft.activeProviderId === entry.provider.id}
-            canRemove={options.draft.providers.length > 1}
-            onUpdate={(id, patch) => updateProvider(options.kind, id, patch)}
-            onSetActive={(id) => setActiveProvider(options.kind, id)}
-            onRemove={(id) => removeProvider(options.kind, id)}
-            onRefreshCatalog={(provider, refreshOptions) =>
-              void refreshSourceCatalog(options.kind, provider, refreshOptions)
-            }
-          />
-        ))}
-      </CardContent>
-    </Card>
-  )
+          {options.entries.map((entry, index) => (
+            <ProviderCard
+              key={entry.provider.id}
+              kind={options.kind}
+              entry={entry}
+              index={index}
+              providerOptions={options.providerOptions}
+              apiKeys={aiSettingsQuery.data.apiKeys}
+              isActive={options.draft.activeProviderId === entry.provider.id}
+              canRemove={options.draft.providers.length > 1}
+              onUpdate={(id, patch) => updateProvider(options.kind, id, patch)}
+              onSetActive={(id) => setActiveProvider(options.kind, id)}
+              onRemove={(id) => removeProvider(options.kind, id)}
+              onRefreshCatalog={(provider, refreshOptions) =>
+                void refreshSourceCatalog(options.kind, provider, refreshOptions)
+              }
+            />
+          ))}
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-background">

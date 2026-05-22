@@ -30,6 +30,7 @@ export type AiProviderType = AiModelSourceType
 
 export type AiProviderDraft = {
   id: string
+  name: string | null
   providerId: string
   type: AiProviderType
   baseURL: string

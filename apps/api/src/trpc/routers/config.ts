@@ -93,6 +93,7 @@ const sourceCatalogInputSchema = z.object({
 
 const aiProviderInputSchema = z.object({
   id: z.string().optional(),
+  name: z.string().trim().optional(),
   providerId: z.string().trim().min(1, 'Provider ID is required.'),
   type: z.enum(AI_MODEL_SOURCE_TYPES),
   baseURL: z
@@ -155,6 +156,7 @@ export const configRouter = router({
         usage: input.usage,
         providers: input.providers.map((provider) => ({
           id: provider.id,
+          name: provider.name,
           providerId: provider.providerId.trim(),
           type: provider.type,
           baseURL: normalizeBaseURL(provider.baseURL),

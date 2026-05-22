@@ -36,7 +36,7 @@ import type {
   ProviderOption,
   ProviderWithCatalog,
 } from './types'
-import { defaultModelForProvider, hasCatalogModels } from './constants'
+import { defaultModelForProvider, formatInternalModelName, hasCatalogModels } from './constants'
 
 interface ProviderCardProps {
   kind: ProviderSectionKind
@@ -135,6 +135,8 @@ export function ProviderCard({
   const selectedApiKeyOption =
     keyOptions.find((item) => item.value === (provider.apiKeyId ?? '__none__')) ?? keyOptions[0]
 
+  const internalName = formatInternalModelName(provider.providerId, provider.model)
+
   return (
     <div
       className={`rounded-xl border p-4 ${isActive ? 'border-primary/25 bg-primary/3' : 'bg-muted/20'}`}
@@ -147,7 +149,7 @@ export function ProviderCard({
               alt={selectedProviderOption.label}
               className="size-5 shrink-0 rounded-sm"
             />
-            <p className="truncate font-medium">{selectedProviderOption.label}</p>
+            <p className="truncate font-medium">{provider.name || internalName}</p>
             {isActive && (
               <Badge variant="secondary" className="shrink-0">
                 Active
@@ -155,12 +157,8 @@ export function ProviderCard({
             )}
           </div>
           <p className="ml-7 mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-            {provider.model ? (
-              <>
-                <span className="truncate">{provider.model}</span>
-                <span className="shrink-0">·</span>
-              </>
-            ) : null}
+            <span className="truncate text-xs">{internalName}</span>
+            <span className="shrink-0">·</span>
             <span className="shrink-0 text-xs">
               {entry.catalogSource === 'provider' ? 'Live catalog' : 'models.dev'}
             </span>
@@ -233,6 +231,22 @@ export function ProviderCard({
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor={`provider-name-${provider.id}`}>Name</FieldLabel>
+          <Input
+            id={`provider-name-${provider.id}`}
+            value={provider.name || ''}
+            onChange={(event) => {
+              onUpdate(provider.id, { name: event.target.value })
+            }}
+            placeholder={internalName}
+            autoComplete="off"
+          />
+          <FieldDescription className="truncate">
+            Internal: <code>{internalName}</code>
+          </FieldDescription>
+        </Field>
+
         <Field>
           <FieldLabel>Provider</FieldLabel>
           <Combobox

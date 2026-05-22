@@ -4,6 +4,7 @@ import type { AiProviderUsage } from '../ai/provider-usage.js'
 export interface AiProviderConfigEntity {
   id: string
   usage: AiProviderUsage
+  name: string | null
   providerId: string
   type: AiModelSourceType
   baseURL: string
@@ -33,6 +34,7 @@ export interface AiRuntimeSettingsEntity {
 export interface UpsertAiProviderConfigInput {
   id: string
   usage: AiProviderUsage
+  name: string | null
   providerId: string
   type: AiModelSourceType
   baseURL: string

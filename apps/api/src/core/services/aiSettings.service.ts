@@ -28,6 +28,7 @@ interface BootstrapProviderDefaults {
 export interface AiProviderConfigRecord {
   id: string
   usage: AiProviderUsage
+  name: string | null
   providerId: string
   type: AiModelSourceType
   baseURL: string
@@ -69,6 +70,7 @@ export interface AiSettingsService {
     usage: AiProviderUsage
     providers: Array<{
       id?: string
+      name?: string
       providerId: string
       type: AiModelSourceType
       baseURL: string
@@ -98,6 +100,12 @@ export interface AiSettingsService {
 function normalizeModel(model: string): string {
   const trimmed = model.trim()
   return trimmed || DEFAULT_OPENAI_MODEL
+}
+
+function normalizeProviderName(name: string | undefined | null): string | null {
+  const trimmed = name?.trim()
+  if (trimmed) return trimmed
+  return null
 }
 
 function normalizeModelForUsage(
@@ -333,6 +341,7 @@ export function createAiSettingsService(
           const generationProvider: AiProviderConfigEntity = {
             id: providerConfigId,
             usage: 'generation',
+            name: null,
             providerId: bootstrapDefaults.providerId,
             type: bootstrapDefaults.type,
             baseURL: bootstrapDefaults.baseURL,
@@ -355,6 +364,7 @@ export function createAiSettingsService(
           const embeddingProvider: AiProviderConfigEntity = {
             id: embeddingProviderConfigId,
             usage: 'embedding',
+            name: null,
             providerId: embeddingSource.providerId,
             type: embeddingSource.type,
             baseURL: embeddingSource.baseURL,
@@ -402,6 +412,7 @@ export function createAiSettingsService(
         generationProviders: generationProviders.map((provider) => ({
           id: provider.id,
           usage: provider.usage,
+          name: normalizeProviderName(provider.name),
           providerId: normalizeProviderId(provider.type, provider.providerId),
           type: normalizeModelSourceType(provider.type),
           baseURL: resolveProviderBaseURLOrThrow(provider.type, provider.baseURL),
@@ -416,6 +427,7 @@ export function createAiSettingsService(
         embeddingProviders: embeddingProviders.map((provider) => ({
           id: provider.id,
           usage: provider.usage,
+          name: normalizeProviderName(provider.name),
           providerId: normalizeProviderId(provider.type, provider.providerId),
           type: normalizeModelSourceType(provider.type),
           baseURL: resolveProviderBaseURLOrThrow(provider.type, provider.baseURL),
@@ -461,6 +473,7 @@ export function createAiSettingsService(
         return {
           id,
           usage: input.usage,
+          name: normalizeProviderName(provider.name),
           providerId: requireProviderId(provider.providerId),
           type,
           baseURL: resolveProviderBaseURLOrThrow(type, provider.baseURL),

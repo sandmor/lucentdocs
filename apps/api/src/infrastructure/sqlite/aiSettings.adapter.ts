@@ -13,6 +13,7 @@ import type { SqliteConnection } from './connection.js'
 interface ProviderRow {
   id: string
   usage: AiProviderUsage
+  name: string | null
   providerId: string
   type: string
   baseUrl: string
@@ -43,6 +44,7 @@ function fromProviderRow(row: ProviderRow): AiProviderConfigEntity {
   return {
     id: row.id,
     usage: row.usage,
+    name: row.name,
     providerId: row.providerId,
     type: normalizeModelSourceType(row.type),
     baseURL: row.baseUrl,
@@ -71,7 +73,7 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
 
   async listProviderConfigs(usage: AiProviderUsage): Promise<AiProviderConfigEntity[]> {
     const rows = this.connection.all<ProviderRow>(
-      `SELECT id, usage, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt
+      `SELECT id, usage, name, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt
        FROM ai_provider_configs
        WHERE usage = ?
        ORDER BY sortOrder ASC, createdAt ASC`,
@@ -83,10 +85,11 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
   async upsertProviderConfig(input: UpsertAiProviderConfigInput): Promise<void> {
     this.connection.run(
       `INSERT INTO ai_provider_configs
-        (id, usage, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, usage, name, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          usage = excluded.usage,
+         name = excluded.name,
          providerId = excluded.providerId,
          type = excluded.type,
          baseUrl = excluded.baseUrl,
@@ -97,6 +100,7 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
       [
         input.id,
         input.usage,
+        input.name,
         input.providerId,
         input.type,
         input.baseURL,

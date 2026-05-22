@@ -70,6 +70,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS ai_provider_configs (
     id TEXT PRIMARY KEY,
     usage TEXT NOT NULL CHECK (usage IN ('generation', 'embedding')),
+    name TEXT,
     providerId TEXT NOT NULL,
     type TEXT NOT NULL,
     baseUrl TEXT NOT NULL,

@@ -333,6 +333,10 @@ export function isValidHttpBaseURL(value: string): boolean {
   return parseAndNormalizeHttpBaseURL(value).ok
 }
 
+export function formatInternalModelName(providerId: string, model: string): string {
+  return `${providerId}/${model}`
+}
+
 export function normalizeProvider(provider: AiProviderDraft): AiProviderDraft {
   const type =
     provider.type === 'anthropic'
@@ -341,11 +345,14 @@ export function normalizeProvider(provider: AiProviderDraft): AiProviderDraft {
         ? 'openrouter'
         : 'openai'
 
+  const normalizedProviderId =
+    provider.providerId.trim() ||
+    (type === 'anthropic' ? 'anthropic' : type === 'openrouter' ? 'openrouter' : 'openai')
+
   return {
     id: provider.id,
-    providerId:
-      provider.providerId.trim() ||
-      (type === 'anthropic' ? 'anthropic' : type === 'openrouter' ? 'openrouter' : 'openai'),
+    name: provider.name?.trim() || null,
+    providerId: normalizedProviderId,
     type,
     baseURL: provider.baseURL.trim() || AI_PROVIDER_DEFAULT_BASE_URLS[type],
     model: provider.model.trim(),
@@ -371,12 +378,15 @@ export function createProviderDraft(
     : DEFAULT_PROVIDER_OPTIONS[0]
 ): AiProviderDraft {
   const type = option.type
+  const providerId = option.value
+  const model = defaultModelForProvider(kind, type)
   return {
     id: `local-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    providerId: option.value,
+    name: null,
+    providerId,
     type,
     baseURL: option.apiBaseURL || AI_PROVIDER_DEFAULT_BASE_URLS[type],
-    model: defaultModelForProvider(kind, type),
+    model,
     apiKeyId: null,
   }
 }
@@ -421,6 +431,7 @@ export function serializeAiDraft(draft: AiDraftState): string {
   return JSON.stringify({
     providers: draft.providers.map((provider) => ({
       id: provider.id,
+      name: provider.name,
       providerId: provider.providerId,
       type: provider.type,
       baseURL: provider.baseURL,
