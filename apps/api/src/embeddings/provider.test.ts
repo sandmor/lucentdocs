@@ -40,6 +40,7 @@ function createAiSettingsServiceMock(): AiSettingsService {
     }),
     resolveApiKeyForBaseURL: async () => null,
     resolveApiKeyById: async () => null,
+    resolveProviderByConfigId: async () => null,
   }
 }
 

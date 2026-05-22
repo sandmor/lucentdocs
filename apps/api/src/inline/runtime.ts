@@ -1094,7 +1094,10 @@ export class InlineRuntime {
         return
       }
 
-      const model = await getLanguageModel()
+      const model = await getLanguageModel({
+        projectId: input.projectId,
+        documentId: input.documentId,
+      })
       const runtimeLimits = configManager.getConfig().limits
 
       if (input.mode === 'continue') {

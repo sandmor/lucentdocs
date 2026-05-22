@@ -2,6 +2,7 @@ import type { ProjectsService } from './projects.service.js'
 import type { DocumentsService } from './documents.service.js'
 import type { ChatsService } from './chats.service.js'
 import type { AiSettingsService } from './aiSettings.service.js'
+import type { AiModelSelectionService } from './aiModelSelection.service.js'
 import type { EmbeddingIndexService } from './embeddingIndex.service.js'
 import type { AuthService } from './auth.service.js'
 import type { IndexingSettingsService } from './indexingSettings.service.js'
@@ -11,6 +12,7 @@ export interface ServiceSet {
   documents: DocumentsService
   chats: ChatsService
   aiSettings: AiSettingsService
+  aiModelSelection: AiModelSelectionService
   indexingSettings: IndexingSettingsService
   embeddingIndex: EmbeddingIndexService
   auth: AuthService

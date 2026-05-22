@@ -188,7 +188,7 @@ export class GenerationEngine {
       )
       assertPromptProtocolMode(rendered.definition, 'chat')
 
-      const model = await getLanguageModel()
+      const model = await getLanguageModel({ projectId: scope.projectId })
       const modelMessages = await convertToModelMessages(toModelMessages(baseMessages))
       const runtimeLimits = configManager.getConfig().limits
 

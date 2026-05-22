@@ -70,6 +70,12 @@ export {
   indexingStrategyScopeTypeSchema,
   describeIndexingStrategy,
 } from './indexing-strategy.js'
+export type { AiModelSelectionScopeType, ResolvedAiModelSelection } from './ai-model-selection.js'
+export {
+  AI_MODEL_SELECTION_SCOPE_TYPES,
+  aiModelSelectionScopeTypeSchema,
+  resolvedAiModelSelectionSchema,
+} from './ai-model-selection.js'
 export type { ParsedBaseURLResult } from './ai-provider.js'
 export {
   AI_PROVIDER_DEFAULT_BASE_URLS,

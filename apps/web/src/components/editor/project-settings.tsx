@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Field, FieldContent, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
+import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 import { trpc } from '@/lib/trpc'
 
 interface ProjectSettings {
@@ -17,6 +18,8 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
   const meQuery = trpc.auth.me.useQuery()
   const projectQuery = trpc.projects.get.useQuery({ id: projectId })
   const query = trpc.indexing.getProject.useQuery({ projectId })
+  const aiModelQuery = trpc.aiModelSelection.getProject.useQuery({ projectId })
+  const aiProvidersQuery = trpc.aiModelSelection.availableProviders.useQuery()
   const [ownerEmail, setOwnerEmail] = useState('')
 
   const isCurrentUserOwner = meQuery.data?.id === projectQuery.data?.ownerUserId
@@ -39,6 +42,21 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
     },
     onError: (error) => {
       toast.error('Failed to update project indexing strategy', {
+        description: error.message,
+      })
+    },
+  })
+
+  const aiModelMutation = trpc.aiModelSelection.updateProject.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.aiModelSelection.getProject.invalidate({ projectId }),
+        utils.aiModelSelection.getDocument.invalidate(),
+      ])
+      toast.success('Project AI model updated')
+    },
+    onError: (error) => {
+      toast.error('Failed to update project AI model', {
         description: error.message,
       })
     },
@@ -117,6 +135,38 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
               </div>
             </form>
           ) : null}
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-visible">
+        <CardHeader>
+          <CardTitle>Project AI model</CardTitle>
+          <CardDescription>
+            Configure the default generation model for documents in this project.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {aiModelQuery.isLoading ||
+          !aiModelQuery.data ||
+          aiProvidersQuery.isLoading ||
+          !aiProvidersQuery.data ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
+              <Loader2 className="size-4 animate-spin" />
+              Loading settings…
+            </div>
+          ) : (
+            <AiModelSelectionForm
+              allowInherit
+              compact
+              directSelection={aiModelQuery.data.project?.providerConfigId ?? null}
+              resolvedProviderConfigId={aiModelQuery.data.resolved.providerConfigId}
+              resolvedScopeType={aiModelQuery.data.resolved.scopeType}
+              availableProviders={aiProvidersQuery.data}
+              isSaving={aiModelMutation.isPending}
+              saveLabel="Save project override"
+              onSave={(providerConfigId) => aiModelMutation.mutate({ projectId, providerConfigId })}
+            />
+          )}
         </CardContent>
       </Card>
 

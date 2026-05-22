@@ -169,6 +169,14 @@ const SCHEMA = `
     PRIMARY KEY (scopeType, scopeId)
   );
 
+  CREATE TABLE IF NOT EXISTS ai_model_selection_settings (
+    scopeType TEXT NOT NULL CHECK (scopeType IN ('global', 'user', 'project', 'document')),
+    scopeId TEXT NOT NULL,
+    providerConfigId TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    PRIMARY KEY (scopeType, scopeId)
+  );
+
   CREATE TABLE IF NOT EXISTS document_embeddings (
     vectorKey TEXT PRIMARY KEY,
     documentId TEXT NOT NULL,

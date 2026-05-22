@@ -95,6 +95,7 @@ export interface AiSettingsService {
   resolveRuntimeSelection(usage: AiProviderUsage): Promise<RuntimeProviderSelection>
   resolveApiKeyForBaseURL(baseURL: string): Promise<string | null>
   resolveApiKeyById(id: string): Promise<string | null>
+  resolveProviderByConfigId(configId: string): Promise<RuntimeProviderSelection | null>
 }
 
 function normalizeModel(model: string): string {
@@ -693,6 +694,44 @@ export function createAiSettingsService(
     async resolveApiKeyById(id: string): Promise<string | null> {
       const row = await repos.aiSettings.findApiKeyById(id)
       return row?.apiKey ?? null
+    },
+
+    async resolveProviderByConfigId(configId: string): Promise<RuntimeProviderSelection | null> {
+      const providers = await repos.aiSettings.listProviderConfigs('generation')
+      const provider = providers.find((p) => p.id === configId)
+      if (!provider) return null
+
+      const keyRows = (await repos.aiSettings.listApiKeys()).filter((row) =>
+        isSameBaseURL(row.baseURL, provider.baseURL)
+      )
+
+      let selectedKey: AiApiKeyEntity | undefined
+      if (provider.apiKeyId) {
+        selectedKey = keyRows.find((row) => row.id === provider.apiKeyId)
+      }
+      if (!selectedKey) {
+        selectedKey = keyRows.find((row) => row.isDefault) ?? keyRows[0]
+      }
+
+      if (!selectedKey) {
+        return {
+          providerConfigId: provider.id,
+          providerId: provider.providerId,
+          type: provider.type,
+          baseURL: provider.baseURL,
+          model: provider.model,
+          apiKey: '',
+        }
+      }
+
+      return {
+        providerConfigId: provider.id,
+        providerId: provider.providerId,
+        type: provider.type,
+        baseURL: provider.baseURL,
+        model: provider.model,
+        apiKey: selectedKey.apiKey,
+      }
     },
   }
 }

@@ -4,6 +4,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { AiModelSourceType } from '@lucentdocs/shared'
 import type { AiSettingsService } from '../core/services/aiSettings.service.js'
+import type { AiModelSelectionService } from '../core/services/aiModelSelection.service.js'
 import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
 
 export interface AiConfig {
@@ -21,13 +22,33 @@ interface ResolvedProvider {
   config: AiConfig
 }
 
+export interface AiModelRuntimeScope {
+  documentId?: string
+  projectId?: string
+}
+
+interface RuntimeProviderSelection {
+  providerConfigId: string
+  providerId: string
+  type: AiModelSourceType
+  baseURL: string
+  model: string
+  apiKey: string
+}
+
 // Cached across requests until configuration changes, so repeated generations do
 // not rebuild SDK clients on every call.
-let providerPromise: Promise<ResolvedProvider> | null = null
+const providerPromises = new Map<string, Promise<ResolvedProvider>>()
 let aiSettingsService: AiSettingsService | null = null
+let aiModelSelectionService: AiModelSelectionService | null = null
 
 export function configureAiProvider(service: AiSettingsService): void {
   aiSettingsService = service
+  resetClient()
+}
+
+export function configureAiModelSelection(service: AiModelSelectionService): void {
+  aiModelSelectionService = service
   resetClient()
 }
 
@@ -38,8 +59,14 @@ function getAiSettingsService(): AiSettingsService {
   return aiSettingsService
 }
 
-async function resolveRuntimeConfig(): Promise<AiConfig> {
-  const selection = await getAiSettingsService().resolveRuntimeSelection('generation')
+function getAiModelSelectionService(): AiModelSelectionService {
+  if (!aiModelSelectionService) {
+    throw new Error('AI model selection service is not configured.')
+  }
+  return aiModelSelectionService
+}
+
+function toAiConfig(selection: RuntimeProviderSelection): AiConfig {
   const openaiDefault = normalizeBaseURL(AI_PROVIDER_DEFAULT_BASE_URLS.openai)
   const sourceBaseURL = normalizeBaseURL(selection.baseURL)
 
@@ -63,61 +90,124 @@ async function resolveRuntimeConfig(): Promise<AiConfig> {
   }
 }
 
-async function getProvider(): Promise<ResolvedProvider> {
-  if (!providerPromise) {
-    const config = await resolveRuntimeConfig()
+async function resolveConfiguredProviderById(
+  providerConfigId: string
+): Promise<RuntimeProviderSelection> {
+  const provider = await getAiSettingsService().resolveProviderByConfigId(providerConfigId)
+  if (!provider) {
+    throw new Error(`Resolved provider config ${providerConfigId} is no longer available.`)
+  }
+  return provider
+}
 
-    const source = config.source
-    const requiresApiKey = config.provider !== 'openai-compatible'
-    if (requiresApiKey && !config.apiKey) {
-      throw new Error('Missing API key for the active provider configuration.')
+async function resolveProviderSelection(
+  scope?: AiModelRuntimeScope
+): Promise<RuntimeProviderSelection> {
+  if (scope?.documentId) {
+    const resolved = await getAiModelSelectionService().resolveForDocument(
+      scope.documentId,
+      scope.projectId
+    )
+    if (!resolved) {
+      throw new Error(`Failed to resolve AI model selection for document ${scope.documentId}.`)
     }
+    return resolveConfiguredProviderById(resolved.providerConfigId)
+  }
 
-    providerPromise = Promise.resolve(
-      config.provider === 'anthropic'
+  if (scope?.projectId) {
+    const resolved = await getAiModelSelectionService().resolveForProject(scope.projectId)
+    if (!resolved) {
+      throw new Error(`Failed to resolve AI model selection for project ${scope.projectId}.`)
+    }
+    return resolveConfiguredProviderById(resolved.providerConfigId)
+  }
+
+  const global = await getAiModelSelectionService().getGlobal()
+  return resolveConfiguredProviderById(global.providerConfigId)
+}
+
+function buildProviderCacheKey(config: AiConfig, providerConfigId: string): string {
+  return [
+    providerConfigId,
+    config.provider,
+    config.source.type,
+    config.source.baseURL,
+    config.source.model,
+  ].join('|')
+}
+
+async function resolveProviderConfig(scope?: AiModelRuntimeScope): Promise<{
+  providerConfigId: string
+  config: AiConfig
+}> {
+  const selection = await resolveProviderSelection(scope)
+  return { providerConfigId: selection.providerConfigId, config: toAiConfig(selection) }
+}
+
+async function getProvider(scope?: AiModelRuntimeScope): Promise<ResolvedProvider> {
+  const { providerConfigId, config } = await resolveProviderConfig(scope)
+  const cacheKey = buildProviderCacheKey(config, providerConfigId)
+
+  const cached = providerPromises.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+
+  const source = config.source
+  const requiresApiKey = config.provider !== 'openai-compatible'
+  if (requiresApiKey && !config.apiKey) {
+    throw new Error('Missing API key for the active provider configuration.')
+  }
+
+  const created = Promise.resolve(
+    config.provider === 'anthropic'
+      ? {
+          config,
+          model: createAnthropic({
+            apiKey: config.apiKey,
+            baseURL: source.baseURL,
+          })(source.model),
+        }
+      : config.provider === 'openrouter'
         ? {
             config,
-            model: createAnthropic({
+            model: createOpenAICompatible({
+              name: 'openrouter',
               apiKey: config.apiKey,
               baseURL: source.baseURL,
             })(source.model),
           }
-        : config.provider === 'openrouter'
+        : config.provider === 'openai-compatible'
           ? {
               config,
               model: createOpenAICompatible({
-                name: 'openrouter',
+                name: 'openai-compatible',
+                ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+                baseURL: source.baseURL,
+              })(source.model),
+            }
+          : {
+              config,
+              model: createOpenAI({
                 apiKey: config.apiKey,
                 baseURL: source.baseURL,
               })(source.model),
             }
-          : config.provider === 'openai-compatible'
-            ? {
-                config,
-                model: createOpenAICompatible({
-                  name: 'openai-compatible',
-                  ...(config.apiKey ? { apiKey: config.apiKey } : {}),
-                  baseURL: source.baseURL,
-                })(source.model),
-              }
-            : {
-                config,
-                model: createOpenAI({
-                  apiKey: config.apiKey,
-                  baseURL: source.baseURL,
-                })(source.model),
-              }
-    )
-  }
-  return providerPromise!
+  ).catch((error) => {
+    providerPromises.delete(cacheKey)
+    throw error
+  })
+
+  providerPromises.set(cacheKey, created)
+  return created
 }
 
-export async function getLanguageModel(): Promise<LanguageModel> {
-  const { model } = await getProvider()
+export async function getLanguageModel(scope?: AiModelRuntimeScope): Promise<LanguageModel> {
+  const { model } = await getProvider(scope)
   return model
 }
 
 /** Invalidate the client so the next call picks up updated config values. */
 export function resetClient(): void {
-  providerPromise = null
+  providerPromises.clear()
 }

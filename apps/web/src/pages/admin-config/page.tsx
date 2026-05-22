@@ -22,6 +22,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
+import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 
 import type {
   AiDraftState,
@@ -77,11 +78,13 @@ export function AdminConfigPage() {
 
   const configQuery = trpc.config.get.useQuery()
   const globalIndexingQuery = trpc.indexing.getGlobal.useQuery()
+  const globalAiModelQuery = trpc.aiModelSelection.getGlobal.useQuery()
   const modelCatalogQuery = trpc.config.modelCatalog.useQuery()
   const aiSettingsQuery = trpc.config.aiSettings.useQuery()
 
   const updateMutation = trpc.config.update.useMutation()
   const updateGlobalIndexingMutation = trpc.indexing.updateGlobal.useMutation()
+  const updateGlobalAiModelMutation = trpc.aiModelSelection.updateGlobal.useMutation()
   const updateProvidersMutation = trpc.config.updateProviders.useMutation()
   const createAiKeyMutation = trpc.config.createAiApiKey.useMutation()
   const updateAiKeyMutation = trpc.config.updateAiApiKey.useMutation()
@@ -578,7 +581,7 @@ export function AdminConfigPage() {
     ])
   }, [embeddingDraft, generationDraft])
 
-  if (configQuery.isLoading || aiSettingsQuery.isLoading) {
+  if (configQuery.isLoading || aiSettingsQuery.isLoading || globalAiModelQuery.isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-muted-foreground">Loading configuration…</p>
@@ -591,6 +594,8 @@ export function AdminConfigPage() {
     !configQuery.data ||
     aiSettingsQuery.error ||
     !aiSettingsQuery.data ||
+    globalAiModelQuery.error ||
+    !globalAiModelQuery.data ||
     !generationDraft ||
     !embeddingDraft
   ) {
@@ -599,6 +604,7 @@ export function AdminConfigPage() {
         <p className="text-destructive">
           {configQuery.error?.message ??
             aiSettingsQuery.error?.message ??
+            globalAiModelQuery.error?.message ??
             'Unable to load configuration'}
         </p>
         <Button variant="outline" onClick={() => navigate('/')}>
@@ -908,6 +914,53 @@ export function AdminConfigPage() {
               ) : (
                 <div className="text-muted-foreground text-sm">Loading indexing settings…</div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Global AI model</CardTitle>
+              <CardDescription>
+                Sets the default generation model inherited by users, projects, and documents.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AiModelSelectionForm
+                allowInherit={false}
+                directSelection={globalAiModelQuery.data.providerConfigId}
+                resolvedProviderConfigId={globalAiModelQuery.data.providerConfigId}
+                resolvedScopeType="global"
+                availableProviders={aiSettingsQuery.data.generationProviders.map((p) => ({
+                  id: p.id,
+                  name: p.name,
+                  providerId: p.providerId,
+                  model: p.model,
+                }))}
+                isSaving={updateGlobalAiModelMutation.isPending}
+                saveLabel="Save global model"
+                onSave={(providerConfigId) => {
+                  if (!providerConfigId) return
+                  updateGlobalAiModelMutation.mutate(
+                    { providerConfigId },
+                    {
+                      onSuccess: async () => {
+                        await Promise.all([
+                          utils.aiModelSelection.getGlobal.invalidate(),
+                          utils.aiModelSelection.getUser.invalidate(),
+                          utils.aiModelSelection.getProject.invalidate(),
+                          utils.aiModelSelection.getDocument.invalidate(),
+                        ])
+                        toast.success('Global AI model updated')
+                      },
+                      onError: (error) => {
+                        toast.error('Failed to update global AI model', {
+                          description: error.message,
+                        })
+                      },
+                    }
+                  )
+                }}
+              />
             </CardContent>
           </Card>
 

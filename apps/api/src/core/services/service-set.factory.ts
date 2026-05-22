@@ -5,6 +5,7 @@ import { createProjectsService } from './projects.service.js'
 import { createDocumentsService } from './documents.service.js'
 import { createChatsService } from './chats.service.js'
 import { createAiSettingsService } from './aiSettings.service.js'
+import { createAiModelSelectionService } from './aiModelSelection.service.js'
 import { createIndexingSettingsService } from './indexingSettings.service.js'
 import {
   createEmbeddingIndexService,
@@ -21,6 +22,7 @@ export function createCoreServiceSet(dependencies: {
   getEmbeddingRuntimeConfig?: () => EmbeddingIndexRuntimeConfig
 }): ServiceSet {
   const aiSettings = createAiSettingsService(dependencies.repositories, dependencies.transaction)
+  const aiModelSelection = createAiModelSelectionService(dependencies.repositories)
   const indexingSettings = createIndexingSettingsService(dependencies.repositories)
   const embeddingIndex = createEmbeddingIndexService(
     dependencies.repositories,
@@ -58,6 +60,7 @@ export function createCoreServiceSet(dependencies: {
     ),
     chats: createChatsService(dependencies.repositories),
     aiSettings,
+    aiModelSelection,
     indexingSettings,
     embeddingIndex,
     auth: createAuthService(dependencies.repositories, dependencies.transaction),

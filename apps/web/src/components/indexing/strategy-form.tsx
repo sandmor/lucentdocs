@@ -36,6 +36,7 @@ interface IndexingStrategyFormProps {
   onSave: (strategy: IndexingStrategy | null) => void
   saveLabel?: string
   compact?: boolean
+  modeLabel?: string
 }
 
 function scopeLabel(scopeType: IndexingStrategyScopeType): string {
@@ -184,6 +185,7 @@ export function IndexingStrategyForm({
   onSave,
   saveLabel = 'Save',
   compact = false,
+  modeLabel = 'Mode',
 }: IndexingStrategyFormProps) {
   const [draft, setDraft] = useState<DraftState>(() =>
     createDraft(directStrategy, resolvedStrategy, allowInherit)
@@ -263,7 +265,7 @@ export function IndexingStrategyForm({
 
       {allowInherit ? (
         <Field>
-          <FieldLabel htmlFor="strategy-mode">Mode</FieldLabel>
+          <FieldLabel htmlFor="strategy-mode">{modeLabel}</FieldLabel>
           <FieldContent>
             <Select
               value={draft.mode}

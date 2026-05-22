@@ -31,6 +31,7 @@ import {
 import type { IndexingStrategy, IndexingStrategyScopeType } from '@lucentdocs/shared'
 import { Loader2 } from 'lucide-react'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
+import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 import type { DeleteTarget, MarkdownRawHtmlMode, MoveTarget, RenameTarget } from './types'
 
 interface BrowserDialogsProps {
@@ -75,6 +76,13 @@ interface BrowserDialogsProps {
   onSaveDocumentSettings: (strategy: IndexingStrategy | null) => void
   isLoadingDocumentSettings: boolean
   isSavingDocumentSettings: boolean
+  documentAiModelDirectId: string | null
+  documentAiModelResolvedId: string | null
+  documentAiModelResolvedScopeType: IndexingStrategyScopeType | null
+  availableProviders: Array<{ id: string; name: string | null; providerId: string; model: string }>
+  onSaveDocumentAiModel: (providerConfigId: string | null) => void
+  isLoadingDocumentAiModel: boolean
+  isSavingDocumentAiModel: boolean
 
   importDialogOpen: boolean
   onImportDialogOpenChange: (open: boolean) => void
@@ -136,6 +144,13 @@ export function BrowserDialogs({
   onSaveDocumentSettings,
   isLoadingDocumentSettings,
   isSavingDocumentSettings,
+  documentAiModelDirectId,
+  documentAiModelResolvedId,
+  documentAiModelResolvedScopeType,
+  availableProviders,
+  onSaveDocumentAiModel,
+  isLoadingDocumentAiModel,
+  isSavingDocumentAiModel,
 
   importDialogOpen,
   onImportDialogOpenChange,
@@ -429,28 +444,61 @@ export function BrowserDialogs({
           <DialogHeader>
             <DialogTitle>Document settings</DialogTitle>
             <DialogDescription>
-              Configure how {documentSettingsTitle || 'this document'} is indexed.
+              Configure how {documentSettingsTitle || 'this document'} is indexed and which AI model
+              it uses.
             </DialogDescription>
           </DialogHeader>
 
-          {isLoadingDocumentSettings ||
-          !documentSettingsResolvedStrategy ||
-          !documentSettingsResolvedScopeType ? (
-            <div className="text-muted-foreground flex items-center gap-2 text-sm">
+          {isLoadingDocumentAiModel || isLoadingDocumentSettings ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm py-4">
               <Loader2 className="size-4 animate-spin" />
-              Loading settings…
+              Loading document settings…
             </div>
           ) : (
-            <IndexingStrategyForm
-              allowInherit
-              compact
-              directStrategy={documentSettingsDirectStrategy}
-              resolvedStrategy={documentSettingsResolvedStrategy}
-              resolvedScopeType={documentSettingsResolvedScopeType}
-              isSaving={isSavingDocumentSettings}
-              saveLabel="Save document override"
-              onSave={onSaveDocumentSettings}
-            />
+            <div className="space-y-8">
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold">AI model</h3>
+                {documentAiModelResolvedId && documentAiModelResolvedScopeType ? (
+                  <AiModelSelectionForm
+                    allowInherit
+                    compact
+                    directSelection={documentAiModelDirectId}
+                    resolvedProviderConfigId={documentAiModelResolvedId}
+                    resolvedScopeType={documentAiModelResolvedScopeType}
+                    availableProviders={availableProviders}
+                    isSaving={isSavingDocumentAiModel}
+                    saveLabel="Save document override"
+                    onSave={onSaveDocumentAiModel}
+                    modeLabel="AI model mode"
+                  />
+                ) : (
+                  <div className="text-muted-foreground text-sm">
+                    Unable to load AI model settings.
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold">Indexing strategy</h3>
+                {documentSettingsResolvedStrategy && documentSettingsResolvedScopeType ? (
+                  <IndexingStrategyForm
+                    allowInherit
+                    compact
+                    directStrategy={documentSettingsDirectStrategy}
+                    resolvedStrategy={documentSettingsResolvedStrategy}
+                    resolvedScopeType={documentSettingsResolvedScopeType}
+                    isSaving={isSavingDocumentSettings}
+                    saveLabel="Save document override"
+                    onSave={onSaveDocumentSettings}
+                    modeLabel="Indexing mode"
+                  />
+                ) : (
+                  <div className="text-muted-foreground text-sm">
+                    Unable to load indexing settings.
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>

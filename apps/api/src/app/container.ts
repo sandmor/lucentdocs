@@ -4,7 +4,7 @@ import type { TransactionPort } from '../core/ports/transaction.port.js'
 import { createYjsRuntime, type YjsRuntime, type YjsRuntimeConfig } from '../yjs/runtime.js'
 import { createChatRuntime, type ChatRuntime } from '../chat/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
-import { configureAiProvider } from '../ai/index.js'
+import { configureAiProvider, configureAiModelSelection } from '../ai/index.js'
 import { configureEmbeddingProvider } from '../embeddings/provider.js'
 import {
   createDocumentImportJobHandler,
@@ -84,6 +84,7 @@ export async function createContainer(
 
   await adapter.services.aiSettings.initializeDefaults({ env: process.env })
   configureAiProvider(adapter.services.aiSettings)
+  configureAiModelSelection(adapter.services.aiModelSelection)
   configureEmbeddingProvider(adapter.services.aiSettings)
 
   const appConfig = configManager.getConfig()

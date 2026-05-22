@@ -425,6 +425,18 @@ export function useDocumentBrowser({
     }
   )
 
+  const documentAiModelQuery = trpc.aiModelSelection.getDocument.useQuery(
+    {
+      projectId,
+      id: settingsDocumentId ?? '',
+    },
+    {
+      enabled: settingsDocumentId !== null,
+    }
+  )
+
+  const aiProvidersQuery = trpc.aiModelSelection.availableProviders.useQuery()
+
   const updateDocumentSettingsMutation = trpc.indexing.updateDocument.useMutation({
     onSuccess: async (_result, variables) => {
       await Promise.all([
@@ -436,6 +448,22 @@ export function useDocumentBrowser({
     },
     onError: (error) => {
       toast.error('Failed to update document indexing strategy', {
+        description: error.message,
+      })
+    },
+  })
+
+  const updateDocumentAiModelMutation = trpc.aiModelSelection.updateDocument.useMutation({
+    onSuccess: async (_result, variables) => {
+      await Promise.all([
+        utils.aiModelSelection.getDocument.invalidate({ projectId, id: variables.id }),
+        utils.aiModelSelection.getProject.invalidate({ projectId }),
+      ])
+      toast.success('Document AI model updated')
+      setSettingsDocumentId(null)
+    },
+    onError: (error) => {
+      toast.error('Failed to update document AI model', {
         description: error.message,
       })
     },
@@ -739,6 +767,19 @@ export function useDocumentBrowser({
       })
     },
     [projectId, settingsDocumentId, updateDocumentSettingsMutation]
+  )
+
+  const handleSaveDocumentAiModel = useCallback(
+    (providerConfigId: string | null) => {
+      if (!settingsDocumentId) return
+
+      updateDocumentAiModelMutation.mutate({
+        projectId,
+        id: settingsDocumentId,
+        providerConfigId,
+      })
+    },
+    [projectId, settingsDocumentId, updateDocumentAiModelMutation]
   )
 
   const handleExportDocument = useCallback(
@@ -1054,6 +1095,11 @@ export function useDocumentBrowser({
     isLoadingDocumentSettings: documentSettingsQuery.isLoading,
     saveDocumentSettings: handleSaveDocumentSettings,
     isSavingDocumentSettings: updateDocumentSettingsMutation.isPending,
+    documentAiModel: documentAiModelQuery.data,
+    isLoadingDocumentAiModel: documentAiModelQuery.isLoading,
+    saveDocumentAiModel: handleSaveDocumentAiModel,
+    isSavingDocumentAiModel: updateDocumentAiModelMutation.isPending,
+    aiProviders: aiProvidersQuery.data,
     isImporting:
       importMutation.isPending || importSplitMutation.isPending || importProgress.isRunning,
     isCreatingDocument: createMutation.isPending,

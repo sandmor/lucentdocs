@@ -8,6 +8,7 @@ import { chatRouter } from './routers/chat.js'
 import { inlineRouter } from './routers/inline.js'
 import { authRouter } from './routers/auth.js'
 import { indexingRouter } from './routers/indexing.js'
+import { aiModelSelectionRouter } from './routers/aiModelSelection.js'
 
 export const appRouter = router({
   projects: projectsRouter,
@@ -19,6 +20,7 @@ export const appRouter = router({
   inline: inlineRouter,
   auth: authRouter,
   indexing: indexingRouter,
+  aiModelSelection: aiModelSelectionRouter,
 })
 
 export type AppRouter = typeof appRouter

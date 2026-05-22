@@ -144,6 +144,13 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
           onSaveDocumentSettings={browser.saveDocumentSettings}
           isLoadingDocumentSettings={browser.isLoadingDocumentSettings}
           isSavingDocumentSettings={browser.isSavingDocumentSettings}
+          documentAiModelDirectId={browser.documentAiModel?.document?.providerConfigId ?? null}
+          documentAiModelResolvedId={browser.documentAiModel?.resolved.providerConfigId ?? null}
+          documentAiModelResolvedScopeType={browser.documentAiModel?.resolved.scopeType ?? null}
+          availableProviders={browser.aiProviders ?? []}
+          onSaveDocumentAiModel={browser.saveDocumentAiModel}
+          isLoadingDocumentAiModel={browser.isLoadingDocumentAiModel}
+          isSavingDocumentAiModel={browser.isSavingDocumentAiModel}
         />
       </section>
     </DndContext>
