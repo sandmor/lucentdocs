@@ -48,7 +48,6 @@ export interface AiApiKeyRecord {
 
 export interface AiSettingsSnapshot {
   generationProviders: AiProviderConfigRecord[]
-  activeGenerationProviderId: string | null
   embeddingProviders: AiProviderConfigRecord[]
   activeEmbeddingProviderId: string | null
   apiKeys: AiApiKeyRecord[]
@@ -77,7 +76,7 @@ export interface AiSettingsService {
       model: string
       apiKeyId: string | null
     }>
-    activeProviderId: string | null
+    activeProviderId?: string | null
   }): Promise<AiSettingsSnapshot>
   createApiKey(input: {
     baseURL: string
@@ -295,12 +294,10 @@ export function createAiSettingsService(
   }
 
   async function readRuntimeSelections(): Promise<{
-    activeGenerationProviderId: string | null
     activeEmbeddingProviderId: string | null
   }> {
     const runtime = await repos.aiSettings.readRuntimeSettings()
     return {
-      activeGenerationProviderId: runtime?.activeGenerationProviderId ?? null,
       activeEmbeddingProviderId: runtime?.activeEmbeddingProviderId ?? null,
     }
   }
@@ -314,7 +311,6 @@ export function createAiSettingsService(
         let generationProviders = await repos.aiSettings.listProviderConfigs('generation')
         let embeddingProviders = await repos.aiSettings.listProviderConfigs('embedding')
         const apiKeys = await repos.aiSettings.listApiKeys()
-        const runtime = await readRuntimeSelections()
         const now = Date.now()
 
         let bootstrapApiKeyId = selectApiKeyIdForBaseURL(apiKeys, bootstrapDefaults.baseURL)
@@ -384,17 +380,33 @@ export function createAiSettingsService(
           embeddingProviders = [embeddingProvider]
         }
 
+        const runtime = await readRuntimeSelections()
         await repos.aiSettings.upsertRuntimeSettings({
-          activeGenerationProviderId: selectActiveProviderId(
-            generationProviders,
-            runtime.activeGenerationProviderId
-          ),
           activeEmbeddingProviderId: selectActiveProviderId(
             embeddingProviders,
             runtime.activeEmbeddingProviderId
           ),
           updatedAt: now,
         })
+
+        const globalModelSelection = await repos.aiModelSelection.get('global', 'global')
+        const availableGenerationIds = new Set(generationProviders.map((provider) => provider.id))
+        if (
+          !globalModelSelection ||
+          !availableGenerationIds.has(globalModelSelection.providerConfigId)
+        ) {
+          const fallbackGenerationProviderId = generationProviders[0]?.id ?? null
+          if (!fallbackGenerationProviderId) {
+            throw new Error('No generation provider is configured.')
+          }
+
+          await repos.aiModelSelection.upsert({
+            scopeType: 'global',
+            scopeId: 'global',
+            providerConfigId: fallbackGenerationProviderId,
+            updatedAt: now,
+          })
+        }
       })
     },
 
@@ -421,10 +433,6 @@ export function createAiSettingsService(
           apiKeyId: resolveSnapshotApiKeyId(provider),
           sortOrder: provider.sortOrder,
         })),
-        activeGenerationProviderId: selectActiveProviderId(
-          generationProviders,
-          runtime.activeGenerationProviderId
-        ),
         embeddingProviders: embeddingProviders.map((provider) => ({
           id: provider.id,
           usage: provider.usage,
@@ -508,23 +516,36 @@ export function createAiSettingsService(
           await repos.aiSettings.upsertProviderConfig(row)
         }
 
-        const currentRuntime = await readRuntimeSelections()
-        const requestedActive = input.activeProviderId
-        const nextActiveProviderId = nextRows.some((row) => row.id === requestedActive)
-          ? requestedActive
-          : (nextRows[0]?.id ?? null)
+        if (input.usage === 'embedding') {
+          const requestedActive = input.activeProviderId ?? null
+          const nextActiveProviderId = nextRows.some((row) => row.id === requestedActive)
+            ? requestedActive
+            : (nextRows[0]?.id ?? null)
 
-        await repos.aiSettings.upsertRuntimeSettings({
-          activeGenerationProviderId:
-            input.usage === 'generation'
-              ? nextActiveProviderId
-              : currentRuntime.activeGenerationProviderId,
-          activeEmbeddingProviderId:
-            input.usage === 'embedding'
-              ? nextActiveProviderId
-              : currentRuntime.activeEmbeddingProviderId,
-          updatedAt: now,
-        })
+          await repos.aiSettings.upsertRuntimeSettings({
+            activeEmbeddingProviderId: nextActiveProviderId,
+            updatedAt: now,
+          })
+        } else {
+          const globalModelSelection = await repos.aiModelSelection.get('global', 'global')
+          const availableGenerationIds = new Set(nextRows.map((row) => row.id))
+          if (
+            !globalModelSelection ||
+            !availableGenerationIds.has(globalModelSelection.providerConfigId)
+          ) {
+            const fallbackGenerationProviderId = nextRows[0]?.id ?? null
+            if (!fallbackGenerationProviderId) {
+              throw new Error('No generation provider is configured.')
+            }
+
+            await repos.aiModelSelection.upsert({
+              scopeType: 'global',
+              scopeId: 'global',
+              providerConfigId: fallbackGenerationProviderId,
+              updatedAt: now,
+            })
+          }
+        }
       })
 
       return this.getSnapshot()
@@ -634,13 +655,13 @@ export function createAiSettingsService(
     },
 
     async resolveRuntimeSelection(usage: AiProviderUsage): Promise<RuntimeProviderSelection> {
+      if (usage === 'generation') {
+        throw new Error('Generation runtime selection is resolved via AI model selection settings.')
+      }
+
       const snapshot = await this.getSnapshot()
-      const providers =
-        usage === 'embedding' ? snapshot.embeddingProviders : snapshot.generationProviders
-      const activeProviderId =
-        usage === 'embedding'
-          ? snapshot.activeEmbeddingProviderId
-          : snapshot.activeGenerationProviderId
+      const providers = snapshot.embeddingProviders
+      const activeProviderId = snapshot.activeEmbeddingProviderId
       const active = providers.find((provider) => provider.id === activeProviderId) ?? providers[0]
 
       if (!active) {

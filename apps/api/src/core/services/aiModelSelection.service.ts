@@ -102,12 +102,7 @@ export function createAiModelSelectionService(repos: RepositorySet): AiModelSele
       }
     }
 
-    const runtime = await repos.aiSettings.readRuntimeSettings()
-    const runtimeProviderId = runtime?.activeGenerationProviderId ?? null
-    const fallbackProviderId =
-      (runtimeProviderId && availableIds.has(runtimeProviderId) ? runtimeProviderId : null) ??
-      availableProviders[0]?.id ??
-      null
+    const fallbackProviderId = availableProviders[0]?.id ?? null
 
     if (!fallbackProviderId) {
       throw new Error('No global AI model selection is configured.')

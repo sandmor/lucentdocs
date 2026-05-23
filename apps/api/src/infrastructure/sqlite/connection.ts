@@ -118,10 +118,8 @@ const SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS ai_runtime_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    activeGenerationProviderId TEXT,
     activeEmbeddingProviderId TEXT,
     updatedAt INTEGER NOT NULL,
-    FOREIGN KEY (activeGenerationProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL,
     FOREIGN KEY (activeEmbeddingProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL
   );
 

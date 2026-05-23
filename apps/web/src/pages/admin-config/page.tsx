@@ -23,7 +23,6 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
-import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 
 import type {
   AiDraftState,
@@ -107,11 +106,11 @@ export function AdminConfigPage() {
 
   // Sync AI draft from server
   useEffect(() => {
-    if (!aiSettingsQuery.data) return
+    if (!aiSettingsQuery.data || !globalAiModelQuery.data) return
 
     const incomingGeneration: AiDraftState = {
       providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
-      activeProviderId: aiSettingsQuery.data.activeGenerationProviderId,
+      activeProviderId: globalAiModelQuery.data.providerConfigId,
     }
     const incomingEmbedding: AiDraftState = {
       providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
@@ -123,7 +122,7 @@ export function AdminConfigPage() {
 
       const baseline = serializeAiDraft({
         providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
-        activeProviderId: aiSettingsQuery.data.activeGenerationProviderId,
+        activeProviderId: globalAiModelQuery.data.providerConfigId,
       })
 
       const currentSerialized = serializeAiDraft(current)
@@ -145,16 +144,16 @@ export function AdminConfigPage() {
 
       return isDirty ? current : incomingEmbedding
     })
-  }, [aiSettingsQuery.data])
+  }, [aiSettingsQuery.data, globalAiModelQuery.data])
 
   // Dirty detection
   const generationBaseline = useMemo(() => {
-    if (!aiSettingsQuery.data) return null
+    if (!aiSettingsQuery.data || !globalAiModelQuery.data) return null
     return serializeAiDraft({
       providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
-      activeProviderId: aiSettingsQuery.data.activeGenerationProviderId,
+      activeProviderId: globalAiModelQuery.data.providerConfigId,
     })
-  }, [aiSettingsQuery.data])
+  }, [aiSettingsQuery.data, globalAiModelQuery.data])
 
   const embeddingBaseline = useMemo(() => {
     if (!aiSettingsQuery.data) return null
@@ -216,7 +215,7 @@ export function AdminConfigPage() {
           }
         : {
             providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
-            activeProviderId: aiSettingsQuery.data.activeGenerationProviderId,
+            activeProviderId: globalAiModelQuery.data?.providerConfigId ?? null,
           }
 
     if (kind === 'embedding') {
@@ -243,12 +242,44 @@ export function AdminConfigPage() {
           model: provider.model,
           apiKeyId: provider.apiKeyId,
         })),
-        activeProviderId: draft.activeProviderId,
+        ...(kind === 'embedding' ? { activeProviderId: draft.activeProviderId } : {}),
       },
       {
         onSuccess: async () => {
-          await Promise.all([utils.config.aiSettings.invalidate(), utils.config.get.invalidate()])
-          toast.success(kind === 'embedding' ? 'Embedding providers saved' : 'AI providers saved')
+          try {
+            if (kind === 'generation') {
+              if (!draft.activeProviderId) {
+                toast.error('Select a global generation model before saving providers.')
+                return
+              }
+
+              await updateGlobalAiModelMutation.mutateAsync({
+                providerConfigId: draft.activeProviderId,
+              })
+              await Promise.all([
+                utils.config.aiSettings.invalidate(),
+                utils.config.get.invalidate(),
+                utils.aiModelSelection.getGlobal.invalidate(),
+                utils.aiModelSelection.getUser.invalidate(),
+                utils.aiModelSelection.getProject.invalidate(),
+                utils.aiModelSelection.getDocument.invalidate(),
+              ])
+              toast.success('AI providers saved')
+              return
+            }
+
+            await Promise.all([utils.config.aiSettings.invalidate(), utils.config.get.invalidate()])
+            toast.success('Embedding providers saved')
+          } catch (error) {
+            toast.error(
+              kind === 'embedding'
+                ? 'Failed to save embedding providers'
+                : 'Failed to save AI providers',
+              {
+                description: error instanceof Error ? error.message : 'Unknown error.',
+              }
+            )
+          }
         },
         onError: (error) => {
           toast.error(
@@ -657,6 +688,7 @@ export function AdminConfigPage() {
     isDirty: boolean
     isSaving: boolean
   }) => {
+    const showActiveControls = true
     const isGeneration = options.kind === 'generation'
 
     return (
@@ -668,8 +700,8 @@ export function AdminConfigPage() {
         <CardContent className="grid gap-6">
           {isGeneration && options.draft.providers.length > 0 && (
             <div className="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
-              <span className="text-sm font-medium shrink-0">Active model</span>
-              <div className="flex-1 min-w-0">
+              <span className="shrink-0 text-sm font-medium">Active model</span>
+              <div className="min-w-0 flex-1">
                 <Combobox
                   items={options.draft.providers}
                   itemToStringLabel={(item) =>
@@ -794,10 +826,13 @@ export function AdminConfigPage() {
               index={index}
               providerOptions={options.providerOptions}
               apiKeys={aiSettingsQuery.data.apiKeys}
-              isActive={options.draft.activeProviderId === entry.provider.id}
+              showActiveControls={showActiveControls}
+              isActive={showActiveControls && options.draft.activeProviderId === entry.provider.id}
               canRemove={options.draft.providers.length > 1}
               onUpdate={(id, patch) => updateProvider(options.kind, id, patch)}
-              onSetActive={(id) => setActiveProvider(options.kind, id)}
+              onSetActive={
+                showActiveControls ? (id) => setActiveProvider(options.kind, id) : undefined
+              }
               onRemove={(id) => removeProvider(options.kind, id)}
               onRefreshCatalog={(provider, refreshOptions) =>
                 void refreshSourceCatalog(options.kind, provider, refreshOptions)
@@ -911,53 +946,6 @@ export function AdminConfigPage() {
               ) : (
                 <div className="text-muted-foreground text-sm">Loading indexing settings…</div>
               )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Global AI model</CardTitle>
-              <CardDescription>
-                Sets the default generation model inherited by users, projects, and documents.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <AiModelSelectionForm
-                allowInherit={false}
-                directSelection={globalAiModelQuery.data.providerConfigId}
-                resolvedProviderConfigId={globalAiModelQuery.data.providerConfigId}
-                resolvedScopeType="global"
-                availableProviders={aiSettingsQuery.data.generationProviders.map((p) => ({
-                  id: p.id,
-                  name: p.name,
-                  providerId: p.providerId,
-                  model: p.model,
-                }))}
-                isSaving={updateGlobalAiModelMutation.isPending}
-                saveLabel="Save global model"
-                onSave={(providerConfigId) => {
-                  if (!providerConfigId) return
-                  updateGlobalAiModelMutation.mutate(
-                    { providerConfigId },
-                    {
-                      onSuccess: async () => {
-                        await Promise.all([
-                          utils.aiModelSelection.getGlobal.invalidate(),
-                          utils.aiModelSelection.getUser.invalidate(),
-                          utils.aiModelSelection.getProject.invalidate(),
-                          utils.aiModelSelection.getDocument.invalidate(),
-                        ])
-                        toast.success('Global AI model updated')
-                      },
-                      onError: (error) => {
-                        toast.error('Failed to update global AI model', {
-                          description: error.message,
-                        })
-                      },
-                    }
-                  )
-                }}
-              />
             </CardContent>
           </Card>
 

@@ -26,7 +26,6 @@ export interface AiApiKeyEntity {
 }
 
 export interface AiRuntimeSettingsEntity {
-  activeGenerationProviderId: string | null
   activeEmbeddingProviderId: string | null
   updatedAt: number
 }
@@ -58,7 +57,6 @@ export interface AiSettingsRepositoryPort {
   deleteProviderConfigsNotIn(usage: AiProviderUsage, ids: string[]): Promise<void>
   readRuntimeSettings(): Promise<AiRuntimeSettingsEntity | undefined>
   upsertRuntimeSettings(input: {
-    activeGenerationProviderId: string | null
     activeEmbeddingProviderId: string | null
     updatedAt: number
   }): Promise<void>

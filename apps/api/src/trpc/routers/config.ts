@@ -106,7 +106,7 @@ const aiProviderInputSchema = z.object({
 const updateProvidersInputSchema = z.object({
   usage: PROVIDER_USAGE_SCHEMA,
   providers: z.array(aiProviderInputSchema).min(1),
-  activeProviderId: z.string().nullable(),
+  activeProviderId: z.string().nullable().optional(),
 })
 
 const createApiKeyInputSchema = z.object({
@@ -163,7 +163,7 @@ export const configRouter = router({
           model: provider.model.trim(),
           apiKeyId: provider.apiKeyId,
         })),
-        activeProviderId: input.activeProviderId,
+        ...(input.usage === 'embedding' ? { activeProviderId: input.activeProviderId } : {}),
       })
 
       if (input.usage === 'generation') {

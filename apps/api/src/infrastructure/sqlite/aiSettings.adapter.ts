@@ -35,7 +35,6 @@ interface ApiKeyRow {
 }
 
 interface RuntimeRow {
-  activeGenerationProviderId: string | null
   activeEmbeddingProviderId: string | null
   updatedAt: number
 }
@@ -133,14 +132,13 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
 
   async readRuntimeSettings(): Promise<AiRuntimeSettingsEntity | undefined> {
     const row = this.connection.get<RuntimeRow>(
-      `SELECT activeGenerationProviderId, activeEmbeddingProviderId, updatedAt
+      `SELECT activeEmbeddingProviderId, updatedAt
        FROM ai_runtime_settings
        WHERE id = 1`,
       []
     )
     return row
       ? {
-          activeGenerationProviderId: row.activeGenerationProviderId,
           activeEmbeddingProviderId: row.activeEmbeddingProviderId,
           updatedAt: row.updatedAt,
         }
@@ -148,18 +146,16 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
   }
 
   async upsertRuntimeSettings(input: {
-    activeGenerationProviderId: string | null
     activeEmbeddingProviderId: string | null
     updatedAt: number
   }): Promise<void> {
     this.connection.run(
-      `INSERT INTO ai_runtime_settings (id, activeGenerationProviderId, activeEmbeddingProviderId, updatedAt)
-       VALUES (1, ?, ?, ?)
+      `INSERT INTO ai_runtime_settings (id, activeEmbeddingProviderId, updatedAt)
+       VALUES (1, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         activeGenerationProviderId = excluded.activeGenerationProviderId,
          activeEmbeddingProviderId = excluded.activeEmbeddingProviderId,
          updatedAt = excluded.updatedAt`,
-      [input.activeGenerationProviderId, input.activeEmbeddingProviderId, input.updatedAt]
+      [input.activeEmbeddingProviderId, input.updatedAt]
     )
   }
 

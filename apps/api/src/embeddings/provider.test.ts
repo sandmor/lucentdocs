@@ -13,7 +13,6 @@ function createAiSettingsServiceMock(): AiSettingsService {
     initializeDefaults: async () => {},
     getSnapshot: async () => ({
       generationProviders: [],
-      activeGenerationProviderId: null,
       embeddingProviders: [],
       activeEmbeddingProviderId: null,
       apiKeys: [],

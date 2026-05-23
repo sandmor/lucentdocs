@@ -44,10 +44,11 @@ interface ProviderCardProps {
   index: number
   providerOptions: ProviderOption[]
   apiKeys: AiApiKeySummary[]
+  showActiveControls: boolean
   isActive: boolean
   canRemove: boolean
   onUpdate: (id: string, patch: Partial<AiProviderDraft>) => void
-  onSetActive: (id: string) => void
+  onSetActive?: (id: string) => void
   onRemove: (id: string) => void
   onRefreshCatalog: (
     provider: AiProviderDraft,
@@ -61,6 +62,7 @@ export function ProviderCard({
   index,
   providerOptions,
   apiKeys,
+  showActiveControls,
   isActive,
   canRemove,
   onUpdate,
@@ -184,21 +186,23 @@ export function ProviderCard({
               {isEmbedding ? 'Refresh embedding models' : 'Refresh models'}
             </TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant={isActive ? 'secondary' : 'ghost'}
-                  size="icon-sm"
-                  onClick={() => onSetActive(provider.id)}
-                />
-              }
-            >
-              <Check />
-            </TooltipTrigger>
-            <TooltipContent>{isActive ? 'Active provider' : 'Set as active'}</TooltipContent>
-          </Tooltip>
+          {showActiveControls ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant={isActive ? 'secondary' : 'ghost'}
+                    size="icon-sm"
+                    onClick={() => onSetActive?.(provider.id)}
+                  />
+                }
+              >
+                <Check />
+              </TooltipTrigger>
+              <TooltipContent>{isActive ? 'Active provider' : 'Set as active'}</TooltipContent>
+            </Tooltip>
+          ) : null}
           <AlertDialog>
             <AlertDialogTrigger
               render={
