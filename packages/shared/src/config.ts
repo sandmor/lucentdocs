@@ -585,7 +585,7 @@ export const editableConfigSchema = z
       .number()
       .int()
       .min(limitsPromptExcerptCharsField.min ?? MIN_PROMPT_EXCERPT_CHARS)
-      .max(limitsPromptExcerptCharsField.max ?? 50_000),
+      .max(limitsPromptExcerptCharsField.max ?? 1_000_000_000),
   })
   .superRefine((value, context) => {
     if (value.maxPromptExcerptChars > value.maxContextChars) {
