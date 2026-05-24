@@ -867,7 +867,7 @@ export function EditorPage() {
   )
 
   const mainContent = (
-    <main className="flex-1 overflow-y-auto h-full">
+    <main className="relative flex-1 overflow-y-auto h-full">
       {!hasVisibleDocuments &&
         !hasDocumentSelection &&
         !documentsQuery.isLoading &&
@@ -937,7 +937,7 @@ export function EditorPage() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header */}
-      <header className="border-b px-3 sm:px-4 py-2 shrink-0">
+      <header className="border-b px-3 sm:px-4 py-2 shrink-0 relative z-50 bg-background">
         <div className="flex items-center gap-2 sm:gap-3">
           <Button variant="ghost" size="icon-sm" onClick={() => navigate('/')}>
             <ArrowLeft className="size-4" />
@@ -1041,7 +1041,7 @@ export function EditorPage() {
               >
                 <div
                   className={cn(
-                    'h-full overflow-hidden border-r transition-opacity duration-300 ease-in-out',
+                    'h-full overflow-hidden border-r transition-opacity duration-300 ease-in-out relative z-50 bg-background',
                     isSidebarOpen ? 'opacity-100 delay-150' : 'opacity-0'
                   )}
                 >
