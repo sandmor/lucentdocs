@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bold, Check, Italic, Loader2, Pen, Search, StopCircle, X } from 'lucide-react'
+import { Bold, Check, Italic, Loader2, Minus, Pen, Search, StopCircle, X } from 'lucide-react'
 import type { EditorView } from 'prosemirror-view'
 import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
@@ -169,6 +169,8 @@ interface AIZoneSurfaceProps {
   onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
+  isMinimized?: boolean
+  onToggleMinimize?: () => void
 }
 
 export function AIZoneSurface({
@@ -187,6 +189,8 @@ export function AIZoneSurface({
   onStop,
   onContinuePrompt,
   onDismissChoices,
+  isMinimized,
+  onToggleMinimize,
 }: AIZoneSurfaceProps) {
   const isProcessing = state === 'processing'
   const isReview = state === 'review'
@@ -213,6 +217,35 @@ export function AIZoneSurface({
     onDismissChoices(zoneId)
   }
 
+  if (isMinimized && onToggleMinimize) {
+    return (
+      <div
+        ref={(node) => {
+          if (rootRef) {
+            rootRef.current = node
+          }
+        }}
+        className={className}
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onToggleMinimize()
+        }}
+        title="Expand AI Controls"
+        data-testid="ai-inline-controls-minimized"
+        data-state={state}
+        data-zone-id={zoneId}
+        data-ai-phase={animationPhase}
+      >
+        {isProcessing ? (
+          <Loader2 className="size-4 animate-spin text-primary" />
+        ) : (
+          <Pen className="size-4 text-muted-foreground" />
+        )}
+      </div>
+    )
+  }
+
   return (
     <div
       ref={(node) => {
@@ -231,17 +264,19 @@ export function AIZoneSurface({
           <Pen className="size-3" />
           Inline AI
         </span>
-        <span className="ml-auto">
-          {isProcessing ? (
-            <div className="flex items-center gap-2">
-              {stuck ? (
-                <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400">
-                  <Loader2 className="size-3 animate-spin" />
-                  <span className="text-[10px] font-medium">Stuck…</span>
-                </span>
-              ) : (
-                <span className="text-[10px] font-medium text-muted-foreground">Processing</span>
-              )}
+        <div className="ml-auto flex items-center gap-3">
+          {isProcessing &&
+            (stuck ? (
+              <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400">
+                <Loader2 className="size-3 animate-spin" />
+                <span className="text-[10px] font-medium">Stuck…</span>
+              </span>
+            ) : (
+              <span className="text-[10px] font-medium text-muted-foreground">Processing</span>
+            ))}
+
+          <div className="flex items-center gap-0.5">
+            {isProcessing && (
               <Button
                 variant="ghost"
                 size="xs"
@@ -258,9 +293,26 @@ export function AIZoneSurface({
                 <StopCircle className="size-3" />
                 Stop
               </Button>
-            </div>
-          ) : null}
-        </span>
+            )}
+
+            {onToggleMinimize && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground hover:bg-foreground/5"
+                title="Minimize"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onToggleMinimize()
+                }}
+              >
+                <Minus className="size-3" />
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="space-y-2 p-2">

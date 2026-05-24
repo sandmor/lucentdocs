@@ -284,6 +284,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
     const view = new EditorView(containerRef.current, {
       state,
+      scrollThreshold: 150,
+      scrollMargin: 150,
       nodeViews: createAIBubbleNodeViews(bubblePresence),
       dispatchTransaction(tr) {
         const newState = view.state.apply(tr)
@@ -510,7 +512,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   )
 
   return (
-    <div className="relative">
+    <div className="relative flex-1 flex flex-col">
       <div ref={containerRef} className={className} />
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">

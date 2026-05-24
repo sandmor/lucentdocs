@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
 import type { InlineZoneSession } from '@lucentdocs/shared'
@@ -188,6 +188,7 @@ export function AIZoneFloatingControl({
   onDismissChoices,
 }: AIZoneFloatingControlProps) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const [isMinimized, setIsMinimized] = useState(false)
   const fromRef = useRef(from)
   const toRef = useRef(to)
   const scheduleUpdateRef = useRef<(() => void) | null>(null)
@@ -312,7 +313,7 @@ export function AIZoneFloatingControl({
           const result = await computePosition(virtualEl, el, {
             placement: 'bottom-start',
             middleware: [
-              offset(8),
+              offset({ mainAxis: 8, crossAxis: isMinimized ? -48 : 0 }),
               shift({ padding: 8, crossAxis: true }),
               {
                 name: 'forceY',
@@ -353,14 +354,20 @@ export function AIZoneFloatingControl({
       cleanupAutoUpdate()
       emitAIZoneControlLayoutChange()
     }
-  }, [view, zoneId, getZoneAnchorRect])
+  }, [view, zoneId, getZoneAnchorRect, isMinimized])
 
   const portalTarget = document.body
 
   return createPortal(
     <AIZoneSurface
       rootRef={rootRef}
-      className="ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-desktop fixed z-40 flex min-w-0 w-[min(94vw,420px)] flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
+      className={`ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-desktop fixed z-40 flex overflow-hidden border border-border bg-background/95 shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10 ${
+        isMinimized
+          ? "w-10 h-10 rounded-full items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
+          : "min-w-0 w-[min(94vw,420px)] flex-col rounded-xl font-sans text-[13px]"
+      }`}
+      isMinimized={isMinimized}
+      onToggleMinimize={() => setIsMinimized((v) => !v)}
       animationPhase={animationPhase}
       zoneId={zoneId}
       state={state}

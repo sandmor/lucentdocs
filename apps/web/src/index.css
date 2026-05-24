@@ -349,14 +349,14 @@
 
 /* ProseMirror editor styles — editorial serif */
 .ProseMirror {
-  outline: none;
-  min-height: 70vh;
+  flex: 1 1 0%;
   line-height: 1.85;
   font-family: var(--font-serif);
   font-size: 1.05rem;
-  padding-bottom: var(--ai-inline-mobile-dock-reserve);
+  padding-bottom: calc(var(--ai-inline-mobile-dock-reserve) + 30vh);
   scroll-padding-bottom: var(--ai-inline-mobile-dock-reserve);
   letter-spacing: 0.005em;
+  outline: none;
 }
 
 @media (min-width: 640px) {

@@ -907,7 +907,7 @@ export function EditorPage() {
         documentQuery.data &&
         !documentQuery.isLoading &&
         currentDocumentId && (
-          <div className="mx-auto max-w-3xl px-4 sm:px-8 py-6 sm:py-10">
+          <div className="mx-auto max-w-3xl px-4 sm:px-8 pt-6 sm:pt-10 min-h-full flex flex-col">
             <EditorToolbar
               onContinueWriting={() => editorRef.current?.startAIContinuation(true)}
               titleInput={titleInput}
@@ -927,7 +927,7 @@ export function EditorPage() {
               projectId={id}
               documentId={currentDocumentId}
               onConnectionChange={handleConnectionChange}
-              className="prose prose-neutral dark:prose-invert min-h-[70vh] max-w-none focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[70vh]"
+              className="prose prose-neutral dark:prose-invert flex-1 flex flex-col max-w-none focus:outline-none"
             />
           </div>
         )}
