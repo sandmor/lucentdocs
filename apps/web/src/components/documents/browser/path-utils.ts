@@ -134,6 +134,7 @@ export function buildRows(allDocuments: DocumentItem[], currentPath: string): Br
       continue
     }
 
+    const meta = doc.metadata ?? {}
     files.push({
       key: `doc:${doc.id}`,
       type: 'document',
@@ -142,6 +143,9 @@ export function buildRows(allDocuments: DocumentItem[], currentPath: string): Br
       path: normalizedTitle,
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
+      wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : 0,
+      charCount: typeof meta.charCount === 'number' ? meta.charCount : 0,
+      charCountNoSpaces: typeof meta.charCountNoSpaces === 'number' ? meta.charCountNoSpaces : 0,
     })
   }
 

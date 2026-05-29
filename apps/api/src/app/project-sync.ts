@@ -53,6 +53,16 @@ export type ProjectSyncPayload =
       deletedChatIds: string[]
       reason: ChatsChangedReason
     }
+  | {
+      projectId: string
+      type: 'document.updated'
+      documentId: string
+      changes: {
+        title?: string
+        updatedAt?: number
+        metadata?: Record<string, unknown>
+      }
+    }
 
 export type ProjectSyncEvent =
   | {
@@ -98,6 +108,18 @@ export type ProjectSyncEvent =
       changedChatIds: string[]
       deletedChatIds: string[]
       reason: ChatsChangedReason
+    }
+  | {
+      id: string
+      projectId: string
+      createdAt: number
+      type: 'document.updated'
+      documentId: string
+      changes: {
+        title?: string
+        updatedAt?: number
+        metadata?: Record<string, unknown>
+      }
     }
 
 type ProjectSyncListener = (event: ProjectSyncEvent) => void

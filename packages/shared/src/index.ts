@@ -1,6 +1,7 @@
 export type { Project } from './project.js'
 export type { Document } from './document.js'
 export type { JsonObject, JsonValue } from './json.js'
+export { computeDocumentCounters, type DocumentCounters } from './document-counters.js'
 export { isJsonObject } from './json.js'
 export { isValidId, authPasswordSchema } from './validators.js'
 export { schema } from './schema.js'

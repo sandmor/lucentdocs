@@ -25,7 +25,7 @@ export interface YjsRuntimeConfig {
 }
 
 export interface YjsContentObserver {
-  onDocumentPersisted?(documentName: string): Promise<void> | void
+  onDocumentPersisted?(documentName: string, prosemirrorJson: JsonObject): Promise<void> | void
 }
 
 interface ProsemirrorTransformResult<T> {
@@ -137,8 +137,10 @@ export class YjsRuntime {
         })
       },
       writeState: async (documentName: string, doc: Y.Doc) => {
-        this.#persistenceDirtyDocs.delete(documentName)
-        await this.#persistDocumentState(documentName, doc)
+        const wasDirty = this.#persistenceDirtyDocs.delete(documentName)
+        if (wasDirty) {
+          await this.#persistDocumentState(documentName, doc)
+        }
       },
     })
 
@@ -237,7 +239,6 @@ export class YjsRuntime {
     this.#ensurePersistenceInitialized()
 
     const persistOps: Promise<void>[] = []
-    const flushed = new Set<string>(this.#persistenceDirtyDocs)
     const dirtyDocumentNames = [...this.#persistenceDirtyDocs]
     this.#persistenceDirtyDocs.clear()
 
@@ -248,16 +249,6 @@ export class YjsRuntime {
       persistOps.push(
         this.#persistDocumentState(documentName, doc).catch((error) => {
           console.error(`Failed to flush Yjs document ${documentName}:`, error)
-        })
-      )
-    }
-
-    for (const [documentName, doc] of docs) {
-      if (flushed.has(documentName)) continue
-
-      persistOps.push(
-        this.#persistDocumentState(documentName, doc).catch((error) => {
-          console.error(`Failed to persist Yjs document ${documentName}:`, error)
         })
       )
     }
@@ -501,7 +492,9 @@ export class YjsRuntime {
     const buffer = Buffer.from(state)
 
     await this.#repos.yjsDocuments.set(documentName, buffer)
-    await this.#observer.onDocumentPersisted?.(documentName)
+
+    const prosemirrorJson = yDocToProsemirrorJSON(doc) as JsonObject
+    await this.#observer.onDocumentPersisted?.(documentName, prosemirrorJson)
   }
 
   async #insertSnapshot(documentName: string, doc: Y.Doc): Promise<void> {

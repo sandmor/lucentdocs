@@ -24,7 +24,7 @@ import {
   parentPath,
   remapPathInsideDirectory,
 } from './path-utils'
-import type { SortField, SortDirection } from './list-toolbar'
+import type { SortField, SortDirection, CounterMetric } from './list-toolbar'
 import type {
   BrowserRow,
   DeleteTarget,
@@ -62,6 +62,8 @@ export function useDocumentBrowser({
   const [searchScope, setSearchScope] = useState<'folder' | 'subtree' | 'project'>('subtree')
   const [sortField, setSortField] = useState<SortField>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+
+  const [counterMetric, setCounterMetricState] = useState<CounterMetric>('wordCount')
   const [newDocumentName, setNewDocumentName] = useState('')
   const [newDirectoryName, setNewDirectoryName] = useState('')
   const [createDocumentOpen, setCreateDocumentOpen] = useState(false)
@@ -103,6 +105,34 @@ export function useDocumentBrowser({
   const isSearchActive = isSemanticSearchActive || isFilterActive
 
   const utils = trpc.useUtils()
+  const projectQuery = trpc.projects.get.useQuery({ id: projectId })
+  const updateProjectMutation = trpc.projects.update.useMutation({
+    onSuccess: () => {
+      utils.projects.get.invalidate({ id: projectId })
+    },
+  })
+
+  // Sync counter metric from project metadata when it changes externally
+  useEffect(() => {
+    const savedMetric = projectQuery.data?.metadata?.['counterMetric']
+    const nextMetric: CounterMetric =
+      savedMetric === 'charCount' || savedMetric === 'charCountNoSpaces' ? savedMetric : 'wordCount'
+    setCounterMetricState((current) => (current !== nextMetric ? nextMetric : current))
+  }, [projectQuery.data?.metadata])
+
+  const setCounterMetric = useCallback(
+    (metric: CounterMetric) => {
+      if (metric === counterMetric) return
+
+      setCounterMetricState(metric)
+      updateProjectMutation.mutate({
+        id: projectId,
+        metadata: { counterMetric: metric },
+      })
+    },
+    [counterMetric, projectId, updateProjectMutation]
+  )
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
   const loadImportLimits = useCallback(async (): Promise<ImportLimits> => {
@@ -200,6 +230,7 @@ export function useDocumentBrowser({
         })
         .map((doc) => {
           const normalizedPath = normalizeDocumentPath(doc.title)
+          const meta = doc.metadata ?? {}
           return {
             key: `doc:${doc.id}`,
             type: 'document' as const,
@@ -208,11 +239,16 @@ export function useDocumentBrowser({
             path: normalizedPath,
             createdAt: doc.createdAt,
             updatedAt: doc.updatedAt,
+            wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : 0,
+            charCount: typeof meta.charCount === 'number' ? meta.charCount : 0,
+            charCountNoSpaces:
+              typeof meta.charCountNoSpaces === 'number' ? meta.charCountNoSpaces : 0,
           }
         })
     } else {
       sourceRows = visibleDocuments.map((doc) => {
         const normalizedPath = normalizeDocumentPath(doc.title)
+        const meta = doc.metadata ?? {}
         return {
           key: `doc:${doc.id}`,
           type: 'document' as const,
@@ -221,6 +257,10 @@ export function useDocumentBrowser({
           path: normalizedPath,
           createdAt: doc.createdAt,
           updatedAt: doc.updatedAt,
+          wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : 0,
+          charCount: typeof meta.charCount === 'number' ? meta.charCount : 0,
+          charCountNoSpaces:
+            typeof meta.charCountNoSpaces === 'number' ? meta.charCountNoSpaces : 0,
         }
       })
     }
@@ -244,6 +284,15 @@ export function useDocumentBrowser({
           return sortDirection === 'asc'
             ? a.name.localeCompare(b.name)
             : b.name.localeCompare(a.name)
+        }
+        if (
+          sortField === 'wordCount' ||
+          sortField === 'charCount' ||
+          sortField === 'charCountNoSpaces'
+        ) {
+          const aVal = a.type === 'document' ? a[sortField] : 0
+          const bVal = b.type === 'document' ? b[sortField] : 0
+          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal
         }
         const aVal = a[sortField]
         const bVal = b[sortField]
@@ -1042,6 +1091,8 @@ export function useDocumentBrowser({
     setSortField,
     sortDirection,
     toggleSortDirection,
+    counterMetric,
+    setCounterMetric,
     currentPath,
     createDocumentOpen,
     setCreateDocumentOpen,

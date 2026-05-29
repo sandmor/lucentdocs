@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { DocumentListRow } from './row-cells'
 import type { BrowserRow } from './types'
+import type { CounterMetric } from './list-toolbar'
 
 const ROW_HEIGHT = 36
 
@@ -10,6 +11,7 @@ interface DocumentListProps {
   activeDocumentId: string
   scrollElement: HTMLElement | null
   emptyMessage?: string
+  counterMetric: CounterMetric
   onRowClick: (row: BrowserRow) => void
   onRenameDocument: (documentId: string) => void
   onMoveDocument: (documentId: string) => void
@@ -26,6 +28,7 @@ export function DocumentList({
   activeDocumentId,
   scrollElement,
   emptyMessage = 'No documents in this directory.',
+  counterMetric,
   onRowClick,
   onRenameDocument,
   onMoveDocument,
@@ -79,6 +82,7 @@ export function DocumentList({
             key={row.key}
             row={row}
             isActive={isActive}
+            counterMetric={counterMetric}
             onClick={() => onRowClick(row)}
             onRenameDocument={onRenameDocument}
             onMoveDocument={onMoveDocument}

@@ -1,6 +1,7 @@
 export type DocumentItem = {
   id: string
   title: string
+  metadata: Record<string, unknown> | null
   createdAt: number
   updatedAt: number
 }
@@ -54,6 +55,9 @@ export type BrowserRow =
       path: string
       createdAt: number
       updatedAt: number
+      wordCount: number
+      charCount: number
+      charCountNoSpaces: number
     }
 
 export type RenameTarget =

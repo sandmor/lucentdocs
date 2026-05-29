@@ -372,15 +372,15 @@ export const documentsRouter = router({
         })
       }
 
-      const defaultDocumentId =
-        await ctx.services.documents.getDefaultDocumentIdForProject(projectId)
       projectSyncBus.publish({
-        type: 'documents.changed',
+        type: 'document.updated',
         projectId,
-        reason: 'documents.update',
-        changedDocumentIds: [doc.id],
-        deletedDocumentIds: [],
-        defaultDocumentId,
+        documentId: doc.id,
+        changes: {
+          title: data.title,
+          metadata: data.metadata ?? undefined,
+          updatedAt: doc.updatedAt,
+        },
       })
 
       return doc

@@ -1,6 +1,7 @@
 import type { ServiceSet } from '../core/services/types.js'
 import type { RepositorySet } from '../core/ports/types.js'
 import type { TransactionPort } from '../core/ports/transaction.port.js'
+import { computeDocumentCounters } from '@lucentdocs/shared'
 import { createYjsRuntime, type YjsRuntime, type YjsRuntimeConfig } from '../yjs/runtime.js'
 import { createChatRuntime, type ChatRuntime } from '../chat/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
@@ -16,6 +17,7 @@ import { LocalAuthAdapter } from '../infrastructure/auth/local-auth.adapter.js'
 import { SqliteAuthAdapter } from '../infrastructure/auth/sqlite-auth.adapter.js'
 import { configManager } from '../config/runtime.js'
 import { createJobWorkerRuntime, type JobWorkerRuntime } from './job-worker-runtime.js'
+import { projectSyncBus } from '../trpc/project-sync.js'
 import {
   resolveQdrantRuntimeConfig,
   resolveVectorStorageConfig,
@@ -36,6 +38,14 @@ import {
   EMBEDDING_VECTOR_CLEANUP_JOB_TYPE,
 } from './embedding-vector-cleanup-runtime.js'
 import { scheduleVectorHealOnBackendChange } from './vector-heal-startup.js'
+
+function metadataCounterValue(
+  metadata: Record<string, unknown> | null,
+  key: string
+): number | null {
+  const value = metadata?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
 
 export interface AppContainer {
   services: ServiceSet
@@ -104,8 +114,46 @@ export async function createContainer(
     },
     yjsConfig,
     {
-      onDocumentPersisted: (documentId) =>
-        adapter.services.embeddingIndex.enqueueDocument(documentId),
+      onDocumentPersisted: async (documentId, prosemirrorJson) => {
+        await adapter.services.embeddingIndex.enqueueDocument(documentId)
+
+        const counters = computeDocumentCounters(prosemirrorJson)
+        const currentDoc = await adapter.services.documents.getById(documentId)
+        if (!currentDoc) return
+
+        if (
+          metadataCounterValue(currentDoc.metadata, 'wordCount') === counters.wordCount &&
+          metadataCounterValue(currentDoc.metadata, 'charCount') === counters.charCount &&
+          metadataCounterValue(currentDoc.metadata, 'charCountNoSpaces') ===
+            counters.charCountNoSpaces
+        ) {
+          return
+        }
+
+        const updatedDoc = await adapter.services.documents.update(documentId, {
+          metadata: {
+            wordCount: counters.wordCount,
+            charCount: counters.charCount,
+            charCountNoSpaces: counters.charCountNoSpaces,
+          },
+        })
+        if (!updatedDoc) return
+
+        const projectIds =
+          await adapter.repositories.projectDocuments.findProjectIdsByDocumentId(documentId)
+
+        for (const projectId of projectIds) {
+          projectSyncBus.publish({
+            type: 'document.updated',
+            projectId,
+            documentId,
+            changes: {
+              metadata: updatedDoc.metadata ?? {},
+              updatedAt: updatedDoc.updatedAt,
+            },
+          })
+        }
+      },
     }
   )
 

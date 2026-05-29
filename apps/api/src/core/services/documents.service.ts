@@ -13,6 +13,7 @@ import {
   directoryPathFromSentinel,
   toDirectorySentinelPath,
   isJsonObject,
+  computeDocumentCounters,
 } from '@lucentdocs/shared'
 import { markdownToProseMirrorDoc } from '../markdown/native.js'
 import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
@@ -501,17 +502,23 @@ export function createDocumentsService(
     const id = nanoid()
     const docContent = content ?? createDefaultContent()
 
+    const { schema } = await import('@lucentdocs/shared')
+    const parsed = parseContent(docContent)
+    const counters = computeDocumentCounters(parsed.doc)
+
     const doc: Document = {
       id,
       title,
       type,
-      metadata: null,
+      metadata: {
+        wordCount: counters.wordCount,
+        charCount: counters.charCount,
+        charCountNoSpaces: counters.charCountNoSpaces,
+      },
       createdAt: now,
       updatedAt: now,
     }
 
-    const { schema } = await import('@lucentdocs/shared')
-    const parsed = parseContent(docContent)
     const ydoc = prosemirrorJSONToYDoc(schema, parsed.doc)
     const blob = Y.encodeStateAsUpdate(ydoc)
     ydoc.destroy()
@@ -776,9 +783,16 @@ export function createDocumentsService(
       if (!doc) return null
 
       const now = Date.now()
+      const nextMetadata =
+        data.metadata === undefined
+          ? doc.metadata
+          : data.metadata === null
+            ? null
+            : { ...(doc.metadata ?? {}), ...data.metadata }
+
       await repos.documents.update(id, {
         title: data.title,
-        metadata: data.metadata,
+        metadata: nextMetadata,
         updatedAt: now,
       })
 
@@ -786,7 +800,7 @@ export function createDocumentsService(
       return {
         ...doc,
         title: data.title ?? doc.title,
-        metadata: data.metadata === undefined ? doc.metadata : data.metadata,
+        metadata: nextMetadata,
         updatedAt: now,
         content,
       }

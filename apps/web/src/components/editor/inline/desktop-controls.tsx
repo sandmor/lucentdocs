@@ -363,8 +363,8 @@ export function AIZoneFloatingControl({
       rootRef={rootRef}
       className={`ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-desktop fixed z-40 flex overflow-hidden border border-border bg-background/95 shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10 ${
         isMinimized
-          ? "w-10 h-10 rounded-full items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors"
-          : "min-w-0 w-[min(94vw,420px)] flex-col rounded-xl font-sans text-[13px]"
+          ? 'w-10 h-10 rounded-full items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors'
+          : 'min-w-0 w-[min(94vw,420px)] flex-col rounded-xl font-sans text-[13px]'
       }`}
       isMinimized={isMinimized}
       onToggleMinimize={() => setIsMinimized((v) => !v)}

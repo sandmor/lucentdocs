@@ -288,16 +288,8 @@ export function EditorPage() {
 
           utils.documents.get.setData({ projectId: id, id: document.id }, document)
           utils.documents.list.setData({ projectId: id }, (documents) => {
-            const summary = {
-              id: document.id,
-              title: document.title,
-              type: document.type,
-              metadata: document.metadata,
-              createdAt: document.createdAt,
-              updatedAt: document.updatedAt,
-            }
-            if (!documents) return [summary]
-            return [summary, ...documents.filter((item) => item.id !== summary.id)]
+            if (!documents) return [document]
+            return [document, ...documents.filter((item) => item.id !== document.id)]
           })
         },
         onError: (error) => {
@@ -713,6 +705,44 @@ export function EditorPage() {
           projectId: id,
           documentId: parsedEvent.documentId,
         })
+        return
+      }
+
+      if (parsedEvent.type === 'document.updated') {
+        utils.documents.list.setData({ projectId: id }, (documents) =>
+          documents?.map((doc) =>
+            doc.id === parsedEvent.documentId
+              ? {
+                  ...doc,
+                  title: parsedEvent.changes.title ?? doc.title,
+                  updatedAt: parsedEvent.changes.updatedAt ?? doc.updatedAt,
+                  metadata: parsedEvent.changes.metadata
+                    ? ({
+                        ...(doc.metadata ?? {}),
+                        ...parsedEvent.changes.metadata,
+                      } as import('@lucentdocs/shared').JsonObject)
+                    : doc.metadata,
+                }
+              : doc
+          )
+        )
+
+        if (activeId === parsedEvent.documentId) {
+          utils.documents.get.setData({ projectId: id, id: activeId }, (doc) => {
+            if (!doc) return doc
+            return {
+              ...doc,
+              title: parsedEvent.changes.title ?? doc.title,
+              updatedAt: parsedEvent.changes.updatedAt ?? doc.updatedAt,
+              metadata: parsedEvent.changes.metadata
+                ? ({
+                    ...(doc.metadata ?? {}),
+                    ...parsedEvent.changes.metadata,
+                  } as import('@lucentdocs/shared').JsonObject)
+                : doc.metadata,
+            }
+          })
+        }
         return
       }
 

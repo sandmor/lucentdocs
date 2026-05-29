@@ -50,6 +50,8 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
             sortDirection={browser.sortDirection}
             onSortFieldChange={browser.setSortField}
             onSortDirectionToggle={browser.toggleSortDirection}
+            counterMetric={browser.counterMetric}
+            onCounterMetricChange={browser.setCounterMetric}
           />
         )}
 
@@ -73,6 +75,7 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
               activeDocumentId={props.activeDocumentId}
               scrollElement={listScrollElement}
               emptyMessage={browser.emptyMessage}
+              counterMetric={browser.counterMetric}
               onRowClick={browser.handleRowClick}
               onRenameDocument={browser.handleRenameDocument}
               onMoveDocument={browser.handleMoveDocument}

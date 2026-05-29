@@ -7,6 +7,7 @@ import { buildHighlightPattern } from './highlight-utils'
 import { formatRelativeDate } from './path-utils'
 import { RowActionsMenu } from './row-actions-menu'
 import type { BrowserRow, DragData, DropData } from './types'
+import type { CounterMetric } from './list-toolbar'
 
 export function HighlightedSnippet({ text, query }: { text: string; query: string }) {
   const pattern = buildHighlightPattern(query)
@@ -67,6 +68,7 @@ function handleRowKeyActivate(event: KeyboardEvent<HTMLDivElement>, onClick: () 
 interface DocumentListRowProps {
   row: BrowserRow
   isActive: boolean
+  counterMetric: CounterMetric
   onClick: () => void
   onRenameDocument: (documentId: string) => void
   onMoveDocument: (documentId: string) => void
@@ -136,9 +138,12 @@ function DirectoryListRow({
 function DocumentFileListRow({
   row,
   isActive,
+  counterMetric,
   onClick,
   ...actionProps
 }: DocumentListRowProps & { row: BrowserRow & { type: 'document' } }) {
+  const counterValue = row[counterMetric]
+
   return (
     <div
       role="button"
@@ -155,6 +160,9 @@ function DocumentFileListRow({
       <FileText className="text-muted-foreground size-4 shrink-0" />
       <span className={cn('min-w-0 flex-1 truncate text-sm', isActive && 'font-medium')}>
         {row.name}
+      </span>
+      <span className="text-muted-foreground shrink-0 text-xs tabular-nums w-16 text-right">
+        {counterValue.toLocaleString()}
       </span>
       <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
         {formatRelativeDate(row.updatedAt)}

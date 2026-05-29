@@ -54,12 +54,23 @@ const chatsChangedEventSchema = eventBaseSchema.extend({
   reason: z.enum(CHATS_CHANGED_REASONS),
 })
 
+const documentUpdatedEventSchema = eventBaseSchema.extend({
+  type: z.literal('document.updated'),
+  documentId: idSchema,
+  changes: z.object({
+    title: z.string().optional(),
+    updatedAt: z.number().int().nonnegative().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  }),
+})
+
 export const projectSyncEventSchema = z.discriminatedUnion('type', [
   projectCreatedEventSchema,
   projectUpdatedEventSchema,
   projectDeletedEventSchema,
   documentsChangedEventSchema,
   chatsChangedEventSchema,
+  documentUpdatedEventSchema,
 ])
 
 const projectsListSyncEventSchema = z.discriminatedUnion('type', [
@@ -72,7 +83,11 @@ export const syncRouter = router({
   onProjectsListEvent: protectedProcedure.subscription(({ ctx, signal }) => {
     return observable<ProjectsListSyncEvent>((emit) => {
       const unsubscribe = projectSyncBus.subscribe((event) => {
-        if (event.type === 'documents.changed' || event.type === 'chats.changed') {
+        if (
+          event.type === 'documents.changed' ||
+          event.type === 'chats.changed' ||
+          event.type === 'document.updated'
+        ) {
           return
         }
 
