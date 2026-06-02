@@ -18,6 +18,7 @@ import { createAIBubbleNodeViews } from './collaboration/ai-bubble-node-view'
 import { AIBubblePresenceStore } from './collaboration/ai-bubble-presence'
 import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
+import { SearchResultMarkers, type SearchResultMarker } from './search-result-markers'
 import { emitAIStateChange } from './ai/writer-store'
 import { getSelectionRangeInView, hasActiveDomSelection } from './selection/dom-selection'
 import { useInlineSessions } from './inline/use-sessions'
@@ -28,7 +29,7 @@ import { useEditorStore } from '@/lib/editor-store'
 
 export interface EditorHandle {
   startAIContinuation: (at_doc_end: boolean) => void
-  scrollToRange: (from: number, to: number) => void
+  scrollToRange: (from: number, to: number, options?: { select?: boolean }) => void
 }
 
 function findScrollParent(element: HTMLElement): HTMLElement | null {
@@ -144,12 +145,14 @@ interface EditorProps {
   documentId: string
   onConnectionChange?: (status: ConnectionStatus) => void
   className?: string
+  searchResultMarkers?: SearchResultMarker[]
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { projectId, documentId, onConnectionChange, className },
+  { projectId, documentId, onConnectionChange, className, searchResultMarkers = [] },
   ref
 ) {
+  const editorShellRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const selectionToolbarInteractingRef = useRef(false)
@@ -459,7 +462,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       if (!viewRef.current) return
       aiControllerRef.current?.startAIContinuation(viewRef.current, at_doc_end)
     },
-    scrollToRange(from: number, to: number) {
+    scrollToRange(from: number, to: number, options?: { select?: boolean }) {
       if (!viewRef.current) return
       const doc = viewRef.current.state.doc
       const max = doc.content.size
@@ -467,9 +470,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
       const resolvedFrom = Math.max(1, Math.min(from, max))
       const resolvedTo = Math.max(resolvedFrom, Math.min(to, max))
+      const shouldSelect = options?.select ?? true
 
       const tr = viewRef.current.state.tr
-      tr.setSelection(TextSelection.create(doc, resolvedFrom, resolvedTo))
+      tr.setSelection(
+        TextSelection.create(doc, resolvedFrom, shouldSelect ? resolvedTo : resolvedFrom)
+      )
       tr.scrollIntoView()
       viewRef.current.dispatch(tr)
       viewRef.current.focus()
@@ -478,8 +484,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       const settleScroll = () => {
         requestAnimationFrame(() => {
           if (!viewRef.current) return
-          scrollEditorPositionIntoView(viewRef.current, Math.floor((resolvedFrom + resolvedTo) / 2))
-          scrollSelectedDomRangeIntoView()
+          scrollEditorPositionIntoView(
+            viewRef.current,
+            shouldSelect ? Math.floor((resolvedFrom + resolvedTo) / 2) : resolvedFrom
+          )
+          if (shouldSelect) scrollSelectedDomRangeIntoView()
           forceSelectionIntoViewport(viewRef.current, resolvedFrom)
           attemptsRemaining -= 1
           if (attemptsRemaining > 0) {
@@ -512,7 +521,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   )
 
   return (
-    <div className="relative flex-1 flex flex-col">
+    <div ref={editorShellRef} className="relative flex-1 flex flex-col">
       <div ref={containerRef} className={className} />
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
@@ -569,6 +578,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         onInteractionChange={handleToolbarInteractionChange}
       />
       <RemotePresenceOverlay view={editorView} awareness={presenceAwareness} />
+      <SearchResultMarkers
+        view={editorView}
+        container={editorShellRef.current}
+        markers={searchResultMarkers}
+      />
       <SelectionFakeOverlay
         view={editorView}
         selection={selectionRange}

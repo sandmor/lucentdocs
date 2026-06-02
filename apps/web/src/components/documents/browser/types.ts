@@ -21,6 +21,13 @@ export type DocumentSearchResultItem = {
   }>
 }
 
+export type SearchResultMarkerRange = {
+  id: string
+  documentId: string
+  from: number
+  to: number
+}
+
 export type BrowserRow =
   | {
       key: string
@@ -116,6 +123,7 @@ export interface DocumentBrowserProps {
   isLoading: boolean
   activeDocumentId: string
   onOpenDocument: (documentId: string, range?: { start: number; end: number }) => void
+  onSearchResultMarkersChange?: (markers: SearchResultMarkerRange[]) => void
 }
 
 export type MarkdownRawHtmlMode = 'drop' | 'code_block'

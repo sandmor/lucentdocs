@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DndContext, closestCenter } from '@dnd-kit/core'
 import { Loader2 } from 'lucide-react'
 import { BrowserDialogs } from './browser/dialogs'
@@ -10,11 +10,36 @@ import type { DocumentBrowserProps } from './browser/types'
 import { SearchResultsList } from './browser/search-results'
 
 export function DocumentBrowser(props: DocumentBrowserProps) {
+  const { onSearchResultMarkersChange } = props
   const browser = useDocumentBrowser(props)
   const [listScrollElement, setListScrollElement] = useState<HTMLDivElement | null>(null)
   const handleListScrollRef = useCallback((node: HTMLDivElement | null) => {
     setListScrollElement(node)
   }, [])
+  const searchResultMarkers = useMemo(() => {
+    if (!browser.isSemanticSearchActive) return []
+
+    return browser.rows.flatMap((row) => {
+      if (row.type !== 'search-result' || row.matchType !== 'snippet') return []
+
+      return row.snippets.map((snippet, index) => ({
+        id: `${row.id}:${index}:${snippet.selectionFrom}:${snippet.selectionTo}`,
+        documentId: row.id,
+        from: snippet.selectionFrom,
+        to: snippet.selectionTo,
+      }))
+    })
+  }, [browser.isSemanticSearchActive, browser.rows])
+
+  useEffect(() => {
+    onSearchResultMarkersChange?.(searchResultMarkers)
+  }, [onSearchResultMarkersChange, searchResultMarkers])
+
+  useEffect(() => {
+    return () => {
+      onSearchResultMarkersChange?.([])
+    }
+  }, [onSearchResultMarkersChange])
 
   return (
     <DndContext

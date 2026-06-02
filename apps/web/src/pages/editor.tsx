@@ -11,6 +11,8 @@ import { toast } from 'sonner'
 import { isDirectorySentinelPath, normalizeDocumentPath, pathSegments } from '@lucentdocs/shared'
 import { trpc } from '@/lib/trpc'
 import { Editor, type EditorHandle } from '@/components/editor'
+import type { SearchResultMarker } from '@/components/editor/search-result-markers'
+import type { SearchResultMarkerRange } from '@/components/documents/browser/types'
 import { EditorToolbar } from '@/components/editor/layout/toolbar'
 import { VersionHistory, type VersionSnapshotInfo } from '@/components/version-history'
 import { DocumentBrowser } from '@/components/documents/document-browser'
@@ -34,10 +36,18 @@ const DESKTOP_SIDEBAR_MIN_WIDTH_PERCENTAGE = 10
 const DESKTOP_SIDEBAR_MAX_WIDTH_PERCENTAGE = 40
 const DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE = 1
 const DESKTOP_SIDEBAR_PANEL_ID = 'desktop-sidebar'
+const SEARCH_RESULT_SELECTION_THRESHOLD_CHARS = 280
 
 interface PersistedDesktopSidebarState {
   isOpen: boolean
   widthPercentage: number
+}
+
+interface SearchNavigationRequest {
+  documentId: string
+  from: number
+  to: number
+  select: boolean
 }
 
 function getDesktopSidebarStorageKey(projectId: string): string {
@@ -109,6 +119,32 @@ function resolveDesktopSidebarState(projectId: string | undefined): PersistedDes
   }
 }
 
+function shouldSelectSearchRange(range: { start: number; end: number }): boolean {
+  return range.end - range.start <= SEARCH_RESULT_SELECTION_THRESHOLD_CHARS
+}
+
+function sameSearchResultMarkers(
+  previous: SearchResultMarkerRange[],
+  next: SearchResultMarkerRange[]
+): boolean {
+  if (previous.length !== next.length) return false
+
+  for (let index = 0; index < previous.length; index += 1) {
+    const left = previous[index]
+    const right = next[index]
+    if (
+      left.id !== right.id ||
+      left.documentId !== right.documentId ||
+      left.from !== right.from ||
+      left.to !== right.to
+    ) {
+      return false
+    }
+  }
+
+  return true
+}
+
 export function EditorPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -144,6 +180,8 @@ export function EditorPage() {
   })
   const sidebarPanelRef = useRef<PanelImperativeHandle | null>(null)
   const appliedSearchSelectionRef = useRef<string | null>(null)
+  const pendingSearchNavigationRef = useRef<SearchNavigationRequest | null>(null)
+  const [searchResultMarkers, setSearchResultMarkers] = useState<SearchResultMarkerRange[]>([])
 
   const updateCurrentSidebarState = useCallback(
     (updater: (previous: PersistedDesktopSidebarState) => PersistedDesktopSidebarState) => {
@@ -599,20 +637,11 @@ export function EditorPage() {
   }, [])
 
   const buildDocumentSearchParams = useCallback(
-    (
-      documentId: string,
-      options?: { range?: { start: number; end: number }; preserveExisting?: boolean }
-    ) => {
+    (documentId: string, options?: { preserveExisting?: boolean }) => {
       const next = new URLSearchParams(options?.preserveExisting ? searchParams : undefined)
       next.set('document', documentId)
-
-      if (options?.range) {
-        next.set('from', options.range.start.toString())
-        next.set('to', options.range.end.toString())
-      } else {
-        next.delete('from')
-        next.delete('to')
-      }
+      next.delete('from')
+      next.delete('to')
 
       return next
     },
@@ -649,22 +678,60 @@ export function EditorPage() {
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        editorRef.current?.scrollToRange(requestedSearchRange.from, requestedSearchRange.to)
+        editorRef.current?.scrollToRange(requestedSearchRange.from, requestedSearchRange.to, {
+          select: shouldSelectSearchRange({
+            start: requestedSearchRange.from,
+            end: requestedSearchRange.to,
+          }),
+        })
       })
     })
   }, [connectionStatus, currentDocumentId, documentQuery.data?.id, requestedSearchRange])
 
+  useEffect(() => {
+    if (connectionStatus !== 'connected') return
+    if (!currentDocumentId || documentQuery.data?.id !== currentDocumentId) return
+    if (!editorRef.current) return
+
+    const pending = pendingSearchNavigationRef.current
+    if (!pending || pending.documentId !== currentDocumentId) return
+    pendingSearchNavigationRef.current = null
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        editorRef.current?.scrollToRange(pending.from, pending.to, {
+          select: pending.select,
+        })
+      })
+    })
+  }, [connectionStatus, currentDocumentId, documentQuery.data?.id])
+
   const handleOpenDocument = useCallback(
     (documentId: string, range?: { start: number; end: number }) => {
+      if (range) {
+        pendingSearchNavigationRef.current = {
+          documentId,
+          from: range.start,
+          to: range.end,
+          select: shouldSelectSearchRange(range),
+        }
+      } else {
+        pendingSearchNavigationRef.current = null
+      }
+
       const next = buildDocumentSearchParams(documentId, {
-        range,
         preserveExisting: true,
       })
       setSearchParams(next)
 
       if (documentId === currentDocumentId && range) {
+        const pending = pendingSearchNavigationRef.current
+        pendingSearchNavigationRef.current = null
+
         requestAnimationFrame(() => {
-          editorRef.current?.scrollToRange(range.start, range.end)
+          editorRef.current?.scrollToRange(range.start, range.end, {
+            select: pending?.select ?? shouldSelectSearchRange(range),
+          })
         })
       }
     },
@@ -855,6 +922,26 @@ export function EditorPage() {
     [handleOpenDocument, isMobileMenuOpen]
   )
 
+  const handleSearchResultMarkersChange = useCallback((markers: SearchResultMarkerRange[]) => {
+    setSearchResultMarkers((previous) =>
+      sameSearchResultMarkers(previous, markers) ? previous : markers
+    )
+  }, [])
+
+  const isSearchResultPanelVisible =
+    sidebarPanel === 'explorer' && (isDesktop ? isSidebarOpen : isMobileMenuOpen)
+  const activeDocumentSearchMarkers = useMemo<SearchResultMarker[]>(() => {
+    if (!isSearchResultPanelVisible || !currentDocumentId) return []
+
+    return searchResultMarkers
+      .filter((marker) => marker.documentId === currentDocumentId)
+      .map((marker) => ({
+        id: marker.id,
+        from: marker.from,
+        to: marker.to,
+      }))
+  }, [currentDocumentId, isSearchResultPanelVisible, searchResultMarkers])
+
   if (projectQuery.isLoading || (projectQuery.isFetching && !projectQuery.data)) {
     return <PageLoader message="Loading project…" />
   }
@@ -889,6 +976,7 @@ export function EditorPage() {
           isLoading={documentsQuery.isLoading || openOrCreateDefaultDocumentMutation.isPending}
           activeDocumentId={currentDocumentId ?? ''}
           onOpenDocument={handleMobileOpenDocument}
+          onSearchResultMarkersChange={handleSearchResultMarkersChange}
         />
       </div>
       {sidebarPanel === 'chat' && <ChatPanel projectId={id} documentId={currentDocumentId} />}
@@ -957,6 +1045,7 @@ export function EditorPage() {
               projectId={id}
               documentId={currentDocumentId}
               onConnectionChange={handleConnectionChange}
+              searchResultMarkers={activeDocumentSearchMarkers}
               className="prose prose-neutral dark:prose-invert flex-1 flex flex-col max-w-none focus:outline-none"
             />
           </div>
