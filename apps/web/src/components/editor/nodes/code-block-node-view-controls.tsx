@@ -1,35 +1,22 @@
 import * as React from 'react'
 import { Check, Copy } from 'lucide-react'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-
-const PLAIN_LANGUAGE = 'plain'
-
-const LANGUAGES = [
-  { value: PLAIN_LANGUAGE, label: 'Plain Text' },
-  { value: 'javascript', label: 'JavaScript' },
-  { value: 'typescript', label: 'TypeScript' },
-  { value: 'html', label: 'HTML' },
-  { value: 'css', label: 'CSS' },
-  { value: 'json', label: 'JSON' },
-  { value: 'python', label: 'Python' },
-  { value: 'rust', label: 'Rust' },
-  { value: 'go', label: 'Go' },
-  { value: 'bash', label: 'Bash' },
-]
-
-function toSelectLanguage(language: string): string {
-  return language || PLAIN_LANGUAGE
-}
-
-function fromSelectLanguage(language: string): string {
-  return language === PLAIN_LANGUAGE ? '' : language
-}
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from '@/components/ui/combobox'
+import { Button } from '@/components/ui/button'
+import {
+  formatLanguageName,
+  getLanguagePickerOptions,
+  toCanonicalStoredLanguage,
+  toPickerValue,
+  toStoredLanguage,
+} from './code-block-languages'
 
 export function CodeBlockLanguageSelector({
   value,
@@ -38,22 +25,66 @@ export function CodeBlockLanguageSelector({
   value: string
   onChange: (val: string) => void
 }) {
+  const [anchor, setAnchor] = React.useState<HTMLButtonElement | null>(null)
+  const options = React.useMemo(() => getLanguagePickerOptions(value), [value])
+  const items = React.useMemo(() => options.map((option) => option.value), [options])
+  const selectedValue = toPickerValue(value)
+
+  const selectedLabel = React.useMemo(() => {
+    const option = options.find((item) => item.value === selectedValue)
+    if (option) return option.label
+    return formatLanguageName(selectedValue)
+  }, [options, selectedValue])
+
   return (
-    <Select
-      value={toSelectLanguage(value)}
-      onValueChange={(val) => onChange(fromSelectLanguage(val ?? PLAIN_LANGUAGE))}
+    <Combobox
+      items={items}
+      itemToStringLabel={(item) => {
+        const option = options.find((entry) => entry.value === item)
+        return option?.label ?? formatLanguageName(item)
+      }}
+      itemToStringValue={(item) => item}
+      value={selectedValue}
+      onValueChange={(nextValue) => {
+        if (!nextValue) {
+          onChange('')
+          return
+        }
+        onChange(toStoredLanguage(toCanonicalStoredLanguage(nextValue)))
+      }}
     >
-      <SelectTrigger className="h-7 w-32 border-none bg-transparent text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:ring-0 shadow-none px-2">
-        <SelectValue placeholder="Language" />
-      </SelectTrigger>
-      <SelectContent align="start" className="w-40">
-        {LANGUAGES.map((lang) => (
-          <SelectItem key={lang.value} value={lang.value}>
-            {lang.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      <ComboboxTrigger
+        render={
+          <Button
+            ref={setAnchor}
+            variant="ghost"
+            size="sm"
+            className="h-7 min-w-32 max-w-48 justify-between border-none bg-transparent px-2 text-xs font-medium tracking-wide text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground"
+          />
+        }
+      >
+        <span className="truncate uppercase">{selectedLabel}</span>
+      </ComboboxTrigger>
+      <ComboboxContent anchor={anchor} align="start" className="min-w-56">
+        <ComboboxInput placeholder="Search languages…" showClear />
+        <ComboboxEmpty>No languages found.</ComboboxEmpty>
+        <ComboboxList>
+          {(item: string) => {
+            const option = options.find((entry) => entry.value === item)
+            return (
+              <ComboboxItem key={item} value={item}>
+                <span className="flex flex-col items-start">
+                  <span>{option?.label ?? formatLanguageName(item)}</span>
+                  {option?.unsupported ? (
+                    <span className="text-muted-foreground text-xs">Unsupported highlighting</span>
+                  ) : null}
+                </span>
+              </ComboboxItem>
+            )
+          }}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
 }
 

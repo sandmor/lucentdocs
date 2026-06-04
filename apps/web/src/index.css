@@ -46,6 +46,22 @@
   --sidebar-ring: oklch(0.72 0.17 75);
   --ai-inline-mobile-dock-offset: 0px;
   --ai-inline-mobile-dock-reserve: 0px;
+  --code-token-comment: oklch(0.55 0.02 60);
+  --code-token-punctuation: oklch(0.45 0.08 300);
+  --code-token-keyword: oklch(0.48 0.12 300);
+  --code-token-property: oklch(0.42 0.08 200);
+  --code-token-tag: oklch(0.45 0.1 200);
+  --code-token-boolean: oklch(0.52 0.18 15);
+  --code-token-number: oklch(0.55 0.16 55);
+  --code-token-string: oklch(0.48 0.12 145);
+  --code-token-operator: oklch(0.45 0.08 200);
+  --code-token-function: oklch(0.42 0.1 260);
+  --code-token-class: oklch(0.48 0.12 145);
+  --code-token-variable: oklch(0.28 0.02 55);
+  --code-token-regex: oklch(0.58 0.16 75);
+  --code-token-important: oklch(0.58 0.16 75);
+  --code-token-deleted: oklch(0.58 0.22 27);
+  --code-token-inserted: oklch(0.48 0.12 145);
 }
 
 .dark {
@@ -84,6 +100,22 @@
   --sidebar-accent-foreground: oklch(0.92 0.01 75);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.72 0.15 75);
+  --code-token-comment: oklch(0.62 0.02 60);
+  --code-token-punctuation: oklch(0.78 0.08 300);
+  --code-token-keyword: oklch(0.78 0.1 300);
+  --code-token-property: oklch(0.78 0.08 200);
+  --code-token-tag: oklch(0.8 0.1 200);
+  --code-token-boolean: oklch(0.78 0.14 15);
+  --code-token-number: oklch(0.78 0.14 55);
+  --code-token-string: oklch(0.78 0.12 145);
+  --code-token-operator: oklch(0.78 0.08 200);
+  --code-token-function: oklch(0.78 0.1 260);
+  --code-token-class: oklch(0.78 0.12 145);
+  --code-token-variable: oklch(0.88 0.02 80);
+  --code-token-regex: oklch(0.82 0.14 75);
+  --code-token-important: oklch(0.82 0.14 75);
+  --code-token-deleted: oklch(0.72 0.18 27);
+  --code-token-inserted: oklch(0.78 0.12 145);
 }
 
 @theme inline {
@@ -477,6 +509,133 @@
 .code-block-copy-btn:hover {
   background: color-mix(in oklch, var(--foreground) 8%, transparent);
   color: var(--foreground);
+}
+
+.code-block-editor-container {
+  position: relative;
+}
+
+.code-block-wrapper .code-block-pre {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow-x: auto;
+  font-family:
+    ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  font-size: 0.9em;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.code-block-wrapper .code-block-pre code {
+  display: block;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: inherit;
+  word-wrap: inherit;
+}
+
+.code-block-wrapper .code-block-editable {
+  position: relative;
+  z-index: 1;
+  color: transparent;
+  caret-color: var(--foreground);
+  outline: none;
+  min-height: 1.5em;
+}
+
+.code-block-wrapper .code-block-highlight-pre {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.code-block-wrapper .code-block-highlight {
+  pointer-events: none;
+  user-select: none;
+}
+
+.code-block-wrapper.ProseMirror-selectednode {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.code-block-highlight .token.comment,
+.code-block-highlight .token.prolog,
+.code-block-highlight .token.doctype,
+.code-block-highlight .token.cdata {
+  color: var(--code-token-comment);
+  font-style: italic;
+}
+
+.code-block-highlight .token.punctuation {
+  color: var(--code-token-punctuation);
+}
+
+.code-block-highlight .token.property,
+.code-block-highlight .token.tag,
+.code-block-highlight .token.constant,
+.code-block-highlight .token.symbol,
+.code-block-highlight .token.deleted {
+  color: var(--code-token-property);
+}
+
+.code-block-highlight .token.boolean,
+.code-block-highlight .token.number {
+  color: var(--code-token-number);
+}
+
+.code-block-highlight .token.selector,
+.code-block-highlight .token.attr-name,
+.code-block-highlight .token.string,
+.code-block-highlight .token.char,
+.code-block-highlight .token.builtin,
+.code-block-highlight .token.inserted {
+  color: var(--code-token-string);
+}
+
+.code-block-highlight .token.operator,
+.code-block-highlight .token.entity,
+.code-block-highlight .token.url,
+.code-block-highlight .token.variable {
+  color: var(--code-token-operator);
+}
+
+.code-block-highlight .token.atrule,
+.code-block-highlight .token.attr-value,
+.code-block-highlight .token.keyword {
+  color: var(--code-token-keyword);
+}
+
+.code-block-highlight .token.function,
+.code-block-highlight .token.class-name {
+  color: var(--code-token-function);
+}
+
+.code-block-highlight .token.regex,
+.code-block-highlight .token.important {
+  color: var(--code-token-regex);
+}
+
+.code-block-highlight .token.important {
+  font-weight: 600;
+}
+
+.code-block-highlight .token.bold {
+  font-weight: 600;
+}
+
+.code-block-highlight .token.italic {
+  font-style: italic;
 }
 
 .ProseMirror pre {

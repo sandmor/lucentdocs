@@ -1,6 +1,7 @@
 import { createRoot, type Root } from 'react-dom/client'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import type { EditorView, NodeView, ViewMutationRecord } from 'prosemirror-view'
+import { getHighlightedHTML } from '../prosemirror/syntax-highlighter'
 import { CodeBlockCopyButton, CodeBlockLanguageSelector } from './code-block-node-view-controls'
 
 export class CodeBlockNodeView implements NodeView {
@@ -13,6 +14,15 @@ export class CodeBlockNodeView implements NodeView {
   reactRootElement: HTMLDivElement
   copyRoot: Root | null = null
   copyRootElement: HTMLDivElement
+  private header: HTMLElement
+  private editorContainer: HTMLElement
+  private preElement: HTMLElement
+  private highlightPre: HTMLElement
+  private highlightCode: HTMLElement
+  private highlightFrame: number | null = null
+  private syncHighlightScroll = () => {
+    this.highlightPre.style.transform = `translateX(-${this.preElement.scrollLeft}px)`
+  }
 
   constructor(
     node: ProseMirrorNode,
@@ -26,29 +36,54 @@ export class CodeBlockNodeView implements NodeView {
     this.dom = document.createElement('div')
     this.dom.className = 'code-block-wrapper'
 
-    const header = document.createElement('div')
-    header.className = 'code-block-header'
-    header.contentEditable = 'false'
+    this.header = document.createElement('div')
+    this.header.className = 'code-block-header'
+    this.header.contentEditable = 'false'
 
     this.reactRootElement = document.createElement('div')
-    header.appendChild(this.reactRootElement)
+    this.header.appendChild(this.reactRootElement)
     this.reactRoot = createRoot(this.reactRootElement)
 
     this.copyRootElement = document.createElement('div')
-    header.appendChild(this.copyRootElement)
+    this.header.appendChild(this.copyRootElement)
     this.copyRoot = createRoot(this.copyRootElement)
 
-    this.renderReact()
+    this.editorContainer = document.createElement('div')
+    this.editorContainer.className = 'code-block-editor-container'
+    this.editorContainer.setAttribute('spellcheck', 'false')
 
-    const pre = document.createElement('pre')
-    pre.setAttribute('data-language', node.attrs.language || '')
+    this.preElement = document.createElement('pre')
+    this.preElement.className = 'code-block-pre'
+    this.preElement.setAttribute('data-language', node.attrs.language || '')
+    this.preElement.setAttribute('spellcheck', 'false')
+    this.preElement.setAttribute('autocorrect', 'off')
+    this.preElement.setAttribute('autocapitalize', 'off')
 
     this.contentDOM = document.createElement('code')
+    this.contentDOM.className = 'code-block-editable'
     this.contentDOM.spellcheck = false
+    this.contentDOM.setAttribute('autocorrect', 'off')
+    this.contentDOM.setAttribute('autocapitalize', 'off')
 
-    pre.appendChild(this.contentDOM)
-    this.dom.appendChild(header)
-    this.dom.appendChild(pre)
+    this.preElement.appendChild(this.contentDOM)
+    this.editorContainer.appendChild(this.preElement)
+
+    this.highlightPre = document.createElement('pre')
+    this.highlightPre.className = 'code-block-pre code-block-highlight-pre'
+    this.highlightPre.setAttribute('aria-hidden', 'true')
+
+    this.highlightCode = document.createElement('code')
+    this.highlightCode.className = 'code-block-highlight'
+    this.highlightPre.appendChild(this.highlightCode)
+    this.editorContainer.appendChild(this.highlightPre)
+
+    this.dom.appendChild(this.header)
+    this.dom.appendChild(this.editorContainer)
+
+    this.preElement.addEventListener('scroll', this.syncHighlightScroll)
+
+    this.renderReact()
+    this.updateHighlighting()
   }
 
   handleLanguageChange = (val: string) => {
@@ -78,23 +113,59 @@ export class CodeBlockNodeView implements NodeView {
     }
   }
 
+  private updateHighlighting() {
+    if (this.highlightFrame !== null) {
+      cancelAnimationFrame(this.highlightFrame)
+    }
+
+    this.highlightFrame = requestAnimationFrame(() => {
+      this.highlightFrame = null
+      const language = this.node.attrs.language || ''
+      const content = this.node.textContent
+      this.highlightCode.innerHTML = getHighlightedHTML(content, language)
+      this.syncHighlightScroll()
+    })
+  }
+
   update(node: ProseMirrorNode): boolean {
     if (node.type !== this.node.type) return false
+
+    const prevLanguage = this.node.attrs.language
+    const prevContent = this.node.textContent
     this.node = node
 
-    this.renderReact()
+    if (prevLanguage !== node.attrs.language) {
+      this.renderReact()
+    }
+    this.preElement.setAttribute('data-language', node.attrs.language || '')
 
-    const pre = this.dom.querySelector('pre')
-    if (pre) {
-      pre.setAttribute('data-language', node.attrs.language || '')
+    if (prevContent !== node.textContent || prevLanguage !== node.attrs.language) {
+      this.updateHighlighting()
     }
 
     return true
   }
 
+  selectNode() {
+    this.dom.classList.add('ProseMirror-selectednode')
+  }
+
+  deselectNode() {
+    this.dom.classList.remove('ProseMirror-selectednode')
+  }
+
   ignoreMutation(mutation: ViewMutationRecord): boolean {
     if (mutation.type === 'selection') return false
-    return (mutation.target as HTMLElement).closest('.code-block-header') !== null
+
+    const target = mutation.target as Node
+    if (this.header.contains(target)) return true
+    if (this.highlightPre.contains(target)) return true
+
+    if (this.contentDOM.contains(target) || target === this.contentDOM) {
+      return false
+    }
+
+    return true
   }
 
   stopEvent(event: Event): boolean {
@@ -102,6 +173,11 @@ export class CodeBlockNodeView implements NodeView {
   }
 
   destroy() {
+    this.preElement.removeEventListener('scroll', this.syncHighlightScroll)
+    if (this.highlightFrame !== null) {
+      cancelAnimationFrame(this.highlightFrame)
+      this.highlightFrame = null
+    }
     if (this.reactRoot) {
       this.reactRoot.unmount()
       this.reactRoot = null

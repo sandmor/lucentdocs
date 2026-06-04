@@ -314,9 +314,10 @@ fn tag_to_node(tag: &Tag) -> ContentNode {
     Tag::BlockQuote(_) => ContentNode::new("blockquote"),
     Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced(info)) => {
       let mut node = ContentNode::new("code_block");
-      let params = info.as_ref();
-      if !params.is_empty() {
-        node.attrs.insert("params".to_string(), json!(params));
+      let language = info.as_ref().trim();
+      if !language.is_empty() {
+        let first = language.split_whitespace().next().unwrap_or(language);
+        node.attrs.insert("language".to_string(), json!(first));
       }
       node
     }

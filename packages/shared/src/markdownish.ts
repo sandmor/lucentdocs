@@ -33,7 +33,16 @@ const markdownParser = new MarkdownParser(schema, markdownIt, {
     },
   },
   code_block: { block: 'code_block', noCloseToken: true },
-  fence: { block: 'code_block', noCloseToken: true },
+  fence: {
+    block: 'code_block',
+    noCloseToken: true,
+    getAttrs(token) {
+      const info = token.info?.trim()
+      if (!info) return null
+      const language = info.split(/\s+/)[0] ?? ''
+      return language ? { language } : null
+    },
+  },
   hr: { node: 'horizontal_rule' },
   image: {
     node: 'image',
