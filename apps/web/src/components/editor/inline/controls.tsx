@@ -24,6 +24,8 @@ interface InlineAIControlsProps {
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
   onInteractionChange: (interacting: boolean) => void
+  mobileBlockBarInteracting: boolean
+  onBlockBarInteractionChange: (interacting: boolean) => void
 }
 
 export function InlineAIControls({
@@ -36,6 +38,8 @@ export function InlineAIControls({
   onContinuePrompt,
   onDismissChoices,
   onInteractionChange,
+  mobileBlockBarInteracting,
+  onBlockBarInteractionChange,
 }: InlineAIControlsProps) {
   const state = useAIWriterState(view)
   const sessionsById = useEditorStore((s) => s.inlineSessionsById)
@@ -81,6 +85,8 @@ export function InlineAIControls({
         onContinuePrompt={onContinuePrompt}
         onDismissChoices={onDismissChoices}
         onInteractionChange={onInteractionChange}
+        mobileBlockBarInteracting={mobileBlockBarInteracting}
+        onBlockBarInteractionChange={onBlockBarInteractionChange}
       />
     )
   }

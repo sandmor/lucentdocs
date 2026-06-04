@@ -28,6 +28,7 @@ import { AIBubblePresenceStore } from './collaboration/ai-bubble-presence'
 import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
 import { SearchResultMarkers, type SearchResultMarker } from './search-result-markers'
+import { BlockHandle } from './block-handle/block-handle'
 import { emitAIStateChange } from './ai/writer-store'
 import { getSelectionRangeInView, hasActiveDomSelection } from './selection/dom-selection'
 import { selectionTouchesCodeBlock, shouldShowSelectionCompose } from './inline/utils'
@@ -191,6 +192,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   // Selection range also needed as local state for overlay components
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
   const [isEditorFocused, setIsEditorFocused] = useState(false)
+  const [mobileBlockBarInteracting, setMobileBlockBarInteracting] = useState(false)
 
   const aiState = useAIWriterState(editorView)
   useInlineSessions({
@@ -558,6 +560,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     },
   }))
 
+  const handleMobileBlockBarInteractionChange = useCallback((interacting: boolean) => {
+    setMobileBlockBarInteracting(interacting)
+  }, [])
+
   const handleToolbarInteractionChange = useCallback(
     (interacting: boolean) => {
       selectionToolbarInteractingRef.current = interacting
@@ -639,6 +645,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           return aiControllerRef.current.dismissChoicesForZone(viewRef.current, zoneId)
         }}
         onInteractionChange={handleToolbarInteractionChange}
+        mobileBlockBarInteracting={mobileBlockBarInteracting}
+        onBlockBarInteractionChange={handleMobileBlockBarInteractionChange}
       />
       <RemotePresenceOverlay view={editorView} awareness={presenceAwareness} />
       <SearchResultMarkers
@@ -646,6 +654,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         container={editorShell}
         markers={searchResultMarkers}
       />
+      <BlockHandle view={editorView} container={editorShell} />
       <SelectionFakeOverlay
         view={editorView}
         selection={selectionRange}

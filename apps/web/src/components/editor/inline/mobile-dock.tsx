@@ -12,6 +12,8 @@ import { AIZoneSurface, SelectionComposeSurface } from './surfaces'
 import type { LoadingAnchor, ReviewZone } from './types'
 import type { SelectionRange } from '../selection/types'
 import { useEditorStore } from '@/lib/editor-store'
+import { MobileBlockBar } from '../block-handle/mobile-block-bar'
+import { useActiveBlock } from '../block-handle/use-active-block'
 
 interface MobileInlineAIDockProps {
   view: EditorView
@@ -20,6 +22,7 @@ interface MobileInlineAIDockProps {
   activeLoadingAnchor: LoadingAnchor | null
   reviewZones: ReviewZone[]
   stuck: boolean
+  mobileBlockBarInteracting: boolean
   onGenerate: (prompt: string, selection: SelectionRange) => boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
@@ -27,6 +30,7 @@ interface MobileInlineAIDockProps {
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
   onInteractionChange: (interacting: boolean) => void
+  onBlockBarInteractionChange: (interacting: boolean) => void
 }
 
 function setDockLayoutVariables(offset: number, reserve: number): void {
@@ -50,9 +54,26 @@ export function MobileInlineAIDock({
   onContinuePrompt,
   onDismissChoices,
   onInteractionChange,
+  mobileBlockBarInteracting,
+  onBlockBarInteractionChange,
 }: MobileInlineAIDockProps) {
   const sessionPreviewsById = useEditorStore((s) => s.inlineSessionPreviewById)
   const sessionStreamMetaById = useEditorStore((s) => s.inlineSessionStreamMetaById)
+  const isEditorFocused = useEditorStore((s) => s.isEditorFocused)
+  const activeBlock = useActiveBlock(view)
+  const [latchedBlock, setLatchedBlock] = useState<typeof activeBlock>(null)
+
+  const handleBlockBarInteraction = useCallback(
+    (interacting: boolean) => {
+      if (interacting) {
+        setLatchedBlock((previous) => activeBlock ?? previous)
+      } else if (!isEditorFocused) {
+        setLatchedBlock(null)
+      }
+      onBlockBarInteractionChange(interacting)
+    },
+    [activeBlock, isEditorFocused, onBlockBarInteractionChange]
+  )
   const dockRef = useRef<HTMLDivElement>(null)
   const selectionRootRef = useRef<HTMLDivElement>(null)
   const viewportBottomOffset = useVisualViewportBottomOffset(true)
@@ -108,7 +129,11 @@ export function MobileInlineAIDock({
     return null
   }, [activeLoadingAnchor, activeReviewZone, showSelectionCompose, selection])
 
-  const presence = useAnimatedPresence(Boolean(activeMode))
+  const displayBlock = activeBlock ?? (mobileBlockBarInteracting ? latchedBlock : null)
+  const showBlockBar = Boolean((isEditorFocused || mobileBlockBarInteracting) && displayBlock)
+  const showAI = activeMode !== null
+  const dockVisible = showAI || showBlockBar
+  const presence = useAnimatedPresence(dockVisible)
 
   const activeSessionId =
     activeMode?.kind === 'loading'
@@ -124,7 +149,7 @@ export function MobileInlineAIDock({
     : false
 
   useEffect(() => {
-    if (!presence.mounted || !dockRef.current) {
+    if (!dockVisible || !dockRef.current) {
       setDockLayoutVariables(0, 0)
       return
     }
@@ -154,7 +179,7 @@ export function MobileInlineAIDock({
       resizeObserver.disconnect()
       window.removeEventListener('resize', scheduleDockLayoutUpdate)
     }
-  }, [presence.mounted, viewportBottomOffset])
+  }, [dockVisible, viewportBottomOffset])
 
   useEffect(() => {
     return () => {
@@ -174,7 +199,7 @@ export function MobileInlineAIDock({
     [activeReviewIndex, reviewZones]
   )
 
-  if (!presence.mounted || !activeMode) return null
+  if (!dockVisible) return null
 
   return createPortal(
     <div
@@ -183,7 +208,7 @@ export function MobileInlineAIDock({
       ref={dockRef}
     >
       <div className="ai-inline-mobile-dock__inner">
-        {activeMode.kind === 'review' && reviewZones.length > 1 ? (
+        {showAI && activeMode?.kind === 'review' && reviewZones.length > 1 ? (
           <div className="mb-2 flex items-center justify-between rounded-lg border border-border bg-background/95 px-2 py-1 text-[11px] text-muted-foreground shadow-md shadow-black/5 backdrop-blur-md dark:shadow-black/40">
             <Button
               type="button"
@@ -209,7 +234,7 @@ export function MobileInlineAIDock({
           </div>
         ) : null}
 
-        {activeMode.kind === 'selection' ? (
+        {showAI && activeMode?.kind === 'selection' ? (
           <SelectionComposeSurface
             rootRef={selectionRootRef}
             className="ai-inline-controls ai-selection-toolbar ai-inline-animated ai-inline-animated-mobile ai-inline-mobile-panel flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
@@ -226,7 +251,7 @@ export function MobileInlineAIDock({
           />
         ) : null}
 
-        {activeMode.kind === 'loading' ? (
+        {showAI && activeMode?.kind === 'loading' ? (
           <AIZoneSurface
             rootRef={null}
             className="ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-mobile ai-inline-mobile-panel flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
@@ -248,7 +273,7 @@ export function MobileInlineAIDock({
           />
         ) : null}
 
-        {activeMode.kind === 'review' ? (
+        {showAI && activeMode?.kind === 'review' ? (
           <AIZoneSurface
             rootRef={null}
             className="ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-mobile ai-inline-mobile-panel flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
@@ -267,6 +292,15 @@ export function MobileInlineAIDock({
             onStop={onStop}
             onContinuePrompt={onContinuePrompt}
             onDismissChoices={onDismissChoices}
+          />
+        ) : null}
+
+        {showBlockBar && displayBlock ? (
+          <MobileBlockBar
+            view={view}
+            activeBlock={displayBlock}
+            stacked={showAI}
+            onInteractionChange={handleBlockBarInteraction}
           />
         ) : null}
       </div>

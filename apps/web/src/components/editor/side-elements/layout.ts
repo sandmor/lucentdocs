@@ -1,10 +1,78 @@
 import type { EditorView } from 'prosemirror-view'
+import type { Node as PMNode } from 'prosemirror-model'
 import { COLLISION_PADDING } from '../inline/utils'
 
 export const EDITOR_SIDE_GUTTER_OFFSET = 14
+export const BLOCK_HANDLE_WIDTH = 28
+export const BLOCK_HANDLE_BUTTON_HEIGHT = 20
+
+export interface BlockHandleLayout {
+  left: number
+  top: number
+  height: number
+}
 
 export function getEditorContentRect(view: EditorView): DOMRect {
   return view.dom.getBoundingClientRect()
+}
+
+export interface BlockHoverZone {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+/** Hover zone spanning the page main column (full gutter width on desktop). */
+export function getBlockHoverZoneRect(view: EditorView, hoverRootRect: DOMRect): BlockHoverZone {
+  const editorRect = view.dom.getBoundingClientRect()
+  return {
+    left: hoverRootRect.left,
+    right: hoverRootRect.right,
+    top: Math.min(hoverRootRect.top, editorRect.top),
+    bottom: Math.max(hoverRootRect.bottom, editorRect.bottom),
+  }
+}
+
+export function isPointerInBlockHoverZone(
+  view: EditorView,
+  hoverRootRect: DOMRect,
+  clientX: number,
+  clientY: number
+): boolean {
+  const zone = getBlockHoverZoneRect(view, hoverRootRect)
+  return (
+    clientX >= zone.left && clientX <= zone.right && clientY >= zone.top && clientY <= zone.bottom
+  )
+}
+
+/**
+ * Positions block handles on the first line of a block (not the block box top),
+ * which avoids misalignment from line-height half-leading and block margins.
+ */
+export function computeBlockHandleLayout(
+  view: EditorView,
+  containerRect: DOMRect,
+  block: { pos: number; node: PMNode; dom: HTMLElement }
+): BlockHandleLayout {
+  const editorRect = view.dom.getBoundingClientRect()
+  const left = computeLeftGutterContainerX(editorRect, containerRect, BLOCK_HANDLE_WIDTH)
+
+  const contentPos = Math.min(block.pos + 1, view.state.doc.content.size)
+  try {
+    const coords = view.coordsAtPos(contentPos)
+    const lineHeight = Math.max(1, coords.bottom - coords.top)
+    const height = Math.max(BLOCK_HANDLE_BUTTON_HEIGHT, Math.min(lineHeight, 28))
+    const top = coords.top - containerRect.top + (lineHeight - height) / 2
+    return { left, top, height }
+  } catch {
+    const blockRect = block.dom.getBoundingClientRect()
+    return {
+      left,
+      top: blockRect.top - containerRect.top,
+      height: Math.max(blockRect.height, BLOCK_HANDLE_BUTTON_HEIGHT),
+    }
+  }
 }
 
 /**

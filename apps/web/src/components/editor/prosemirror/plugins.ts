@@ -3,7 +3,6 @@ import { keymap } from 'prosemirror-keymap'
 import { baseKeymap, toggleMark } from 'prosemirror-commands'
 import { history, undo, redo } from 'prosemirror-history'
 import { inputRules, wrappingInputRule, textblockTypeInputRule } from 'prosemirror-inputrules'
-import { dropCursor } from 'prosemirror-dropcursor'
 import { gapCursor } from 'prosemirror-gapcursor'
 import * as Y from 'yjs'
 import { ySyncPlugin, yUndoPlugin, undo as yUndo, redo as yRedo } from 'y-prosemirror'
@@ -14,6 +13,7 @@ import { createAIWriterPlugin, type AIWriterActionHandlers } from '../ai/writer-
 import { isInCodeBlock } from '../inline/utils'
 import { buildCodeBlockKeymapCommand } from './code-block-keymap'
 import { installYjsSelectionPatch } from './yjs-selection-patch'
+import { blockDragPlugin } from './block-drag-plugin'
 
 export type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>
 
@@ -125,7 +125,7 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   plugins.push(buildFormatKeymap())
   plugins.push(keymap(buildCodeBlockKeymapCommand()))
   plugins.push(keymap(baseKeymap))
-  plugins.push(dropCursor())
+  plugins.push(blockDragPlugin)
   plugins.push(gapCursor())
 
   return plugins
