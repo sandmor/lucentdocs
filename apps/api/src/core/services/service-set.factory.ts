@@ -5,7 +5,10 @@ import { createProjectsService } from './projects.service.js'
 import { createDocumentsService } from './documents.service.js'
 import { createChatsService } from './chats.service.js'
 import { createAiSettingsService } from './aiSettings.service.js'
-import { createAiModelSelectionService } from './aiModelSelection.service.js'
+import {
+  createAiModelSelectionService,
+  createEmbeddingModelSelectionService,
+} from './aiModelSelection.service.js'
 import { createIndexingSettingsService } from './indexingSettings.service.js'
 import {
   createEmbeddingIndexService,
@@ -23,6 +26,7 @@ export function createCoreServiceSet(dependencies: {
 }): ServiceSet {
   const aiSettings = createAiSettingsService(dependencies.repositories, dependencies.transaction)
   const aiModelSelection = createAiModelSelectionService(dependencies.repositories)
+  const embeddingModelSelection = createEmbeddingModelSelectionService(dependencies.repositories)
   const indexingSettings = createIndexingSettingsService(dependencies.repositories)
   const embeddingIndex = createEmbeddingIndexService(
     dependencies.repositories,
@@ -30,6 +34,7 @@ export function createCoreServiceSet(dependencies: {
     dependencies.jobQueue,
     aiSettings,
     indexingSettings,
+    embeddingModelSelection,
     {
       getRuntimeConfig: dependencies.getEmbeddingRuntimeConfig,
     }
@@ -50,6 +55,7 @@ export function createCoreServiceSet(dependencies: {
       dependencies.repositories,
       dependencies.transaction,
       aiSettings,
+      embeddingModelSelection,
       {
         onDocumentContentStored: (documentId) => embeddingIndex.enqueueDocument(documentId),
         onDocumentsContentStored: (documentIds) => embeddingIndex.enqueueDocuments(documentIds),
@@ -61,6 +67,7 @@ export function createCoreServiceSet(dependencies: {
     chats: createChatsService(dependencies.repositories),
     aiSettings,
     aiModelSelection,
+    embeddingModelSelection,
     indexingSettings,
     embeddingIndex,
     auth: createAuthService(dependencies.repositories, dependencies.transaction),

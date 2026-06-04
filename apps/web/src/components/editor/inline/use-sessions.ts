@@ -15,10 +15,7 @@ export function useInlineSessions({
   documentId,
   aiState,
 }: UseInlineSessionsOptions): void {
-  const inlineSessionIdsRaw = useMemo(
-    () => resolveHydratedInlineSessionIds(aiState),
-    [aiState]
-  )
+  const inlineSessionIdsRaw = useMemo(() => resolveHydratedInlineSessionIds(aiState), [aiState])
 
   const inlineSessionIdsStr = JSON.stringify(inlineSessionIdsRaw)
   const inlineSessionIds = useMemo(() => JSON.parse(inlineSessionIdsStr), [inlineSessionIdsStr])

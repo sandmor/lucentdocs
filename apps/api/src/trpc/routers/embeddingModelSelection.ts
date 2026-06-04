@@ -1,14 +1,24 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod/v4'
-import {
-  isValidId,
-  indexingStrategySchema,
-  nullableIndexingStrategySchema,
-} from '@lucentdocs/shared'
+import { isValidId } from '@lucentdocs/shared'
 import { adminProcedure, protectedProcedure, router, type AppContext } from '../index.js'
 import { assertProjectAccess } from '../access.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
+
+async function ensureDocumentInProject(
+  ctx: AppContext,
+  projectId: string,
+  documentId: string
+): Promise<void> {
+  const isAssociated = await ctx.services.documents.hasProjectAssociation(projectId, documentId)
+  if (!isAssociated) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: `Document ${documentId} not found in project ${projectId}`,
+    })
+  }
+}
 
 async function enqueueProjectDocuments(ctx: AppContext, projectId: string): Promise<void> {
   const documents = await ctx.services.documents.listForProject(projectId)
@@ -25,43 +35,35 @@ async function enqueueProjectsOwnedByUser(ctx: AppContext, userId: string): Prom
   await Promise.all(projects.map((project) => enqueueProjectDocuments(ctx, project.id)))
 }
 
-async function ensureDocumentInProject(
-  ctx: AppContext,
-  projectId: string,
-  documentId: string
-): Promise<void> {
-  const isAssociated = await ctx.services.documents.hasProjectAssociation(projectId, documentId)
-  if (!isAssociated) {
-    throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: `Document ${documentId} not found in project ${projectId}`,
-    })
-  }
-}
+export const embeddingModelSelectionRouter = router({
+  availableProviders: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.services.embeddingModelSelection.getAvailableProviders()
+  }),
 
-export const indexingRouter = router({
-  getGlobal: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.services.indexingSettings.getGlobal()
+  getGlobal: adminProcedure.query(async ({ ctx }) => {
+    return ctx.services.embeddingModelSelection.getGlobal()
   }),
 
   updateGlobal: adminProcedure
-    .input(z.object({ strategy: indexingStrategySchema }))
+    .input(z.object({ providerConfigId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const snapshot = await ctx.services.indexingSettings.updateGlobal(input.strategy)
+      const snapshot = await ctx.services.embeddingModelSelection.updateGlobal(
+        input.providerConfigId
+      )
       await enqueueAllDocuments(ctx)
       return snapshot
     }),
 
   getUser: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.services.indexingSettings.getUserSnapshot(ctx.user.id)
+    return ctx.services.embeddingModelSelection.getUserSnapshot(ctx.user.id)
   }),
 
   updateUser: protectedProcedure
-    .input(z.object({ strategy: nullableIndexingStrategySchema }))
+    .input(z.object({ providerConfigId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
-      const snapshot = await ctx.services.indexingSettings.updateUserStrategy(
+      const snapshot = await ctx.services.embeddingModelSelection.updateUserStrategy(
         ctx.user.id,
-        input.strategy
+        input.providerConfigId
       )
       await enqueueProjectsOwnedByUser(ctx, ctx.user.id)
       return snapshot
@@ -71,7 +73,9 @@ export const indexingRouter = router({
     .input(z.object({ projectId: idSchema }))
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
-      const snapshot = await ctx.services.indexingSettings.getProjectSnapshot(input.projectId)
+      const snapshot = await ctx.services.embeddingModelSelection.getProjectSnapshot(
+        input.projectId
+      )
       if (!snapshot) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -85,14 +89,14 @@ export const indexingRouter = router({
     .input(
       z.object({
         projectId: idSchema,
-        strategy: nullableIndexingStrategySchema,
+        providerConfigId: z.string().nullable(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
-      const snapshot = await ctx.services.indexingSettings.updateProjectStrategy(
+      const snapshot = await ctx.services.embeddingModelSelection.updateProjectStrategy(
         input.projectId,
-        input.strategy
+        input.providerConfigId
       )
       if (!snapshot) {
         throw new TRPCError({
@@ -115,7 +119,7 @@ export const indexingRouter = router({
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
       await ensureDocumentInProject(ctx, input.projectId, input.id)
-      const snapshot = await ctx.services.indexingSettings.getDocumentSnapshot(
+      const snapshot = await ctx.services.embeddingModelSelection.getDocumentSnapshot(
         input.id,
         input.projectId
       )
@@ -133,15 +137,15 @@ export const indexingRouter = router({
       z.object({
         projectId: idSchema,
         id: idSchema,
-        strategy: nullableIndexingStrategySchema,
+        providerConfigId: z.string().nullable(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
       await ensureDocumentInProject(ctx, input.projectId, input.id)
-      const snapshot = await ctx.services.indexingSettings.updateDocumentStrategy(
+      const snapshot = await ctx.services.embeddingModelSelection.updateDocumentStrategy(
         input.id,
-        input.strategy,
+        input.providerConfigId,
         input.projectId
       )
       if (!snapshot) {

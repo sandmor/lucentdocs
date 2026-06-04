@@ -9,6 +9,7 @@ import { inlineRouter } from './routers/inline.js'
 import { authRouter } from './routers/auth.js'
 import { indexingRouter } from './routers/indexing.js'
 import { aiModelSelectionRouter } from './routers/aiModelSelection.js'
+import { embeddingModelSelectionRouter } from './routers/embeddingModelSelection.js'
 
 export const appRouter = router({
   projects: projectsRouter,
@@ -21,6 +22,7 @@ export const appRouter = router({
   auth: authRouter,
   indexing: indexingRouter,
   aiModelSelection: aiModelSelectionRouter,
+  embeddingModelSelection: embeddingModelSelectionRouter,
 })
 
 export type AppRouter = typeof appRouter

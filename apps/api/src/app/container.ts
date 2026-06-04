@@ -6,7 +6,10 @@ import { createYjsRuntime, type YjsRuntime, type YjsRuntimeConfig } from '../yjs
 import { createChatRuntime, type ChatRuntime } from '../chat/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from '../inline/runtime.js'
 import { configureAiProvider, configureAiModelSelection } from '../ai/index.js'
-import { configureEmbeddingProvider } from '../embeddings/provider.js'
+import {
+  configureEmbeddingProvider,
+  configureEmbeddingModelSelection,
+} from '../embeddings/provider.js'
 import {
   createDocumentImportJobHandler,
   createDocumentImportRuntime,
@@ -96,6 +99,7 @@ export async function createContainer(
   configureAiProvider(adapter.services.aiSettings)
   configureAiModelSelection(adapter.services.aiModelSelection)
   configureEmbeddingProvider(adapter.services.aiSettings)
+  configureEmbeddingModelSelection(adapter.services.embeddingModelSelection)
 
   const appConfig = configManager.getConfig()
   let authPort: AuthPort

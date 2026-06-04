@@ -29,9 +29,7 @@ describe('isInCodeBlock', () => {
   })
 
   test('returns false for paragraph selections', () => {
-    const doc = schema.node('doc', null, [
-      schema.node('paragraph', null, [schema.text('hello')]),
-    ])
+    const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('hello')])])
     const view = viewFromDoc(doc, 2)
     expect(isInCodeBlock(view)).toBe(false)
   })
@@ -59,18 +57,14 @@ describe('selectionTouchesCodeBlock', () => {
 
 describe('shouldShowSelectionCompose', () => {
   test('returns false for selections inside code blocks', () => {
-    const doc = schema.node('doc', null, [
-      schema.node('code_block', null, [schema.text('code')]),
-    ])
+    const doc = schema.node('doc', null, [schema.node('code_block', null, [schema.text('code')])])
     const view = viewFromDoc(doc, 2)
     const selection: SelectionRange = { from: 2, to: 5 }
     expect(shouldShowSelectionCompose(view, selection)).toBe(false)
   })
 
   test('returns true for paragraph selections', () => {
-    const doc = schema.node('doc', null, [
-      schema.node('paragraph', null, [schema.text('text')]),
-    ])
+    const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('text')])])
     const view = viewFromDoc(doc, 2)
     const selection: SelectionRange = { from: 2, to: 5 }
     expect(shouldShowSelectionCompose(view, selection)).toBe(true)
@@ -79,18 +73,14 @@ describe('shouldShowSelectionCompose', () => {
 
 describe('canApplyFormatMark', () => {
   test('disables inline marks inside code blocks', () => {
-    const doc = schema.node('doc', null, [
-      schema.node('code_block', null, [schema.text('code')]),
-    ])
+    const doc = schema.node('doc', null, [schema.node('code_block', null, [schema.text('code')])])
     const view = viewFromDoc(doc, 2)
     expect(canApplyFormatMark(view, 'strong')).toBe(false)
     expect(canApplyFormatMark(view, 'code')).toBe(false)
   })
 
   test('allows inline marks in paragraphs', () => {
-    const doc = schema.node('doc', null, [
-      schema.node('paragraph', null, [schema.text('text')]),
-    ])
+    const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('text')])])
     const view = viewFromDoc(doc, 2)
     expect(canApplyFormatMark(view, 'strong')).toBe(true)
   })

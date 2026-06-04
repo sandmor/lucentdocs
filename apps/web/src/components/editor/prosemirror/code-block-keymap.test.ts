@@ -17,16 +17,16 @@ describe('handleCodeBlockBackspace', () => {
     const state = stateAt(doc, 1)
     let applied: EditorState | undefined
 
-    expect(handleCodeBlockBackspace(state, (tr) => {
-      applied = state.apply(tr)
-    })).toBe(true)
+    expect(
+      handleCodeBlockBackspace(state, (tr) => {
+        applied = state.apply(tr)
+      })
+    ).toBe(true)
     expect(applied?.doc.firstChild?.type.name).toBe('paragraph')
   })
 
   test('does not convert a non-empty code block at the start', () => {
-    const doc = schema.node('doc', null, [
-      schema.node('code_block', null, [schema.text('line')]),
-    ])
+    const doc = schema.node('doc', null, [schema.node('code_block', null, [schema.text('line')])])
     const state = stateAt(doc, 1)
 
     expect(handleCodeBlockBackspace(state)).toBe(false)

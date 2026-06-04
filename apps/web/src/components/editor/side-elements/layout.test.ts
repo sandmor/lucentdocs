@@ -11,9 +11,7 @@ function rect(left: number): DOMRect {
 
 describe('computeLeftGutterViewportX', () => {
   test('places element right edge offset px left of editor content', () => {
-    expect(computeLeftGutterViewportX(rect(200), 40)).toBe(
-      200 - EDITOR_SIDE_GUTTER_OFFSET - 40
-    )
+    expect(computeLeftGutterViewportX(rect(200), 40)).toBe(200 - EDITOR_SIDE_GUTTER_OFFSET - 40)
   })
 
   test('respects custom offset', () => {

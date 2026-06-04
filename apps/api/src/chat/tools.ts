@@ -283,7 +283,10 @@ export function buildReadTools({ scope, services }: BuildReadToolsContext) {
           searchToolConfig.maxResultLimit
         )
         const previewMaxLength = searchToolConfig.previewMaxLength
-        const resolved = await services.indexingSettings.resolveForDocument(scope.documentId)
+        const resolved = await services.indexingSettings.resolveForDocument(
+          scope.documentId,
+          scope.projectId
+        )
         const indexing = buildIndexingSummary(resolved)
 
         const notes: string[] = [

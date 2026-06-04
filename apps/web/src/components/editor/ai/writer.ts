@@ -22,7 +22,11 @@ import {
   updateZoneNode,
   wrapSliceWithZoneNodes,
 } from './writer/zone-marks'
-import type { AIWriterController, AIWriterControllerOptions, InlineStreamPayload } from './writer/types'
+import type {
+  AIWriterController,
+  AIWriterControllerOptions,
+  InlineStreamPayload,
+} from './writer/types'
 import { getTrpcProxyClient } from '@/lib/trpc'
 
 export function createAIWriterController(

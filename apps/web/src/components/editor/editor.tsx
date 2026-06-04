@@ -651,9 +651,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         selection={selectionRange}
         visible={Boolean(
           editorView &&
-            selectionRange &&
-            !isEditorFocused &&
-            shouldShowSelectionCompose(editorView, selectionRange)
+          selectionRange &&
+          !isEditorFocused &&
+          shouldShowSelectionCompose(editorView, selectionRange)
         )}
       />
     </div>

@@ -13,7 +13,9 @@ export function UserSettingsPage() {
   const utils = trpc.useUtils()
   const query = trpc.indexing.getUser.useQuery()
   const aiModelQuery = trpc.aiModelSelection.getUser.useQuery()
+  const embeddingModelQuery = trpc.embeddingModelSelection.getUser.useQuery()
   const aiProvidersQuery = trpc.aiModelSelection.availableProviders.useQuery()
+  const embeddingProvidersQuery = trpc.embeddingModelSelection.availableProviders.useQuery()
 
   const mutation = trpc.indexing.updateUser.useMutation({
     onSuccess: async () => {
@@ -47,8 +49,29 @@ export function UserSettingsPage() {
     },
   })
 
+  const embeddingModelMutation = trpc.embeddingModelSelection.updateUser.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.embeddingModelSelection.getUser.invalidate(),
+        utils.embeddingModelSelection.getProject.invalidate(),
+        utils.embeddingModelSelection.getDocument.invalidate(),
+      ])
+      toast.success('User embedding model updated')
+    },
+    onError: (error) => {
+      toast.error('Failed to update user embedding model', {
+        description: error.message,
+      })
+    },
+  })
+
   const isLoading =
-    query.isLoading || aiModelQuery.isLoading || aiProvidersQuery.isLoading || !query.data
+    query.isLoading ||
+    aiModelQuery.isLoading ||
+    embeddingModelQuery.isLoading ||
+    aiProvidersQuery.isLoading ||
+    embeddingProvidersQuery.isLoading ||
+    !query.data
 
   return (
     <div className="min-h-screen bg-background">
@@ -64,7 +87,11 @@ export function UserSettingsPage() {
           </p>
         </div>
 
-        {isLoading || !aiModelQuery.data || !aiProvidersQuery.data ? (
+        {isLoading ||
+        !aiModelQuery.data ||
+        !embeddingModelQuery.data ||
+        !aiProvidersQuery.data ||
+        !embeddingProvidersQuery.data ? (
           <PageLoader variant="inline" message="Loading settings…" />
         ) : (
           <div className="grid gap-6">
@@ -91,9 +118,33 @@ export function UserSettingsPage() {
 
             <Card>
               <CardHeader>
+                <CardTitle>Embedding model</CardTitle>
+                <CardDescription>
+                  This applies to documents owned only by your projects unless a project or document
+                  override is set. Shared documents use a document override or the global default.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <AiModelSelectionForm
+                  allowInherit
+                  directSelection={embeddingModelQuery.data.user?.providerConfigId ?? null}
+                  resolvedProviderConfigId={embeddingModelQuery.data.resolved.providerConfigId}
+                  resolvedScopeType={embeddingModelQuery.data.resolved.scopeType}
+                  availableProviders={embeddingProvidersQuery.data}
+                  isSaving={embeddingModelMutation.isPending}
+                  saveLabel="Save user override"
+                  modeLabel="Embedding model mode"
+                  onSave={(providerConfigId) => embeddingModelMutation.mutate({ providerConfigId })}
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
                 <CardTitle>Indexing strategy</CardTitle>
                 <CardDescription>
-                  This applies to your projects unless a project or document override is set.
+                  This applies to documents owned only by your projects unless a project or document
+                  override is set. Shared documents use a document override or the global default.
                 </CardDescription>
               </CardHeader>
               <CardContent>

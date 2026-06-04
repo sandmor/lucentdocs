@@ -7,7 +7,11 @@ import { LOCAL_DEFAULT_USER, type User } from '../../core/models/user.js'
 import type { AppContext } from '../index.js'
 import { documentsRouter } from './documents.js'
 import { createTestAdapter, type TestAdapter } from '../../testing/factory.js'
-import { configureEmbeddingProvider, resetEmbeddingClient } from '../../embeddings/provider.js'
+import {
+  configureEmbeddingModelSelection,
+  configureEmbeddingProvider,
+  resetEmbeddingClient,
+} from '../../embeddings/provider.js'
 import { projectSyncBus } from '../project-sync.js'
 import { projectSyncEventSchema } from './sync.js'
 import {
@@ -90,6 +94,7 @@ async function initializeEmbeddingSelection(adapter: TestAdapter): Promise<void>
     },
   })
   configureEmbeddingProvider(adapter.services.aiSettings)
+  configureEmbeddingModelSelection(adapter.services.embeddingModelSelection)
 }
 
 describe('documentsRouter', () => {
@@ -295,6 +300,246 @@ describe('documentsRouter', () => {
     expect(results[1]?.snippets).toEqual([])
     expect(results.some((result) => result.id === foreignDoc.id)).toBe(false)
     expect(results.some((result) => result.id === mismatchedModelDoc.id)).toBe(false)
+  })
+
+  test('search merges results across multiple resolved embedding models in a project', async () => {
+    const user: User = {
+      id: 'owner_1',
+      name: 'Owner One',
+      email: 'owner1@example.com',
+      role: 'user',
+    }
+    const adapter = createTestAdapter()
+    await initializeEmbeddingSelection(adapter)
+
+    const snapshot = await adapter.services.aiSettings.getSnapshot()
+    const primary = snapshot.embeddingProviders[0]
+    if (!primary) {
+      throw new Error('Expected a default embedding provider.')
+    }
+
+    await adapter.services.aiSettings.updateSettings({
+      usage: 'embedding',
+      providers: [
+        {
+          id: primary.id,
+          name: primary.name ?? undefined,
+          providerId: primary.providerId,
+          type: primary.type,
+          baseURL: primary.baseURL,
+          model: primary.model,
+          apiKeyId: primary.apiKeyId,
+        },
+        {
+          providerId: 'openrouter',
+          type: 'openrouter',
+          baseURL: OPENROUTER_BASE_URL,
+          model: 'openai/text-embedding-ada-002',
+          apiKeyId: null,
+        },
+      ],
+    })
+
+    const secondary = (await adapter.services.embeddingModelSelection.getAvailableProviders()).find(
+      (provider) => provider.model === 'openai/text-embedding-ada-002'
+    )
+
+    if (!secondary) {
+      throw new Error('Expected a secondary embedding provider.')
+    }
+
+    const project = await adapter.services.projects.create('Mixed models', { ownerUserId: user.id })
+    const defaultModelDoc = await adapter.services.documents.createForProject(
+      project.id,
+      'default-model.md'
+    )
+    const overrideModelDoc = await adapter.services.documents.createForProject(
+      project.id,
+      'override-model.md'
+    )
+
+    if (!defaultModelDoc || !overrideModelDoc) {
+      throw new Error('Expected test documents to be created.')
+    }
+
+    await adapter.services.embeddingModelSelection.updateDocumentStrategy(
+      overrideModelDoc.id,
+      secondary.id
+    )
+
+    const now = Date.now()
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: defaultModelDoc.id,
+      providerConfigId: primary.id,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      model: primary.model,
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 300,
+      contentHash: 'default-model-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 52,
+          text: 'Moonlight spills across the forest canopy in silver ribbons.',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: overrideModelDoc.id,
+      providerConfigId: secondary.id,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'openai/text-embedding-ada-002',
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 301,
+      contentHash: 'override-model-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 50,
+          text: 'Another moonlight forest scene with silver branches and mist.',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const caller = documentsRouter.createCaller(
+      createCallerContext({
+        user,
+        adapter,
+      })
+    )
+
+    const results = await caller.search({
+      projectId: project.id,
+      query: 'silver moonlight forest',
+      limit: 5,
+      scope: { type: 'project' },
+    })
+
+    expect(results.map((result) => result.id).sort()).toEqual(
+      [defaultModelDoc.id, overrideModelDoc.id].sort()
+    )
+  })
+
+  test('search uses document-owned embedding policy for shared documents', async () => {
+    const user: User = {
+      id: 'owner_1',
+      name: 'Owner One',
+      email: 'owner1@example.com',
+      role: 'user',
+    }
+    const adapter = createTestAdapter()
+    await initializeEmbeddingSelection(adapter)
+
+    const snapshot = await adapter.services.aiSettings.getSnapshot()
+    const primary = snapshot.embeddingProviders[0]
+    if (!primary) {
+      throw new Error('Expected a default embedding provider.')
+    }
+
+    await adapter.services.aiSettings.updateSettings({
+      usage: 'embedding',
+      providers: [
+        {
+          id: primary.id,
+          name: primary.name ?? undefined,
+          providerId: primary.providerId,
+          type: primary.type,
+          baseURL: primary.baseURL,
+          model: primary.model,
+          apiKeyId: primary.apiKeyId,
+        },
+        {
+          providerId: 'openrouter',
+          type: 'openrouter',
+          baseURL: OPENROUTER_BASE_URL,
+          model: 'openai/text-embedding-ada-002',
+          apiKeyId: null,
+        },
+      ],
+    })
+
+    const secondary = (await adapter.services.embeddingModelSelection.getAvailableProviders()).find(
+      (provider) => provider.model === 'openai/text-embedding-ada-002'
+    )
+
+    if (!secondary) {
+      throw new Error('Expected a secondary embedding provider.')
+    }
+
+    const projectA = await adapter.services.projects.create('Story', { ownerUserId: user.id })
+    const projectB = await adapter.services.projects.create('Shared', { ownerUserId: user.id })
+    const sharedDoc = await adapter.services.documents.createForProject(projectA.id, 'shared.md')
+
+    if (!sharedDoc) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    await adapter.repositories.projectDocuments.insert({
+      projectId: projectB.id,
+      documentId: sharedDoc.id,
+      addedAt: Date.now(),
+    })
+    await adapter.services.embeddingModelSelection.updateProjectStrategy(projectA.id, secondary.id)
+
+    const now = Date.now()
+    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+      documentId: sharedDoc.id,
+      providerConfigId: primary.id,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      model: primary.model,
+      strategy: { type: 'whole_document', properties: {} },
+      documentTimestamp: 400,
+      contentHash: 'shared-global-model-hash',
+      chunks: [
+        {
+          ordinal: 0,
+          start: 0,
+          end: 56,
+          text: 'Silver moonlight marks the shared document for global embeddings.',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const caller = documentsRouter.createCaller(
+      createCallerContext({
+        user,
+        adapter,
+      })
+    )
+
+    const projectResults = await caller.search({
+      projectId: projectA.id,
+      query: 'silver moonlight shared',
+      limit: 5,
+      scope: { type: 'project' },
+    })
+    const documentResults = await adapter.services.documents.searchForProjectDocument(
+      projectA.id,
+      sharedDoc.id,
+      'silver moonlight shared',
+      { limit: 5 }
+    )
+
+    expect(projectResults.map((result) => result.id)).toContain(sharedDoc.id)
+    expect(documentResults).toHaveLength(1)
   })
 
   test('search supports directory subtree scope for semantic results', async () => {

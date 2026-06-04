@@ -28,10 +28,7 @@ import {
   type InlineScope,
   type InlineSessionMetadataStore,
 } from './metadata-store.js'
-import {
-  serializeInlineConversation,
-  sessionAfterInterruptedGeneration,
-} from './conversation.js'
+import { serializeInlineConversation, sessionAfterInterruptedGeneration } from './conversation.js'
 import type { RepositorySet } from '../core/ports/types.js'
 import type { YjsDocumentVersion, YjsRuntime } from '../yjs/runtime.js'
 import {
@@ -250,7 +247,6 @@ function createUserMessage(text: string): InlineChatMessage {
     tools: [],
   }
 }
-
 
 function getMessageParts(message: unknown): unknown[] {
   if (typeof message !== 'object' || message === null || Array.isArray(message)) {

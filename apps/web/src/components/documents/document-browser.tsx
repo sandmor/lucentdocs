@@ -179,6 +179,19 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
           onSaveDocumentAiModel={browser.saveDocumentAiModel}
           isLoadingDocumentAiModel={browser.isLoadingDocumentAiModel}
           isSavingDocumentAiModel={browser.isSavingDocumentAiModel}
+          documentEmbeddingModelDirectId={
+            browser.documentEmbeddingModel?.document?.providerConfigId ?? null
+          }
+          documentEmbeddingModelResolvedId={
+            browser.documentEmbeddingModel?.resolved.providerConfigId ?? null
+          }
+          documentEmbeddingModelResolvedScopeType={
+            browser.documentEmbeddingModel?.resolved.scopeType ?? null
+          }
+          availableEmbeddingProviders={browser.embeddingProviders ?? []}
+          onSaveDocumentEmbeddingModel={browser.saveDocumentEmbeddingModel}
+          isLoadingDocumentEmbeddingModel={browser.isLoadingDocumentEmbeddingModel}
+          isSavingDocumentEmbeddingModel={browser.isSavingDocumentEmbeddingModel}
         />
       </section>
     </DndContext>

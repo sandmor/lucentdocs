@@ -70,7 +70,5 @@ export function shouldStartChunkPumpForGeneration(
   pumpGenerationId: string | null,
   eventGenerationId: string
 ): boolean {
-  return (
-    activeGenerationId !== eventGenerationId || pumpGenerationId !== eventGenerationId
-  )
+  return activeGenerationId !== eventGenerationId || pumpGenerationId !== eventGenerationId
 }

@@ -1,6 +1,7 @@
-import type { AiModelSelectionScopeType } from '@lucentdocs/shared'
+import type { AiModelSelectionScopeType, AiProviderSelectionUsage } from '@lucentdocs/shared'
 
 export interface AiModelSelectionEntity {
+  usage: AiProviderSelectionUsage
   scopeType: AiModelSelectionScopeType
   scopeId: string
   providerConfigId: string
@@ -8,6 +9,7 @@ export interface AiModelSelectionEntity {
 }
 
 export interface UpsertAiModelSelectionInput {
+  usage: AiProviderSelectionUsage
   scopeType: AiModelSelectionScopeType
   scopeId: string
   providerConfigId: string
@@ -16,13 +18,19 @@ export interface UpsertAiModelSelectionInput {
 
 export interface AiModelSelectionRepositoryPort {
   get(
+    usage: AiProviderSelectionUsage,
     scopeType: AiModelSelectionScopeType,
     scopeId: string
   ): Promise<AiModelSelectionEntity | undefined>
   getMany(
+    usage: AiProviderSelectionUsage,
     scopeType: AiModelSelectionScopeType,
     scopeIds: string[]
   ): Promise<AiModelSelectionEntity[]>
   upsert(input: UpsertAiModelSelectionInput): Promise<AiModelSelectionEntity>
-  delete(scopeType: AiModelSelectionScopeType, scopeId: string): Promise<void>
+  delete(
+    usage: AiProviderSelectionUsage,
+    scopeType: AiModelSelectionScopeType,
+    scopeId: string
+  ): Promise<void>
 }

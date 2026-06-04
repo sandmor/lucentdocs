@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { AiSettingsService } from '../core/services/aiSettings.service.js'
+import type { AiProviderSelectionService } from '../core/services/aiModelSelection.service.js'
 import {
+  configureEmbeddingModelSelection,
   configureEmbeddingProvider,
   getEmbeddingProvider,
   resetEmbeddingClient,
@@ -14,7 +16,6 @@ function createAiSettingsServiceMock(): AiSettingsService {
     getSnapshot: async () => ({
       generationProviders: [],
       embeddingProviders: [],
-      activeEmbeddingProviderId: null,
       apiKeys: [],
     }),
     updateSettings: async () => {
@@ -29,24 +30,35 @@ function createAiSettingsServiceMock(): AiSettingsService {
     deleteApiKey: async () => {
       throw new Error('not implemented')
     },
-    resolveRuntimeSelection: async () => ({
-      providerConfigId: 'embedding-provider',
+    resolveApiKeyForBaseURL: async () => null,
+    resolveApiKeyById: async () => null,
+    resolveProviderByConfigId: async (configId: string) => ({
+      providerConfigId: configId,
       providerId: 'openrouter',
       type: 'openrouter',
       baseURL: OPENROUTER_BASE_URL,
       model: 'openai/text-embedding-3-small',
       apiKey: 'test-key',
     }),
-    resolveApiKeyForBaseURL: async () => null,
-    resolveApiKeyById: async () => null,
-    resolveProviderByConfigId: async () => null,
   }
+}
+
+function createEmbeddingModelSelectionMock(): AiProviderSelectionService {
+  return {
+    getGlobal: async () => ({
+      scopeType: 'global',
+      scopeId: 'global',
+      providerConfigId: 'embedding-provider',
+      updatedAt: Date.now(),
+    }),
+  } as unknown as AiProviderSelectionService
 }
 
 function configureWithMockFetch(fetchImpl: () => Promise<Response>): void {
   configureEmbeddingProvider(createAiSettingsServiceMock(), {
     fetchImpl: fetchImpl as unknown as typeof fetch,
   })
+  configureEmbeddingModelSelection(createEmbeddingModelSelectionMock())
 }
 
 describe('EmbeddingProvider', () => {
@@ -124,6 +136,7 @@ describe('EmbeddingProvider', () => {
 
     try {
       resetEmbeddingClient()
+      configureEmbeddingModelSelection(createEmbeddingModelSelectionMock())
       const secondProvider = await getEmbeddingProvider()
       const second = await secondProvider.embed(['beta'])
       expect(second[0]?.embedding).toEqual([0.1, 0.2, 0.3])

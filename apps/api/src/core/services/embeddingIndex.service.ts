@@ -3,8 +3,9 @@ import { DEFAULT_PERSISTED_CONFIG, type IndexingStrategy } from '@lucentdocs/sha
 import type { RepositorySet } from '../ports/types.js'
 import type { TransactionPort } from '../ports/transaction.port.js'
 import type { JobQueuePort } from '../ports/jobQueue.port.js'
-import type { AiSettingsService } from './aiSettings.service.js'
+import type { AiSettingsService, RuntimeProviderSelection } from './aiSettings.service.js'
 import type { IndexingSettingsService } from './indexingSettings.service.js'
+import type { AiProviderSelectionService } from './aiModelSelection.service.js'
 import type { DocumentEmbeddingEntity } from '../ports/documentEmbeddings.port.js'
 import type { DocumentEmbeddingVectorReference } from '../ports/documentEmbeddings.port.js'
 import type {
@@ -13,7 +14,7 @@ import type {
 } from '../ports/embeddingIndexQueue.port.js'
 import { readDocumentContentSnapshot } from '../../embeddings/document-content.js'
 import { prepareEmbeddingDocumentsNative } from '../../embeddings/native-preparation.js'
-import { getEmbeddingProvider } from '../../embeddings/provider.js'
+import { getEmbeddingProviderForConfigId } from '../../embeddings/provider.js'
 import { normalizeBaseURL } from '../ai/provider-types.js'
 import { EMBEDDING_VECTOR_CLEANUP_JOB_TYPE } from '../jobs/job-types.js'
 import type { EmbeddingVectorCleanupJobPayload } from '../jobs/embedding-vector-cleanup-job.js'
@@ -126,6 +127,7 @@ export function createEmbeddingIndexService(
   jobQueue: JobQueuePort,
   aiSettingsService: AiSettingsService,
   indexingSettingsService: IndexingSettingsService,
+  embeddingModelSelectionService: AiProviderSelectionService,
   configOptions: {
     getRuntimeConfig?: () => EmbeddingIndexRuntimeConfig
   } = {}
@@ -250,8 +252,19 @@ export function createEmbeddingIndexService(
       return { queued: queuedCount, processed: 0, skipped: 0 }
     }
 
-    const selection = await aiSettingsService.resolveRuntimeSelection('embedding')
-    const provider = await getEmbeddingProvider()
+    const resolvedEmbeddings = await embeddingModelSelectionService.resolveForDocuments(
+      jobsToProcess.map((job) => job.documentId)
+    )
+    const resolvedSelectionsByConfigId = new Map<string, RuntimeProviderSelection>()
+    for (const resolved of resolvedEmbeddings.values()) {
+      if (!resolved) continue
+      if (resolvedSelectionsByConfigId.has(resolved.providerConfigId)) continue
+      const selection = await aiSettingsService.resolveProviderByConfigId(resolved.providerConfigId)
+      if (selection) {
+        resolvedSelectionsByConfigId.set(resolved.providerConfigId, selection)
+      }
+    }
+
     const documents = await repos.documents.findByIds(jobsToProcess.map((job) => job.documentId))
     const documentsById = new Map(documents.map((document) => [document.id, document]))
     const resolvedStrategies = await indexingSettingsService.resolveForDocuments(
@@ -265,6 +278,7 @@ export function createEmbeddingIndexService(
       expectedLastQueuedAt: number
       chunks: PreparedEmbeddingChunk[]
       strategy: IndexingStrategy
+      selection: RuntimeProviderSelection
     }> = []
     const candidatesToClear: Array<{ documentId: string; expectedLastQueuedAt: number }> = []
     let skipped = 0
@@ -366,6 +380,18 @@ export function createEmbeddingIndexService(
 
       const chunks = prepared.chunks
 
+      const resolvedEmbedding = resolvedEmbeddings.get(document.id)
+      const selection = resolvedEmbedding
+        ? resolvedSelectionsByConfigId.get(resolvedEmbedding.providerConfigId)
+        : undefined
+      if (!selection) {
+        candidatesToClear.push({
+          documentId: document.id,
+          expectedLastQueuedAt: job.lastQueuedAt,
+        })
+        continue
+      }
+
       const contentHash = hashEmbeddingText(
         JSON.stringify({
           strategy: resolvedStrategy.strategy,
@@ -396,6 +422,7 @@ export function createEmbeddingIndexService(
         expectedLastQueuedAt: job.lastQueuedAt,
         chunks,
         strategy: resolvedStrategy.strategy,
+        selection,
       })
     }
 
@@ -411,30 +438,45 @@ export function createEmbeddingIndexService(
         1,
         Math.floor(runtimeConfig.batchMaxInputs || DEFAULT_BATCH_MAX_INPUTS)
       )
-      const embeddings = await embedDocumentsInPlannedBatches(
-        provider,
-        documentsToEmbed,
-        {
-          baseURL: selection.baseURL,
-          model: selection.model,
-        },
-        { maxTokens, maxInputs }
-      )
 
-      const replacements: Array<{
-        item: (typeof documentsToEmbed)[number]
-        startOffset: number
-      }> = []
-      let embeddingOffset = 0
+      const documentsByConfigId = new Map<string, typeof documentsToEmbed>()
       for (const item of documentsToEmbed) {
-        replacements.push({ item, startOffset: embeddingOffset })
-        embeddingOffset += item.chunks.length
+        const group = documentsByConfigId.get(item.selection.providerConfigId) ?? []
+        group.push(item)
+        documentsByConfigId.set(item.selection.providerConfigId, group)
+      }
+
+      const embeddingsByDocumentId = new Map<string, Array<{ embedding: number[] }>>()
+
+      for (const [providerConfigId, groupDocuments] of documentsByConfigId.entries()) {
+        const selection = resolvedSelectionsByConfigId.get(providerConfigId)
+        if (!selection) continue
+
+        const provider = await getEmbeddingProviderForConfigId(providerConfigId)
+        const embeddings = await embedDocumentsInPlannedBatches(
+          provider,
+          groupDocuments,
+          {
+            baseURL: selection.baseURL,
+            model: selection.model,
+          },
+          { maxTokens, maxInputs }
+        )
+
+        let embeddingOffset = 0
+        for (const item of groupDocuments) {
+          embeddingsByDocumentId.set(
+            item.documentId,
+            embeddings.slice(embeddingOffset, embeddingOffset + item.chunks.length)
+          )
+          embeddingOffset += item.chunks.length
+        }
       }
 
       const replacementResults = await mapWithConcurrency(
-        replacements,
+        documentsToEmbed,
         EMBED_REPLACE_CONCURRENCY,
-        async ({ item, startOffset }) => {
+        async (item) => {
           const currentJob = await repos.embeddingIndexQueue.getQueuedDocument(item.documentId)
           if (!currentJob || currentJob.lastQueuedAt !== item.expectedLastQueuedAt) {
             return {
@@ -445,8 +487,9 @@ export function createEmbeddingIndexService(
             }
           }
 
+          const documentEmbeddings = embeddingsByDocumentId.get(item.documentId) ?? []
           const nextChunks = item.chunks.map((chunk, chunkIndex) => {
-            const embedding = embeddings[startOffset + chunkIndex]?.embedding
+            const embedding = documentEmbeddings[chunkIndex]?.embedding
             if (!embedding) {
               throw new Error(
                 `Missing embedding vector for document ${item.documentId} chunk ${chunk.ordinal}.`
@@ -460,7 +503,7 @@ export function createEmbeddingIndexService(
               selectionFrom: chunk.selectionFrom,
               selectionTo: chunk.selectionTo,
               text: chunk.text,
-              vectorKey: `${item.documentId}:${normalizeBaseURL(selection.baseURL)}:${selection.model.trim()}:${chunk.ordinal}`,
+              vectorKey: `${item.documentId}:${normalizeBaseURL(item.selection.baseURL)}:${item.selection.model.trim()}:${chunk.ordinal}`,
               embedding,
             }
           })
@@ -469,11 +512,11 @@ export function createEmbeddingIndexService(
           try {
             replacement = await repos.documentEmbeddings.replaceEmbeddings({
               documentId: item.documentId,
-              providerConfigId: selection.providerConfigId,
-              providerId: selection.providerId,
-              type: selection.type,
-              baseURL: selection.baseURL,
-              model: selection.model,
+              providerConfigId: item.selection.providerConfigId,
+              providerId: item.selection.providerId,
+              type: item.selection.type,
+              baseURL: item.selection.baseURL,
+              model: item.selection.model,
               strategy: item.strategy,
               documentTimestamp: item.documentTimestamp,
               contentHash: item.contentHash,

@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  areInlineSessionPreviewsEqual,
-  type InlineSessionPreview,
-} from './inline-session-preview'
+import { areInlineSessionPreviewsEqual, type InlineSessionPreview } from './inline-session-preview'
 
 describe('areInlineSessionPreviewsEqual', () => {
   const preview: InlineSessionPreview = {
@@ -18,17 +15,15 @@ describe('areInlineSessionPreviewsEqual', () => {
   })
 
   test('detects text, tool, and generation changes', () => {
-    expect(
-      areInlineSessionPreviewsEqual(preview, { ...preview, assistantText: 'Changed' })
-    ).toBe(false)
+    expect(areInlineSessionPreviewsEqual(preview, { ...preview, assistantText: 'Changed' })).toBe(
+      false
+    )
     expect(
       areInlineSessionPreviewsEqual(preview, {
         ...preview,
         tools: [{ toolName: 'search', state: 'complete' }],
       })
     ).toBe(false)
-    expect(
-      areInlineSessionPreviewsEqual(preview, { ...preview, generationId: 'g2' })
-    ).toBe(false)
+    expect(areInlineSessionPreviewsEqual(preview, { ...preview, generationId: 'g2' })).toBe(false)
   })
 })

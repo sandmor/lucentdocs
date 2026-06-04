@@ -32,7 +32,6 @@ async function createGenerationProviderPair() {
         apiKeyId: null,
       },
     ],
-    activeProviderId: primary.id,
   })
 
   const providers = await adapter.services.aiModelSelection.getAvailableGenerationProviders()
@@ -86,6 +85,7 @@ describe('AiModelSelectionService', () => {
     await adapter.services.aiSettings.initializeDefaults()
 
     await adapter.repositories.aiModelSelection.upsert({
+      usage: 'generation',
       scopeType: 'user',
       scopeId: 'user_1',
       providerConfigId: 'missing-provider',

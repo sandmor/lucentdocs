@@ -1,7 +1,6 @@
 import type {
   AiApiKeyEntity,
   AiProviderConfigEntity,
-  AiRuntimeSettingsEntity,
   AiSettingsRepositoryPort,
   UpdateAiApiKeyData,
   UpsertAiProviderConfigInput,
@@ -31,11 +30,6 @@ interface ApiKeyRow {
   apiKey: string
   isDefault: number
   createdAt: number
-  updatedAt: number
-}
-
-interface RuntimeRow {
-  activeEmbeddingProviderId: string | null
   updatedAt: number
 }
 
@@ -127,35 +121,6 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
              WHERE requested.value = cfg.id
           )`,
       [usage, JSON.stringify(ids)]
-    )
-  }
-
-  async readRuntimeSettings(): Promise<AiRuntimeSettingsEntity | undefined> {
-    const row = this.connection.get<RuntimeRow>(
-      `SELECT activeEmbeddingProviderId, updatedAt
-       FROM ai_runtime_settings
-       WHERE id = 1`,
-      []
-    )
-    return row
-      ? {
-          activeEmbeddingProviderId: row.activeEmbeddingProviderId,
-          updatedAt: row.updatedAt,
-        }
-      : undefined
-  }
-
-  async upsertRuntimeSettings(input: {
-    activeEmbeddingProviderId: string | null
-    updatedAt: number
-  }): Promise<void> {
-    this.connection.run(
-      `INSERT INTO ai_runtime_settings (id, activeEmbeddingProviderId, updatedAt)
-       VALUES (1, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         activeEmbeddingProviderId = excluded.activeEmbeddingProviderId,
-         updatedAt = excluded.updatedAt`,
-      [input.activeEmbeddingProviderId, input.updatedAt]
     )
   }
 

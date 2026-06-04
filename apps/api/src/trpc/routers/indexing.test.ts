@@ -80,6 +80,54 @@ describe('indexingRouter', () => {
     })
   })
 
+  test('getDocument returns document-owned snapshot for shared documents', async () => {
+    const owner: User = {
+      id: 'owner_1',
+      name: 'Owner One',
+      email: 'owner1@example.com',
+      role: 'user',
+    }
+    const adapter = createTestAdapter()
+
+    const projectA = await adapter.services.projects.create('Story', {
+      ownerUserId: owner.id,
+    })
+    const projectB = await adapter.services.projects.create('Shared', {
+      ownerUserId: 'owner_2',
+    })
+    const document = await adapter.services.documents.createForProject(projectA.id, 'shared.md')
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    await adapter.repositories.projectDocuments.insert({
+      projectId: projectB.id,
+      documentId: document.id,
+      addedAt: Date.now(),
+    })
+
+    await adapter.services.indexingSettings.updateProjectStrategy(projectA.id, {
+      type: 'whole_document',
+      properties: {},
+    })
+
+    const caller = indexingRouter.createCaller(
+      createCallerContext({
+        user: owner,
+        adapter,
+      })
+    )
+
+    const snapshot = await caller.getDocument({
+      projectId: projectA.id,
+      id: document.id,
+    })
+
+    expect(snapshot.resolved.scopeType).toBe('global')
+    expect(snapshot.resolved.strategy.type).toBe('sliding_window')
+  })
+
   test('global indexing updates enqueue multi-project documents', async () => {
     const admin: User = {
       id: 'admin_user',

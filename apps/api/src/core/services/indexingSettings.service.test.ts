@@ -56,7 +56,69 @@ describe('IndexingSettingsService', () => {
     expect(documentResolved?.strategy.type).toBe('whole_document')
   })
 
-  test('ignores project and user settings for multi-project documents', async () => {
+  test('uses document-owned indexing for shared documents', async () => {
+    const adapter = createTestAdapter()
+
+    const projectA = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const projectB = await adapter.services.projects.create('Shared board', {
+      ownerUserId: 'user_2',
+    })
+    const document = await adapter.services.documents.createForProject(projectA.id, 'shared.md')
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    await adapter.repositories.projectDocuments.insert({
+      projectId: projectB.id,
+      documentId: document.id,
+      addedAt: Date.now(),
+    })
+
+    await adapter.services.indexingSettings.updateProjectStrategy(projectA.id, {
+      type: 'whole_document',
+      properties: {},
+    })
+
+    const projectScoped = await adapter.services.indexingSettings.resolveForDocument(
+      document.id,
+      projectA.id
+    )
+    const unscoped = await adapter.services.indexingSettings.resolveForDocument(document.id)
+    const snapshot = await adapter.services.indexingSettings.getDocumentSnapshot(
+      document.id,
+      projectA.id
+    )
+    const batchScoped = await adapter.services.indexingSettings.resolveForProjectDocuments(
+      projectA.id,
+      [document.id]
+    )
+
+    expect(projectScoped?.scopeType).toBe('global')
+    expect(unscoped?.scopeType).toBe('global')
+    expect(snapshot?.resolved.scopeType).toBe('global')
+    expect(batchScoped.get(document.id)?.scopeType).toBe('global')
+
+    await adapter.services.indexingSettings.updateDocumentStrategy(
+      document.id,
+      {
+        type: 'whole_document',
+        properties: {},
+      },
+      projectA.id
+    )
+
+    const documentScoped = await adapter.services.indexingSettings.resolveForDocument(
+      document.id,
+      projectA.id
+    )
+    expect(documentScoped?.scopeType).toBe('document')
+    expect(documentScoped?.strategy.type).toBe('whole_document')
+  })
+
+  test('ignores project and user settings for multi-project documents without project context', async () => {
     const adapter = createTestAdapter()
 
     const primaryProject = await adapter.services.projects.create('Story', {

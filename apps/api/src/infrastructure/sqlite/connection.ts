@@ -116,11 +116,13 @@ const SCHEMA = `
     ON ai_api_keys(baseUrl)
     WHERE isDefault = 1;
 
-  CREATE TABLE IF NOT EXISTS ai_runtime_settings (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    activeEmbeddingProviderId TEXT,
+  CREATE TABLE IF NOT EXISTS ai_model_selection_settings (
+    usage TEXT NOT NULL CHECK (usage IN ('generation', 'embedding')),
+    scopeType TEXT NOT NULL CHECK (scopeType IN ('global', 'user', 'project', 'document')),
+    scopeId TEXT NOT NULL,
+    providerConfigId TEXT NOT NULL,
     updatedAt INTEGER NOT NULL,
-    FOREIGN KEY (activeEmbeddingProviderId) REFERENCES ai_provider_configs(id) ON DELETE SET NULL
+    PRIMARY KEY (usage, scopeType, scopeId)
   );
 
   CREATE TABLE IF NOT EXISTS job_queue (
@@ -163,14 +165,6 @@ const SCHEMA = `
     scopeId TEXT NOT NULL,
     strategyType TEXT NOT NULL CHECK (strategyType IN ('whole_document', 'sliding_window')),
     strategyProperties TEXT NOT NULL,
-    updatedAt INTEGER NOT NULL,
-    PRIMARY KEY (scopeType, scopeId)
-  );
-
-  CREATE TABLE IF NOT EXISTS ai_model_selection_settings (
-    scopeType TEXT NOT NULL CHECK (scopeType IN ('global', 'user', 'project', 'document')),
-    scopeId TEXT NOT NULL,
-    providerConfigId TEXT NOT NULL,
     updatedAt INTEGER NOT NULL,
     PRIMARY KEY (scopeType, scopeId)
   );

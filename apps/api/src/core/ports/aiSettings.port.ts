@@ -25,11 +25,6 @@ export interface AiApiKeyEntity {
   updatedAt: number
 }
 
-export interface AiRuntimeSettingsEntity {
-  activeEmbeddingProviderId: string | null
-  updatedAt: number
-}
-
 export interface UpsertAiProviderConfigInput {
   id: string
   usage: AiProviderUsage
@@ -55,11 +50,6 @@ export interface AiSettingsRepositoryPort {
   listProviderConfigs(usage: AiProviderUsage): Promise<AiProviderConfigEntity[]>
   upsertProviderConfig(input: UpsertAiProviderConfigInput): Promise<void>
   deleteProviderConfigsNotIn(usage: AiProviderUsage, ids: string[]): Promise<void>
-  readRuntimeSettings(): Promise<AiRuntimeSettingsEntity | undefined>
-  upsertRuntimeSettings(input: {
-    activeEmbeddingProviderId: string | null
-    updatedAt: number
-  }): Promise<void>
   listApiKeys(): Promise<AiApiKeyEntity[]>
   findApiKeyById(id: string): Promise<AiApiKeyEntity | undefined>
   clearDefaultApiKeys(baseURL: string, updatedAt: number): Promise<void>

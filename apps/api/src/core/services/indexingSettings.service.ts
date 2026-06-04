@@ -38,12 +38,19 @@ export interface IndexingSettingsService {
     projectId: string,
     strategy: IndexingStrategy | null
   ): Promise<IndexingSettingsSnapshot | null>
-  getDocumentSnapshot(documentId: string): Promise<IndexingSettingsSnapshot | null>
+  getDocumentSnapshot(
+    documentId: string,
+    projectId?: string | null
+  ): Promise<IndexingSettingsSnapshot | null>
   updateDocumentStrategy(
     documentId: string,
-    strategy: IndexingStrategy | null
+    strategy: IndexingStrategy | null,
+    projectId?: string | null
   ): Promise<IndexingSettingsSnapshot | null>
-  resolveForDocument(documentId: string): Promise<ResolvedIndexingStrategy | null>
+  resolveForDocument(
+    documentId: string,
+    projectId?: string | null
+  ): Promise<ResolvedIndexingStrategy | null>
   resolveForDocuments(documentIds: string[]): Promise<Map<string, ResolvedIndexingStrategy | null>>
   resolveForProjectDocuments(
     projectId: string,
@@ -103,11 +110,26 @@ export function createIndexingSettingsService(repos: RepositorySet): IndexingSet
       ? await repos.indexingSettings.get('document', documentId)
       : undefined
 
+    const requestedProjectId = options.projectId ?? null
     const soleProjectId = documentId
       ? ((await repos.projectDocuments.findSoleProjectIdByDocumentId(documentId)) ?? null)
       : null
 
-    let projectId = documentId ? soleProjectId : (options.projectId ?? null)
+    let projectId = requestedProjectId
+    if (documentId && projectId) {
+      const isAssociated = (
+        await repos.projectDocuments.findAssociatedDocumentIds(projectId, [documentId])
+      ).has(documentId)
+      if (!isAssociated) {
+        return null
+      }
+    }
+    if (documentId && !projectId) {
+      projectId = soleProjectId
+    }
+    if (documentId && projectId && soleProjectId !== projectId) {
+      projectId = null
+    }
     if (projectId && !isValidId(projectId)) {
       projectId = null
     }
@@ -437,27 +459,34 @@ export function createIndexingSettingsService(repos: RepositorySet): IndexingSet
       return buildSnapshot({ projectId })
     },
 
-    async getDocumentSnapshot(documentId: string): Promise<IndexingSettingsSnapshot | null> {
+    async getDocumentSnapshot(
+      documentId: string,
+      projectId?: string | null
+    ): Promise<IndexingSettingsSnapshot | null> {
       if (!isValidId(documentId)) return null
       const document = await repos.documents.findById(documentId)
       if (!document) return null
-      return buildSnapshot({ documentId })
+      return buildSnapshot({ documentId, projectId })
     },
 
     async updateDocumentStrategy(
       documentId: string,
-      strategy: IndexingStrategy | null
+      strategy: IndexingStrategy | null,
+      projectId?: string | null
     ): Promise<IndexingSettingsSnapshot | null> {
       if (!isValidId(documentId)) return null
       const document = await repos.documents.findById(documentId)
       if (!document) return null
 
       await updateScopeStrategy('document', documentId, strategy)
-      return buildSnapshot({ documentId })
+      return buildSnapshot({ documentId, projectId })
     },
 
-    async resolveForDocument(documentId: string): Promise<ResolvedIndexingStrategy | null> {
-      const snapshot = await buildSnapshot({ documentId })
+    async resolveForDocument(
+      documentId: string,
+      projectId?: string | null
+    ): Promise<ResolvedIndexingStrategy | null> {
+      const snapshot = await buildSnapshot({ documentId, projectId })
       return snapshot?.resolved ?? null
     },
 

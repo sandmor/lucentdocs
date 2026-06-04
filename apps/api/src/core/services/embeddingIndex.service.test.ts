@@ -753,4 +753,110 @@ describe('EmbeddingIndexService', () => {
 
     adapter.connection.close()
   })
+
+  test('flush uses document-owned embedding policy for shared documents', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-shared-policy')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createSqliteAdapter(dbPath)
+
+    await adapter.services.aiSettings.initializeDefaults({
+      env: {
+        AI_BASE_URL: OPENROUTER_BASE_URL,
+        AI_MODEL: 'gpt-5',
+        AI_API_KEY: 'test-key',
+      },
+    })
+    configureEmbeddingProvider(adapter.services.aiSettings)
+
+    const snapshot = await adapter.services.aiSettings.getSnapshot()
+    const primary = snapshot.embeddingProviders[0]
+    if (!primary) {
+      throw new Error('Expected a default embedding provider.')
+    }
+
+    await adapter.services.aiSettings.updateSettings({
+      usage: 'embedding',
+      providers: [
+        {
+          id: primary.id,
+          name: primary.name ?? undefined,
+          providerId: primary.providerId,
+          type: primary.type,
+          baseURL: primary.baseURL,
+          model: primary.model,
+          apiKeyId: primary.apiKeyId,
+        },
+        {
+          providerId: 'openrouter',
+          type: 'openrouter',
+          baseURL: OPENROUTER_BASE_URL,
+          model: 'openai/text-embedding-ada-002',
+          apiKeyId: null,
+        },
+      ],
+    })
+
+    const secondary = (await adapter.services.embeddingModelSelection.getAvailableProviders()).find(
+      (provider) => provider.model === 'openai/text-embedding-ada-002'
+    )
+    if (!secondary) {
+      throw new Error('Expected a secondary embedding provider.')
+    }
+
+    const projectA = await adapter.services.projects.create('Story', { ownerUserId: 'owner_1' })
+    const projectB = await adapter.services.projects.create('Shared', { ownerUserId: 'owner_2' })
+    const doc = await adapter.services.documents.createForProject(
+      projectA.id,
+      'shared.md',
+      JSON.stringify({
+        doc: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'shared document should use global embeddings' }],
+            },
+          ],
+        },
+        aiDraft: null,
+      })
+    )
+
+    if (!doc) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    await adapter.repositories.projectDocuments.insert({
+      projectId: projectB.id,
+      documentId: doc.id,
+      addedAt: Date.now(),
+    })
+    await adapter.services.embeddingModelSelection.updateProjectStrategy(projectA.id, secondary.id)
+
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
+    await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
+
+    const result = await adapter.services.embeddingIndex.flushDueQueue(
+      embeddingRuntimeConfig({ debounceMs: 0, batchMaxWaitMs: 5000 }),
+      1000
+    )
+
+    expect(result.processed).toBe(1)
+
+    const globalModelEmbeddings = await adapter.repositories.documentEmbeddings.findEmbeddings(
+      doc.id,
+      OPENROUTER_BASE_URL,
+      primary.model
+    )
+    const projectModelEmbeddings = await adapter.repositories.documentEmbeddings.findEmbeddings(
+      doc.id,
+      OPENROUTER_BASE_URL,
+      secondary.model
+    )
+
+    expect(globalModelEmbeddings).toHaveLength(1)
+    expect(projectModelEmbeddings).toHaveLength(0)
+
+    adapter.connection.close()
+  })
 })

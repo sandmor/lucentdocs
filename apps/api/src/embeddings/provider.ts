@@ -1,5 +1,9 @@
 import type { AiModelSourceType } from '@lucentdocs/shared'
-import type { AiSettingsService } from '../core/services/aiSettings.service.js'
+import type {
+  AiSettingsService,
+  RuntimeProviderSelection,
+} from '../core/services/aiSettings.service.js'
+import type { AiProviderSelectionService } from '../core/services/aiModelSelection.service.js'
 import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
 
 const PROVIDER_REQUEST_TIMEOUT_MS = 30_000
@@ -26,6 +30,12 @@ export interface EmbeddingResult {
 export interface EmbeddingProvider {
   config: EmbeddingConfig
   embed(inputs: string[]): Promise<EmbeddingResult[]>
+}
+
+export interface EmbeddingModelRuntimeScope {
+  documentId?: string
+  projectId?: string
+  userId?: string
 }
 
 export interface EmbeddingProviderRuntimeOptions {
@@ -86,8 +96,9 @@ function buildFakeEmbeddingBatch(inputs: string[]): EmbeddingResult[] {
   }))
 }
 
-let providerPromise: Promise<EmbeddingProvider> | null = null
+const providerPromises = new Map<string, Promise<EmbeddingProvider>>()
 let aiSettingsService: AiSettingsService | null = null
+let embeddingModelSelectionService: AiProviderSelectionService | null = null
 let embeddingFetchOverride: typeof fetch | null = null
 
 export function configureEmbeddingProvider(
@@ -99,6 +110,11 @@ export function configureEmbeddingProvider(
   embeddingFetchOverride = options.fetchImpl ?? null
 }
 
+export function configureEmbeddingModelSelection(service: AiProviderSelectionService): void {
+  embeddingModelSelectionService = service
+  providerPromises.clear()
+}
+
 function getAiSettingsService(): AiSettingsService {
   if (!aiSettingsService) {
     throw new Error('Embedding provider is not configured.')
@@ -106,8 +122,14 @@ function getAiSettingsService(): AiSettingsService {
   return aiSettingsService
 }
 
-async function resolveRuntimeConfig(): Promise<EmbeddingConfig> {
-  const selection = await getAiSettingsService().resolveRuntimeSelection('embedding')
+function getEmbeddingModelSelectionService(): AiProviderSelectionService {
+  if (!embeddingModelSelectionService) {
+    throw new Error('Embedding model selection service is not configured.')
+  }
+  return embeddingModelSelectionService
+}
+
+function toEmbeddingConfig(selection: RuntimeProviderSelection): EmbeddingConfig {
   const openaiDefault = normalizeBaseURL(AI_PROVIDER_DEFAULT_BASE_URLS.openai)
   const sourceBaseURL = normalizeBaseURL(selection.baseURL)
 
@@ -133,6 +155,46 @@ async function resolveRuntimeConfig(): Promise<EmbeddingConfig> {
       model: selection.model,
     },
   }
+}
+
+async function resolveConfiguredProviderById(
+  providerConfigId: string
+): Promise<RuntimeProviderSelection> {
+  const provider = await getAiSettingsService().resolveProviderByConfigId(providerConfigId)
+  if (!provider) {
+    throw new Error(
+      `Resolved embedding provider config ${providerConfigId} is no longer available.`
+    )
+  }
+  return provider
+}
+
+async function resolveEmbeddingSelection(
+  scope?: EmbeddingModelRuntimeScope
+): Promise<RuntimeProviderSelection> {
+  if (scope?.documentId) {
+    const resolved = await getEmbeddingModelSelectionService().resolveForDocument(
+      scope.documentId,
+      scope.projectId
+    )
+    if (!resolved) {
+      throw new Error(
+        `Failed to resolve embedding model selection for document ${scope.documentId}.`
+      )
+    }
+    return resolveConfiguredProviderById(resolved.providerConfigId)
+  }
+
+  if (scope?.projectId) {
+    const resolved = await getEmbeddingModelSelectionService().resolveForProject(scope.projectId)
+    if (!resolved) {
+      throw new Error(`Failed to resolve embedding model selection for project ${scope.projectId}.`)
+    }
+    return resolveConfiguredProviderById(resolved.providerConfigId)
+  }
+
+  const global = await getEmbeddingModelSelectionService().getGlobal()
+  return resolveConfiguredProviderById(global.providerConfigId)
 }
 
 function buildEmbeddingsEndpoint(baseURL: string): string {
@@ -202,8 +264,7 @@ function validateEmbeddingBatch(embeddings: EmbeddingResult[]): void {
   }
 }
 
-async function createProvider(): Promise<EmbeddingProvider> {
-  const config = await resolveRuntimeConfig()
+async function createProvider(config: EmbeddingConfig): Promise<EmbeddingProvider> {
   if (shouldUseFakeEmbeddings()) {
     return {
       config,
@@ -271,17 +332,34 @@ async function createProvider(): Promise<EmbeddingProvider> {
   }
 }
 
-export async function getEmbeddingProvider(): Promise<EmbeddingProvider> {
-  if (!providerPromise) {
-    providerPromise = createProvider().catch((error) => {
-      providerPromise = null
-      throw error
-    })
+export async function getEmbeddingProviderForConfigId(
+  providerConfigId: string
+): Promise<EmbeddingProvider> {
+  const selection = await resolveConfiguredProviderById(providerConfigId)
+  const config = toEmbeddingConfig(selection)
+  const cacheKey = providerConfigId
+
+  const cached = providerPromises.get(cacheKey)
+  if (cached) {
+    return cached
   }
-  return providerPromise
+
+  const created = createProvider(config).catch((error) => {
+    providerPromises.delete(cacheKey)
+    throw error
+  })
+  providerPromises.set(cacheKey, created)
+  return created
+}
+
+export async function getEmbeddingProvider(
+  scope?: EmbeddingModelRuntimeScope
+): Promise<EmbeddingProvider> {
+  const selection = await resolveEmbeddingSelection(scope)
+  return getEmbeddingProviderForConfigId(selection.providerConfigId)
 }
 
 export function resetEmbeddingClient(): void {
-  providerPromise = null
+  providerPromises.clear()
   embeddingFetchOverride = null
 }

@@ -4,10 +4,7 @@ import { schema, type InlineZoneWriteAction, type JsonObject } from '@lucentdocs
 import { createTestAdapter, type TestAdapter } from '../testing/factory.js'
 import { createYjsRuntime, type YjsRuntime } from '../yjs/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from './runtime.js'
-import {
-  applyInlineZoneWriteActionToDoc,
-  getInlineZoneTextFromDoc,
-} from './zone-write.js'
+import { applyInlineZoneWriteActionToDoc, getInlineZoneTextFromDoc } from './zone-write.js'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))

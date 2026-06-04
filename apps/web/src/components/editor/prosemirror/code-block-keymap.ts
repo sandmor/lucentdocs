@@ -1,9 +1,4 @@
-import {
-  type EditorState,
-  type Command,
-  type Transaction,
-  TextSelection,
-} from 'prosemirror-state'
+import { type EditorState, type Command, type Transaction, TextSelection } from 'prosemirror-state'
 import { schema } from '@lucentdocs/shared'
 
 /**

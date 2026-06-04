@@ -19,7 +19,9 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
   const projectQuery = trpc.projects.get.useQuery({ id: projectId })
   const query = trpc.indexing.getProject.useQuery({ projectId })
   const aiModelQuery = trpc.aiModelSelection.getProject.useQuery({ projectId })
+  const embeddingModelQuery = trpc.embeddingModelSelection.getProject.useQuery({ projectId })
   const aiProvidersQuery = trpc.aiModelSelection.availableProviders.useQuery()
+  const embeddingProvidersQuery = trpc.embeddingModelSelection.availableProviders.useQuery()
   const [ownerEmail, setOwnerEmail] = useState('')
 
   const isCurrentUserOwner = meQuery.data?.id === projectQuery.data?.ownerUserId
@@ -57,6 +59,21 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
     },
     onError: (error) => {
       toast.error('Failed to update project AI model', {
+        description: error.message,
+      })
+    },
+  })
+
+  const embeddingModelMutation = trpc.embeddingModelSelection.updateProject.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.embeddingModelSelection.getProject.invalidate({ projectId }),
+        utils.embeddingModelSelection.getDocument.invalidate(),
+      ])
+      toast.success('Project embedding model updated')
+    },
+    onError: (error) => {
+      toast.error('Failed to update project embedding model', {
         description: error.message,
       })
     },
@@ -172,9 +189,46 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
 
       <Card className="overflow-visible">
         <CardHeader>
+          <CardTitle>Project embedding model</CardTitle>
+          <CardDescription>
+            Configure the default embedding model for documents owned only by this project. Shared
+            documents use a document override or the global default.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {embeddingModelQuery.isLoading ||
+          !embeddingModelQuery.data ||
+          embeddingProvidersQuery.isLoading ||
+          !embeddingProvidersQuery.data ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
+              <Loader2 className="size-4 animate-spin" />
+              Loading settings…
+            </div>
+          ) : (
+            <AiModelSelectionForm
+              allowInherit
+              compact
+              directSelection={embeddingModelQuery.data.project?.providerConfigId ?? null}
+              resolvedProviderConfigId={embeddingModelQuery.data.resolved.providerConfigId}
+              resolvedScopeType={embeddingModelQuery.data.resolved.scopeType}
+              availableProviders={embeddingProvidersQuery.data}
+              isSaving={embeddingModelMutation.isPending}
+              saveLabel="Save project override"
+              modeLabel="Embedding model mode"
+              onSave={(providerConfigId) =>
+                embeddingModelMutation.mutate({ projectId, providerConfigId })
+              }
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-visible">
+        <CardHeader>
           <CardTitle>Project indexing</CardTitle>
           <CardDescription>
-            Configure the default indexing strategy for documents in this project.
+            Configure the default indexing strategy for documents owned only by this project. Shared
+            documents use a document override or the global default.
           </CardDescription>
         </CardHeader>
         <CardContent>

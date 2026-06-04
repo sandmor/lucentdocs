@@ -1,4 +1,4 @@
-import type { AiModelSelectionScopeType } from '@lucentdocs/shared'
+import type { AiModelSelectionScopeType, AiProviderSelectionUsage } from '@lucentdocs/shared'
 import type {
   AiModelSelectionEntity,
   AiModelSelectionRepositoryPort,
@@ -7,6 +7,7 @@ import type {
 import type { SqliteConnection } from './connection.js'
 
 interface AiModelSelectionRow {
+  usage: AiProviderSelectionUsage
   scopeType: AiModelSelectionScopeType
   scopeId: string
   providerConfigId: string
@@ -15,6 +16,7 @@ interface AiModelSelectionRow {
 
 function toEntity(row: AiModelSelectionRow): AiModelSelectionEntity {
   return {
+    usage: row.usage,
     scopeType: row.scopeType,
     scopeId: row.scopeId,
     providerConfigId: row.providerConfigId,
@@ -26,20 +28,22 @@ export class AiModelSelectionRepository implements AiModelSelectionRepositoryPor
   constructor(private readonly connection: SqliteConnection) {}
 
   async get(
+    usage: AiProviderSelectionUsage,
     scopeType: AiModelSelectionScopeType,
     scopeId: string
   ): Promise<AiModelSelectionEntity | undefined> {
     const row = this.connection.get<AiModelSelectionRow>(
-      `SELECT scopeType, scopeId, providerConfigId, updatedAt
+      `SELECT usage, scopeType, scopeId, providerConfigId, updatedAt
          FROM ai_model_selection_settings
-        WHERE scopeType = ? AND scopeId = ?`,
-      [scopeType, scopeId]
+        WHERE usage = ? AND scopeType = ? AND scopeId = ?`,
+      [usage, scopeType, scopeId]
     )
 
     return row ? toEntity(row) : undefined
   }
 
   async getMany(
+    usage: AiProviderSelectionUsage,
     scopeType: AiModelSelectionScopeType,
     scopeIds: string[]
   ): Promise<AiModelSelectionEntity[]> {
@@ -53,11 +57,11 @@ export class AiModelSelectionRepository implements AiModelSelectionRepositoryPor
          SELECT value AS scopeId
            FROM json_each(?)
        )
-       SELECT s.scopeType, s.scopeId, s.providerConfigId, s.updatedAt
+       SELECT s.usage, s.scopeType, s.scopeId, s.providerConfigId, s.updatedAt
          FROM ai_model_selection_settings AS s
          JOIN requested ON requested.scopeId = s.scopeId
-        WHERE s.scopeType = ?`,
-      [JSON.stringify(uniqueScopeIds), scopeType]
+        WHERE s.usage = ? AND s.scopeType = ?`,
+      [JSON.stringify(uniqueScopeIds), usage, scopeType]
     )
 
     return rows.map(toEntity)
@@ -66,25 +70,29 @@ export class AiModelSelectionRepository implements AiModelSelectionRepositoryPor
   async upsert(input: UpsertAiModelSelectionInput): Promise<AiModelSelectionEntity> {
     this.connection.run(
       `INSERT INTO ai_model_selection_settings
-         (scopeType, scopeId, providerConfigId, updatedAt)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(scopeType, scopeId) DO UPDATE SET
+         (usage, scopeType, scopeId, providerConfigId, updatedAt)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(usage, scopeType, scopeId) DO UPDATE SET
          providerConfigId = excluded.providerConfigId,
          updatedAt = excluded.updatedAt`,
-      [input.scopeType, input.scopeId, input.providerConfigId, input.updatedAt]
+      [input.usage, input.scopeType, input.scopeId, input.providerConfigId, input.updatedAt]
     )
 
-    const entity = await this.get(input.scopeType, input.scopeId)
+    const entity = await this.get(input.usage, input.scopeType, input.scopeId)
     if (!entity) {
       throw new Error('Failed to read stored AI model selection settings.')
     }
     return entity
   }
 
-  async delete(scopeType: AiModelSelectionScopeType, scopeId: string): Promise<void> {
+  async delete(
+    usage: AiProviderSelectionUsage,
+    scopeType: AiModelSelectionScopeType,
+    scopeId: string
+  ): Promise<void> {
     this.connection.run(
-      'DELETE FROM ai_model_selection_settings WHERE scopeType = ? AND scopeId = ?',
-      [scopeType, scopeId]
+      'DELETE FROM ai_model_selection_settings WHERE usage = ? AND scopeType = ? AND scopeId = ?',
+      [usage, scopeType, scopeId]
     )
   }
 }

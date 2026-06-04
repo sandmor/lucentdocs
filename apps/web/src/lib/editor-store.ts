@@ -126,10 +126,7 @@ export const useEditorStore = create<EditorStore>((set) => ({
         return { inlineSessionStreamMetaById: next }
       }
       const current = state.inlineSessionStreamMetaById[sessionId]
-      if (
-        current?.generating === meta.generating &&
-        current?.generationId === meta.generationId
-      ) {
+      if (current?.generating === meta.generating && current?.generationId === meta.generationId) {
         return state
       }
       return {

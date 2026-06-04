@@ -79,12 +79,14 @@ export function AdminConfigPage() {
   const configQuery = trpc.config.get.useQuery()
   const globalIndexingQuery = trpc.indexing.getGlobal.useQuery()
   const globalAiModelQuery = trpc.aiModelSelection.getGlobal.useQuery()
+  const globalEmbeddingModelQuery = trpc.embeddingModelSelection.getGlobal.useQuery()
   const modelCatalogQuery = trpc.config.modelCatalog.useQuery()
   const aiSettingsQuery = trpc.config.aiSettings.useQuery()
 
   const updateMutation = trpc.config.update.useMutation()
   const updateGlobalIndexingMutation = trpc.indexing.updateGlobal.useMutation()
   const updateGlobalAiModelMutation = trpc.aiModelSelection.updateGlobal.useMutation()
+  const updateGlobalEmbeddingModelMutation = trpc.embeddingModelSelection.updateGlobal.useMutation()
   const updateProvidersMutation = trpc.config.updateProviders.useMutation()
   const createAiKeyMutation = trpc.config.createAiApiKey.useMutation()
   const updateAiKeyMutation = trpc.config.updateAiApiKey.useMutation()
@@ -106,7 +108,7 @@ export function AdminConfigPage() {
 
   // Sync AI draft from server
   useEffect(() => {
-    if (!aiSettingsQuery.data || !globalAiModelQuery.data) return
+    if (!aiSettingsQuery.data || !globalAiModelQuery.data || !globalEmbeddingModelQuery.data) return
 
     const incomingGeneration: AiDraftState = {
       providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
@@ -114,7 +116,7 @@ export function AdminConfigPage() {
     }
     const incomingEmbedding: AiDraftState = {
       providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
-      activeProviderId: aiSettingsQuery.data.activeEmbeddingProviderId,
+      activeProviderId: globalEmbeddingModelQuery.data.providerConfigId,
     }
 
     setGenerationDraft((current) => {
@@ -136,7 +138,7 @@ export function AdminConfigPage() {
 
       const baseline = serializeAiDraft({
         providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
-        activeProviderId: aiSettingsQuery.data.activeEmbeddingProviderId,
+        activeProviderId: globalEmbeddingModelQuery.data.providerConfigId,
       })
 
       const currentSerialized = serializeAiDraft(current)
@@ -144,7 +146,7 @@ export function AdminConfigPage() {
 
       return isDirty ? current : incomingEmbedding
     })
-  }, [aiSettingsQuery.data, globalAiModelQuery.data])
+  }, [aiSettingsQuery.data, globalAiModelQuery.data, globalEmbeddingModelQuery.data])
 
   // Dirty detection
   const generationBaseline = useMemo(() => {
@@ -156,12 +158,12 @@ export function AdminConfigPage() {
   }, [aiSettingsQuery.data, globalAiModelQuery.data])
 
   const embeddingBaseline = useMemo(() => {
-    if (!aiSettingsQuery.data) return null
+    if (!aiSettingsQuery.data || !globalEmbeddingModelQuery.data) return null
     return serializeAiDraft({
       providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
-      activeProviderId: aiSettingsQuery.data.activeEmbeddingProviderId,
+      activeProviderId: globalEmbeddingModelQuery.data.providerConfigId,
     })
-  }, [aiSettingsQuery.data])
+  }, [aiSettingsQuery.data, globalEmbeddingModelQuery.data])
 
   const generationDirty = useMemo(() => {
     if (!generationDraft || !generationBaseline) return false
@@ -211,7 +213,7 @@ export function AdminConfigPage() {
       kind === 'embedding'
         ? {
             providers: aiSettingsQuery.data.embeddingProviders.map(normalizeProvider),
-            activeProviderId: aiSettingsQuery.data.activeEmbeddingProviderId,
+            activeProviderId: globalEmbeddingModelQuery.data?.providerConfigId ?? null,
           }
         : {
             providers: aiSettingsQuery.data.generationProviders.map(normalizeProvider),
@@ -242,17 +244,20 @@ export function AdminConfigPage() {
           model: provider.model,
           apiKeyId: provider.apiKeyId,
         })),
-        ...(kind === 'embedding' ? { activeProviderId: draft.activeProviderId } : {}),
       },
       {
         onSuccess: async () => {
           try {
-            if (kind === 'generation') {
-              if (!draft.activeProviderId) {
-                toast.error('Select a global generation model before saving providers.')
-                return
-              }
+            if (!draft.activeProviderId) {
+              toast.error(
+                kind === 'embedding'
+                  ? 'Select a global embedding model before saving providers.'
+                  : 'Select a global generation model before saving providers.'
+              )
+              return
+            }
 
+            if (kind === 'generation') {
               await updateGlobalAiModelMutation.mutateAsync({
                 providerConfigId: draft.activeProviderId,
               })
@@ -268,7 +273,17 @@ export function AdminConfigPage() {
               return
             }
 
-            await Promise.all([utils.config.aiSettings.invalidate(), utils.config.get.invalidate()])
+            await updateGlobalEmbeddingModelMutation.mutateAsync({
+              providerConfigId: draft.activeProviderId,
+            })
+            await Promise.all([
+              utils.config.aiSettings.invalidate(),
+              utils.config.get.invalidate(),
+              utils.embeddingModelSelection.getGlobal.invalidate(),
+              utils.embeddingModelSelection.getUser.invalidate(),
+              utils.embeddingModelSelection.getProject.invalidate(),
+              utils.embeddingModelSelection.getDocument.invalidate(),
+            ])
             toast.success('Embedding providers saved')
           } catch (error) {
             toast.error(
@@ -613,7 +628,12 @@ export function AdminConfigPage() {
     ])
   }, [embeddingDraft, generationDraft])
 
-  if (configQuery.isLoading || aiSettingsQuery.isLoading || globalAiModelQuery.isLoading) {
+  if (
+    configQuery.isLoading ||
+    aiSettingsQuery.isLoading ||
+    globalAiModelQuery.isLoading ||
+    globalEmbeddingModelQuery.isLoading
+  ) {
     return <PageLoader message="Loading configuration…" />
   }
 
@@ -624,6 +644,8 @@ export function AdminConfigPage() {
     !aiSettingsQuery.data ||
     globalAiModelQuery.error ||
     !globalAiModelQuery.data ||
+    globalEmbeddingModelQuery.error ||
+    !globalEmbeddingModelQuery.data ||
     !generationDraft ||
     !embeddingDraft
   ) {
@@ -633,6 +655,7 @@ export function AdminConfigPage() {
           {configQuery.error?.message ??
             aiSettingsQuery.error?.message ??
             globalAiModelQuery.error?.message ??
+            globalEmbeddingModelQuery.error?.message ??
             'Unable to load configuration'}
         </p>
         <Button variant="outline" onClick={() => navigate('/')}>
@@ -688,8 +711,7 @@ export function AdminConfigPage() {
     isDirty: boolean
     isSaving: boolean
   }) => {
-    const showActiveControls = true
-    const isGeneration = options.kind === 'generation'
+    const showActiveControls = false
 
     return (
       <Card>
@@ -698,7 +720,7 @@ export function AdminConfigPage() {
           <CardDescription>{options.description}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-6">
-          {isGeneration && options.draft.providers.length > 0 && (
+          {options.draft.providers.length > 0 && (
             <div className="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
               <span className="shrink-0 text-sm font-medium">Active model</span>
               <div className="min-w-0 flex-1">

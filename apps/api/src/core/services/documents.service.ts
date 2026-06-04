@@ -20,12 +20,13 @@ import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 import { configManager } from '../../config/runtime.js'
-import { getEmbeddingProvider } from '../../embeddings/provider.js'
+import { getEmbeddingProvider, getEmbeddingProviderForConfigId } from '../../embeddings/provider.js'
 import type {
   DocumentEmbeddingVectorReference,
   ProjectDocumentEmbeddingSearchMatch,
 } from '../ports/documentEmbeddings.port.js'
-import type { AiSettingsService } from './aiSettings.service.js'
+import type { AiSettingsService, RuntimeProviderSelection } from './aiSettings.service.js'
+import type { AiProviderSelectionService } from './aiModelSelection.service.js'
 import {
   buildSnippetPreview as buildSearchSnippetPreview,
   normalizeValidatedSearchText,
@@ -439,17 +440,11 @@ function aggregateProjectSearchMatches(
 export function createDocumentsService(
   repos: RepositorySet,
   transaction: TransactionPort,
-  aiSettingsServiceOrObserver?: AiSettingsService | DocumentContentObserver,
+  aiSettingsService?: AiSettingsService | null,
+  embeddingModelSelectionService?: AiProviderSelectionService | null,
   observer: DocumentContentObserver = {}
 ): DocumentsService {
-  const aiSettingsService =
-    aiSettingsServiceOrObserver && 'resolveRuntimeSelection' in aiSettingsServiceOrObserver
-      ? aiSettingsServiceOrObserver
-      : null
-  const resolvedObserver =
-    aiSettingsServiceOrObserver && 'resolveRuntimeSelection' in aiSettingsServiceOrObserver
-      ? observer
-      : (aiSettingsServiceOrObserver ?? observer)
+  const resolvedObserver = observer
 
   const { dispatchDocumentsDeleted } = createDocumentDeletionDispatcher(resolvedObserver, {
     logLabel: 'documents',
@@ -540,6 +535,24 @@ export function createDocumentsService(
     if (!isValidId(projectId)) return []
     const ids = await repos.projectDocuments.findSoleDocumentIdsByProjectId(projectId)
     if (ids.length === 0) return []
+    const docs = await repos.documents.findByIds(ids)
+    const byId = new Map(docs.map((d: Document) => [d.id, d]))
+    return ids.flatMap((id: string) => {
+      const doc = byId.get(id)
+      return doc ? [doc] : []
+    })
+  }
+
+  const listAssociatedDocumentsForProject = async (projectId: string): Promise<Document[]> => {
+    if (!isValidId(projectId)) return []
+    const allDocumentIds = await repos.projectDocuments.listDocumentIds()
+    const associatedIds = await repos.projectDocuments.findAssociatedDocumentIds(
+      projectId,
+      allDocumentIds
+    )
+    if (associatedIds.size === 0) return []
+
+    const ids = Array.from(associatedIds)
     const docs = await repos.documents.findByIds(ids)
     const byId = new Map(docs.map((d: Document) => [d.id, d]))
     return ids.flatMap((id: string) => {
@@ -645,27 +658,58 @@ export function createDocumentsService(
           }
         }
       }
-      if (!aiSettingsService) return []
+      if (!aiSettingsService || !embeddingModelSelectionService) return []
 
-      const selection = await aiSettingsService.resolveRuntimeSelection('embedding')
-      const provider = await getEmbeddingProvider()
-      const [queryResult] = await provider.embed([normalizedQuery])
-      const queryEmbedding = queryResult?.embedding
-      if (!queryEmbedding) return []
+      const projectDocuments = await listAssociatedDocumentsForProject(projectId)
+      const resolvedByDocumentId = await embeddingModelSelectionService.resolveForProjectDocuments(
+        projectId,
+        projectDocuments.map((document) => document.id)
+      )
+
+      const selectionGroups = new Map<
+        string,
+        { selection: RuntimeProviderSelection; providerConfigId: string }
+      >()
+      for (const resolved of resolvedByDocumentId.values()) {
+        if (!resolved) continue
+        if (selectionGroups.has(resolved.providerConfigId)) continue
+        const selection = await aiSettingsService.resolveProviderByConfigId(
+          resolved.providerConfigId
+        )
+        if (selection) {
+          selectionGroups.set(resolved.providerConfigId, {
+            selection,
+            providerConfigId: resolved.providerConfigId,
+          })
+        }
+      }
+
+      if (selectionGroups.size === 0) return []
 
       const maxCandidateLimit = Math.max(limit * 12, 48)
       let candidateLimit = Math.max(limit * 4, 16)
       let bestResults: ProjectDocumentSearchResult[] = []
 
       while (candidateLimit <= maxCandidateLimit) {
-        const matches = await repos.documentEmbeddings.searchProjectDocuments({
-          projectId,
-          baseURL: selection.baseURL,
-          model: selection.model,
-          queryEmbedding,
-          limit: candidateLimit,
-          scope: normalizedScope,
-        })
+        const matches: ProjectDocumentEmbeddingSearchMatch[] = []
+
+        for (const group of selectionGroups.values()) {
+          const scopedProvider = await getEmbeddingProviderForConfigId(group.providerConfigId)
+          const [queryResult] = await scopedProvider.embed([normalizedQuery])
+          const queryEmbedding = queryResult?.embedding
+          if (!queryEmbedding) continue
+
+          const groupMatches = await repos.documentEmbeddings.searchProjectDocuments({
+            projectId,
+            baseURL: group.selection.baseURL,
+            model: group.selection.model,
+            queryEmbedding,
+            limit: candidateLimit,
+            scope: normalizedScope,
+          })
+          matches.push(...groupMatches)
+        }
+
         if (matches.length === 0) return []
 
         const documents = await repos.documents.findByIds(
@@ -703,10 +747,18 @@ export function createDocumentsService(
       if (!normalizedQuery) return []
 
       const limit = clampSearchLimit(options?.limit)
-      if (!aiSettingsService) return []
+      if (!aiSettingsService || !embeddingModelSelectionService) return []
 
-      const selection = await aiSettingsService.resolveRuntimeSelection('embedding')
-      const provider = await getEmbeddingProvider()
+      const resolved = await embeddingModelSelectionService.resolveForDocument(
+        documentId,
+        projectId
+      )
+      if (!resolved) return []
+
+      const selection = await aiSettingsService.resolveProviderByConfigId(resolved.providerConfigId)
+      if (!selection) return []
+
+      const provider = await getEmbeddingProvider({ projectId, documentId })
       const [queryResult] = await provider.embed([normalizedQuery])
       const queryEmbedding = queryResult?.embedding
       if (!queryEmbedding) return []

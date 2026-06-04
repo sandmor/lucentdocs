@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bold, Check, Italic, Loader2, Minus, Pen, Search, StopCircle, X, Code, Sparkles } from 'lucide-react'
+import {
+  Bold,
+  Check,
+  Italic,
+  Loader2,
+  Minus,
+  Pen,
+  Search,
+  StopCircle,
+  X,
+  Code,
+  Sparkles,
+} from 'lucide-react'
 import type { EditorView } from 'prosemirror-view'
 import { Streamdown } from 'streamdown'
 import { cn } from '@/lib/utils'
@@ -80,7 +92,10 @@ export function SelectionComposeSurface({
       ref={(node) => {
         rootRef.current = node
       }}
-      className={cn(className, isAIModeExpanded ? 'w-[min(94vw,420px)] flex-col' : 'w-max items-center')}
+      className={cn(
+        className,
+        isAIModeExpanded ? 'w-[min(94vw,420px)] flex-col' : 'w-max items-center'
+      )}
       data-testid="ai-inline-controls"
       data-state="compose"
       data-ai-phase={animationPhase}
@@ -264,15 +279,14 @@ export function AIZoneSurface({
   const [followupPrompt, setFollowupPrompt] = useState('')
 
   const canSendFollowup = useMemo(
-    () =>
-      Boolean(
-        zoneId && followupPrompt.trim() && !isProcessing && !serverGenerating
-      ),
+    () => Boolean(zoneId && followupPrompt.trim() && !isProcessing && !serverGenerating),
     [followupPrompt, isProcessing, serverGenerating, zoneId]
   )
 
   const showAssistantPreview = Boolean(
-    isProcessing && sessionPreview && (sessionPreview.assistantText || sessionPreview.tools.length > 0)
+    isProcessing &&
+    sessionPreview &&
+    (sessionPreview.assistantText || sessionPreview.tools.length > 0)
   )
 
   const handleSendFollowup = () => {

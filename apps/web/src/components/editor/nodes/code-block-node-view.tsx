@@ -40,9 +40,7 @@ function LanguageSelector({ value, onChange }: { value: string; onChange: (val: 
       value={toSelectLanguage(value)}
       onValueChange={(val) => onChange(fromSelectLanguage(val ?? PLAIN_LANGUAGE))}
     >
-      <SelectTrigger
-        className="h-7 w-32 border-none bg-transparent text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:ring-0 shadow-none px-2"
-      >
+      <SelectTrigger className="h-7 w-32 border-none bg-transparent text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:ring-0 shadow-none px-2">
         <SelectValue placeholder="Language" />
       </SelectTrigger>
       <SelectContent align="start" className="w-40">
@@ -87,7 +85,11 @@ export class CodeBlockNodeView implements NodeView {
   copyRoot: Root | null = null
   copyRootElement: HTMLDivElement
 
-  constructor(node: ProseMirrorNode, view: EditorView, getPos: boolean | (() => number | undefined)) {
+  constructor(
+    node: ProseMirrorNode,
+    view: EditorView,
+    getPos: boolean | (() => number | undefined)
+  ) {
     this.node = node
     this.view = view
     this.getPos = getPos
@@ -184,7 +186,11 @@ export class CodeBlockNodeView implements NodeView {
 
 export function createCodeBlockNodeView() {
   return {
-    code_block(node: ProseMirrorNode, view: EditorView, getPos: boolean | (() => number | undefined)) {
+    code_block(
+      node: ProseMirrorNode,
+      view: EditorView,
+      getPos: boolean | (() => number | undefined)
+    ) {
       return new CodeBlockNodeView(node, view, getPos)
     },
   }

@@ -9,10 +9,7 @@ import {
   settleInlineGenerationWaitsForSession,
 } from './inline-generation-wait'
 import { emitInlineStreamActivity } from './inline-stream-activity'
-import {
-  getAssistantSeedMessage,
-  previewFromUIMessage,
-} from './inline-message-preview'
+import { getAssistantSeedMessage, previewFromUIMessage } from './inline-message-preview'
 import {
   effectsFromInlineSnapshot,
   shouldStartChunkPumpForGeneration,
@@ -58,8 +55,7 @@ function failInlineSessionSubscription(
   subscription.chunkPump.stop()
   subscription.activeGenerationId = null
 
-  const message =
-    error instanceof Error ? error.message : 'Inline stream subscription failed'
+  const message = error instanceof Error ? error.message : 'Inline stream subscription failed'
   settleInlineGenerationWaitsForSession(sessionId, { error: message })
 
   const store = useEditorStore.getState()
@@ -175,11 +171,7 @@ export function useInlineSessionObserver({
 
             if (effects.clearPreview) {
               chunkPump.stop()
-              settleGenerationFromEffects(
-                sessionId,
-                effects.settleGeneration,
-                event.error
-              )
+              settleGenerationFromEffects(sessionId, effects.settleGeneration, event.error)
               current.activeGenerationId = null
               store.setSessionPreviewById(sessionId, null)
             }
@@ -245,9 +237,5 @@ export function useInlineSessionObserver({
       }
       subscriptions.clear()
     }
-  }, [
-    documentId,
-    projectId,
-    sessionIdsKey,
-  ])
+  }, [documentId, projectId, sessionIdsKey])
 }

@@ -484,7 +484,18 @@ export function useDocumentBrowser({
     }
   )
 
+  const documentEmbeddingModelQuery = trpc.embeddingModelSelection.getDocument.useQuery(
+    {
+      projectId,
+      id: settingsDocumentId ?? '',
+    },
+    {
+      enabled: settingsDocumentId !== null,
+    }
+  )
+
   const aiProvidersQuery = trpc.aiModelSelection.availableProviders.useQuery()
+  const embeddingProvidersQuery = trpc.embeddingModelSelection.availableProviders.useQuery()
 
   const updateDocumentSettingsMutation = trpc.indexing.updateDocument.useMutation({
     onSuccess: async (_result, variables) => {
@@ -517,6 +528,23 @@ export function useDocumentBrowser({
       })
     },
   })
+
+  const updateDocumentEmbeddingModelMutation =
+    trpc.embeddingModelSelection.updateDocument.useMutation({
+      onSuccess: async (_result, variables) => {
+        await Promise.all([
+          utils.embeddingModelSelection.getDocument.invalidate({ projectId, id: variables.id }),
+          utils.embeddingModelSelection.getProject.invalidate({ projectId }),
+        ])
+        toast.success('Document embedding model updated')
+        setSettingsDocumentId(null)
+      },
+      onError: (error) => {
+        toast.error('Failed to update document embedding model', {
+          description: error.message,
+        })
+      },
+    })
 
   const handleCreateDocument = useCallback(() => {
     const trimmed = newDocumentName.trim()
@@ -829,6 +857,19 @@ export function useDocumentBrowser({
       })
     },
     [projectId, settingsDocumentId, updateDocumentAiModelMutation]
+  )
+
+  const handleSaveDocumentEmbeddingModel = useCallback(
+    (providerConfigId: string | null) => {
+      if (!settingsDocumentId) return
+
+      updateDocumentEmbeddingModelMutation.mutate({
+        projectId,
+        id: settingsDocumentId,
+        providerConfigId,
+      })
+    },
+    [projectId, settingsDocumentId, updateDocumentEmbeddingModelMutation]
   )
 
   const handleExportDocument = useCallback(
@@ -1150,7 +1191,12 @@ export function useDocumentBrowser({
     isLoadingDocumentAiModel: documentAiModelQuery.isLoading,
     saveDocumentAiModel: handleSaveDocumentAiModel,
     isSavingDocumentAiModel: updateDocumentAiModelMutation.isPending,
+    documentEmbeddingModel: documentEmbeddingModelQuery.data,
+    isLoadingDocumentEmbeddingModel: documentEmbeddingModelQuery.isLoading,
+    saveDocumentEmbeddingModel: handleSaveDocumentEmbeddingModel,
+    isSavingDocumentEmbeddingModel: updateDocumentEmbeddingModelMutation.isPending,
     aiProviders: aiProvidersQuery.data,
+    embeddingProviders: embeddingProvidersQuery.data,
     isImporting:
       importMutation.isPending || importSplitMutation.isPending || importProgress.isRunning,
     isCreatingDocument: createMutation.isPending,

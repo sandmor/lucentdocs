@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { LOCAL_DEFAULT_USER, type User } from '../../core/models/user.js'
 import type { AppContext } from '../index.js'
-import { aiModelSelectionRouter } from './aiModelSelection.js'
+import { embeddingModelSelectionRouter } from './embeddingModelSelection.js'
 import { createTestAdapter, type TestAdapter } from '../../testing/factory.js'
 
 function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): AppContext {
@@ -30,8 +30,8 @@ function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): 
   }
 }
 
-describe('aiModelSelectionRouter', () => {
-  test('resolves document settings against the active project for shared documents', async () => {
+describe('embeddingModelSelectionRouter', () => {
+  test('resolves shared document settings through document/global embedding policy', async () => {
     const owner: User = {
       id: 'owner_1',
       name: 'Owner One',
@@ -42,14 +42,14 @@ describe('aiModelSelectionRouter', () => {
     await adapter.services.aiSettings.initializeDefaults()
 
     const snapshot = await adapter.services.aiSettings.getSnapshot()
-    const primary = snapshot.generationProviders[0]
+    const primary = snapshot.embeddingProviders[0]
 
     if (!primary) {
-      throw new Error('Expected a default generation provider.')
+      throw new Error('Expected a default embedding provider.')
     }
 
     await adapter.services.aiSettings.updateSettings({
-      usage: 'generation',
+      usage: 'embedding',
       providers: [
         {
           id: primary.id,
@@ -64,18 +64,18 @@ describe('aiModelSelectionRouter', () => {
           providerId: 'openrouter',
           type: 'openrouter',
           baseURL: 'https://openrouter.ai/api/v1',
-          model: 'openai/gpt-4.1-mini',
+          model: 'openai/text-embedding-ada-002',
           apiKeyId: null,
         },
       ],
     })
 
-    const provider = (
-      await adapter.services.aiModelSelection.getAvailableGenerationProviders()
-    ).find((entry) => entry.model === 'openai/gpt-4.1-mini')
+    const provider = (await adapter.services.embeddingModelSelection.getAvailableProviders()).find(
+      (entry) => entry.model === 'openai/text-embedding-ada-002'
+    )
 
     if (!provider) {
-      throw new Error('Expected a secondary generation provider.')
+      throw new Error('Expected a secondary embedding provider.')
     }
 
     const projectA = await adapter.services.projects.create('Story', {
@@ -96,7 +96,7 @@ describe('aiModelSelectionRouter', () => {
       addedAt: Date.now(),
     })
 
-    const caller = aiModelSelectionRouter.createCaller(
+    const caller = embeddingModelSelectionRouter.createCaller(
       createCallerContext({
         user: owner,
         adapter,
@@ -113,8 +113,21 @@ describe('aiModelSelectionRouter', () => {
       id: document.id,
     })
 
-    expect(snapshotForDocument.resolved.scopeType).toBe('project')
-    expect(snapshotForDocument.resolved.scopeId).toBe(projectA.id)
-    expect(snapshotForDocument.resolved.providerConfigId).toBe(provider.id)
+    expect(snapshotForDocument.resolved.scopeType).toBe('global')
+    expect(snapshotForDocument.resolved.providerConfigId).toBe(primary.id)
+
+    await caller.updateDocument({
+      projectId: projectA.id,
+      id: document.id,
+      providerConfigId: provider.id,
+    })
+
+    const documentOverride = await caller.getDocument({
+      projectId: projectA.id,
+      id: document.id,
+    })
+
+    expect(documentOverride.resolved.scopeType).toBe('document')
+    expect(documentOverride.resolved.providerConfigId).toBe(provider.id)
   })
 })

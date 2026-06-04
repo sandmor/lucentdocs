@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { InlineZoneSession } from '@lucentdocs/shared'
-import {
-  serializeInlineConversation,
-  sessionAfterInterruptedGeneration,
-} from './conversation.js'
+import { serializeInlineConversation, sessionAfterInterruptedGeneration } from './conversation.js'
 
 function createSession(messages: InlineZoneSession['messages']): InlineZoneSession {
   return {

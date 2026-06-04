@@ -5,7 +5,11 @@ import {
   type InlineZoneWriteAction,
 } from '@lucentdocs/shared'
 import { configManager } from '../config/runtime.js'
-import { configureEmbeddingProvider, resetEmbeddingClient } from '../embeddings/provider.js'
+import {
+  configureEmbeddingModelSelection,
+  configureEmbeddingProvider,
+  resetEmbeddingClient,
+} from '../embeddings/provider.js'
 import { createTestAdapter } from '../testing/factory.js'
 import { toEditorContent } from '../testing/editor-content.js'
 import { buildInlineZoneWriteTools, buildReadTools, hasValidToolScope } from './tools.js'
@@ -36,6 +40,7 @@ async function initializeEmbeddingSelection(
       )
     }) as unknown as typeof fetch,
   })
+  configureEmbeddingModelSelection(adapter.services.embeddingModelSelection)
 }
 
 describe('buildInlineZoneWriteTools', () => {

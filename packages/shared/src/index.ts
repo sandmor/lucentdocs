@@ -71,9 +71,15 @@ export {
   indexingStrategyScopeTypeSchema,
   describeIndexingStrategy,
 } from './indexing-strategy.js'
-export type { AiModelSelectionScopeType, ResolvedAiModelSelection } from './ai-model-selection.js'
+export type {
+  AiModelSelectionScopeType,
+  AiProviderSelectionUsage,
+  ResolvedAiModelSelection,
+  ResolvedEmbeddingModelSelection,
+} from './ai-model-selection.js'
 export {
   AI_MODEL_SELECTION_SCOPE_TYPES,
+  AI_PROVIDER_SELECTION_USAGES,
   aiModelSelectionScopeTypeSchema,
   resolvedAiModelSelectionSchema,
 } from './ai-model-selection.js'

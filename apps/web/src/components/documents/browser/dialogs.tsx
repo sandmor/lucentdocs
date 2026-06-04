@@ -83,6 +83,18 @@ interface BrowserDialogsProps {
   onSaveDocumentAiModel: (providerConfigId: string | null) => void
   isLoadingDocumentAiModel: boolean
   isSavingDocumentAiModel: boolean
+  documentEmbeddingModelDirectId: string | null
+  documentEmbeddingModelResolvedId: string | null
+  documentEmbeddingModelResolvedScopeType: IndexingStrategyScopeType | null
+  availableEmbeddingProviders: Array<{
+    id: string
+    name: string | null
+    providerId: string
+    model: string
+  }>
+  onSaveDocumentEmbeddingModel: (providerConfigId: string | null) => void
+  isLoadingDocumentEmbeddingModel: boolean
+  isSavingDocumentEmbeddingModel: boolean
 
   importDialogOpen: boolean
   onImportDialogOpenChange: (open: boolean) => void
@@ -151,6 +163,13 @@ export function BrowserDialogs({
   onSaveDocumentAiModel,
   isLoadingDocumentAiModel,
   isSavingDocumentAiModel,
+  documentEmbeddingModelDirectId,
+  documentEmbeddingModelResolvedId,
+  documentEmbeddingModelResolvedScopeType,
+  availableEmbeddingProviders,
+  onSaveDocumentEmbeddingModel,
+  isLoadingDocumentEmbeddingModel,
+  isSavingDocumentEmbeddingModel,
 
   importDialogOpen,
   onImportDialogOpenChange,
@@ -444,12 +463,14 @@ export function BrowserDialogs({
           <DialogHeader>
             <DialogTitle>Document settings</DialogTitle>
             <DialogDescription>
-              Configure how {documentSettingsTitle || 'this document'} is indexed and which AI model
-              it uses.
+              Configure how {documentSettingsTitle || 'this document'} is indexed, which AI model it
+              uses, and which embedding model indexes it for search.
             </DialogDescription>
           </DialogHeader>
 
-          {isLoadingDocumentAiModel || isLoadingDocumentSettings ? (
+          {isLoadingDocumentAiModel ||
+          isLoadingDocumentEmbeddingModel ||
+          isLoadingDocumentSettings ? (
             <div className="text-muted-foreground flex items-center gap-2 text-sm py-4">
               <Loader2 className="size-4 animate-spin" />
               Loading document settings…
@@ -479,7 +500,37 @@ export function BrowserDialogs({
               </div>
 
               <div className="space-y-4">
+                <h3 className="text-sm font-semibold">Embedding model</h3>
+                <p className="text-muted-foreground text-sm">
+                  Shared documents inherit only document overrides or the global default for search
+                  indexing.
+                </p>
+                {documentEmbeddingModelResolvedId && documentEmbeddingModelResolvedScopeType ? (
+                  <AiModelSelectionForm
+                    allowInherit
+                    compact
+                    directSelection={documentEmbeddingModelDirectId}
+                    resolvedProviderConfigId={documentEmbeddingModelResolvedId}
+                    resolvedScopeType={documentEmbeddingModelResolvedScopeType}
+                    availableProviders={availableEmbeddingProviders}
+                    isSaving={isSavingDocumentEmbeddingModel}
+                    saveLabel="Save document override"
+                    onSave={onSaveDocumentEmbeddingModel}
+                    modeLabel="Embedding model mode"
+                  />
+                ) : (
+                  <div className="text-muted-foreground text-sm">
+                    Unable to load embedding model settings.
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
                 <h3 className="text-sm font-semibold">Indexing strategy</h3>
+                <p className="text-muted-foreground text-sm">
+                  Shared documents inherit only document overrides or the global default for
+                  chunking.
+                </p>
                 {documentSettingsResolvedStrategy && documentSettingsResolvedScopeType ? (
                   <IndexingStrategyForm
                     allowInherit

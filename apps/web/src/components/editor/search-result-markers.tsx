@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { EditorView } from 'prosemirror-view'
-import {
-  computeLeftGutterContainerX,
-  getRangeBandRect,
-} from './side-elements/layout'
+import { computeLeftGutterContainerX, getRangeBandRect } from './side-elements/layout'
 import { subscribeEditorView } from './prosemirror/view-store'
 
 export interface SearchResultMarker {
