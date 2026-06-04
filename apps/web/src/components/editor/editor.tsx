@@ -1,4 +1,12 @@
-import { useRef, useEffect, forwardRef, useImperativeHandle, useState, useCallback } from 'react'
+import {
+  useRef,
+  useEffect,
+  forwardRef,
+  useImperativeHandle,
+  useState,
+  useCallback,
+  useMemo,
+} from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
@@ -24,6 +32,9 @@ import { emitAIStateChange } from './ai/writer-store'
 import { getSelectionRangeInView, hasActiveDomSelection } from './selection/dom-selection'
 import { selectionTouchesCodeBlock, shouldShowSelectionCompose } from './inline/utils'
 import { useInlineSessions } from './inline/use-sessions'
+import { useInlineSessionObserver } from './inline/use-inline-session-observer'
+import { resolveObservedInlineSessionIds } from './inline/resolve-observed-inline-session-ids'
+import { getAIZones } from './ai/writer-plugin'
 import { emitEditorViewChange } from './prosemirror/view-store'
 import { getLocalPresenceUser, installLocalPresenceUser } from './prosemirror/presence'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
@@ -186,6 +197,35 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     projectId,
     documentId,
     aiState,
+  })
+
+  const sessionStreamMetaById = useEditorStore((s) => s.inlineSessionStreamMetaById)
+
+  const inlineSessionIds = useMemo(
+    () => resolveObservedInlineSessionIds(aiState, sessionStreamMetaById),
+    [aiState, sessionStreamMetaById]
+  )
+
+  const resolveZoneIdForSession = useCallback(
+    (sessionId: string) => {
+      if (!editorView) return null
+      const zone = getAIZones(editorView).find((entry) => entry.sessionId === sessionId)
+      if (zone) return zone.id
+      const pluginState = aiState
+      if (pluginState?.sessionId === sessionId && pluginState.zoneId) {
+        return pluginState.zoneId
+      }
+      return null
+    },
+    [aiState, editorView]
+  )
+
+  useInlineSessionObserver({
+    projectId,
+    documentId,
+    sessionIds: inlineSessionIds,
+    resolveZoneIdForSession,
+    getBubblePresence: () => bubblePresenceRef.current,
   })
 
   const showOfflineToast = useCallback(() => {

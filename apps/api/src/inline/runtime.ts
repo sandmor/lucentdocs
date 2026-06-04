@@ -28,6 +28,10 @@ import {
   type InlineScope,
   type InlineSessionMetadataStore,
 } from './metadata-store.js'
+import {
+  serializeInlineConversation,
+  sessionAfterInterruptedGeneration,
+} from './conversation.js'
 import type { RepositorySet } from '../core/ports/types.js'
 import type { YjsDocumentVersion, YjsRuntime } from '../yjs/runtime.js'
 import {
@@ -247,21 +251,6 @@ function createUserMessage(text: string): InlineChatMessage {
   }
 }
 
-function serializeInlineConversation(session: InlineZoneSession): string {
-  if (session.messages.length === 0) {
-    return ''
-  }
-
-  return session.messages
-    .map((message) => {
-      const role = message.role === 'assistant' ? 'Assistant' : 'User'
-      const text = message.text.trim()
-      if (!text) return ''
-      return `${role}: ${text}`
-    })
-    .filter((line) => line.length > 0)
-    .join('\n')
-}
 
 function getMessageParts(message: unknown): unknown[] {
   if (typeof message !== 'object' || message === null || Array.isArray(message)) {
@@ -387,16 +376,6 @@ function applyWriteActionToSession(
     ...session,
     choices: [...nextChoices],
   }
-}
-
-function applyReplaceRangeToText(current: string, action: InlineZoneWriteAction): string {
-  if (action.type !== 'replace_range') {
-    return current
-  }
-
-  const fromOffset = Math.max(0, Math.min(action.fromOffset, current.length))
-  const toOffset = Math.max(fromOffset, Math.min(action.toOffset, current.length))
-  return `${current.slice(0, fromOffset)}${action.content}${current.slice(toOffset)}`
 }
 
 function normalizeRequesterClientName(name: string | undefined): string {
@@ -984,6 +963,41 @@ export class InlineRuntime {
     }
   }
 
+  async #rollbackZoneTextAfterInterruptedGeneration(
+    input: ResolvedInlineGenerationInput,
+    rollbackZoneText: string,
+    requesterClientName: string,
+    documentVersion: YjsDocumentVersion
+  ): Promise<void> {
+    const rollbackAction: InlineZoneWriteAction = {
+      type: 'replace_range',
+      fromOffset: 0,
+      toOffset: Number.MAX_SAFE_INTEGER,
+      content: rollbackZoneText,
+    }
+
+    try {
+      await this.#applyWriteActionToDocument(input, rollbackAction, requesterClientName)
+    } catch (error) {
+      if (
+        input.mode !== 'continue' ||
+        !(error instanceof InlineRuntimeError) ||
+        error.code !== 'NOT_FOUND' ||
+        !(await this.#ensureTerminalContinuationZone(
+          input,
+          input.continuationTailAnchor,
+          input.contextAfter,
+          requesterClientName,
+          documentVersion
+        ))
+      ) {
+        throw error
+      }
+
+      await this.#applyWriteActionToDocument(input, rollbackAction, requesterClientName)
+    }
+  }
+
   async #readZoneText(scope: InlineScope & { sessionId: string }): Promise<string | null> {
     const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
       transform: (currentDoc) => {
@@ -1089,7 +1103,10 @@ export class InlineRuntime {
         zoneDraftText = testResult.draftText
         if (controller.signal.aborted) {
           generationAborted = true
-          finalSession = baselineSession
+          finalSession =
+            input.mode === 'prompt'
+              ? sessionAfterInterruptedGeneration(generationSession, baselineSession)
+              : baselineSession
         }
         return
       }
@@ -1165,7 +1182,7 @@ export class InlineRuntime {
         const rendered = resolveSelectionPrompt(
           contextParts,
           prompt,
-          serializeInlineConversation(generationSession)
+          serializeInlineConversation(generationSession, { excludeTrailingUser: true })
         )
         assertPromptProtocolMode(rendered.definition, 'prompt')
 
@@ -1173,7 +1190,10 @@ export class InlineRuntime {
           onWriteAction: async (action) => {
             await this.#enqueueSessionWrite(input, async () => {
               if (action.type === 'replace_range') {
-                zoneDraftText = applyReplaceRangeToText(zoneDraftText, action)
+                // Apply each tool write to the live document so read/search tools see
+                // the same zone the model is editing. zoneDraftText tracks doc text.
+                await this.#applyWriteActionToDocument(input, action, requesterClientName)
+                zoneDraftText = (await this.#readZoneText(input)) ?? zoneDraftText
               }
 
               const nextSession = applyWriteActionToSession(finalSession, action)
@@ -1290,7 +1310,10 @@ export class InlineRuntime {
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         generationAborted = true
-        finalSession = baselineSession
+        finalSession =
+          input.mode === 'prompt'
+            ? sessionAfterInterruptedGeneration(finalSession, baselineSession)
+            : baselineSession
       }
       if (!shouldSilenceInlineGenerationError(error)) {
         if (!(error instanceof Error && error.name === 'AbortError')) {
@@ -1299,38 +1322,21 @@ export class InlineRuntime {
       }
       if (!(error instanceof Error && error.name === 'AbortError')) {
         generationError = error instanceof Error ? error.message : 'Inline AI generation failed.'
-        finalSession = baselineSession
+        finalSession =
+          input.mode === 'prompt'
+            ? sessionAfterInterruptedGeneration(finalSession, baselineSession)
+            : baselineSession
       }
     } finally {
-      if (input.mode === 'continue' && (generationAborted || generationError !== null)) {
+      if (generationAborted || generationError !== null) {
         try {
           await this.#enqueueSessionWrite(input, async () => {
-            const rollbackAction: InlineZoneWriteAction = {
-              type: 'replace_range',
-              fromOffset: 0,
-              toOffset: Number.MAX_SAFE_INTEGER,
-              content: rollbackZoneText,
-            }
-
-            try {
-              await this.#applyWriteActionToDocument(input, rollbackAction, requesterClientName)
-            } catch (error) {
-              if (
-                !(error instanceof InlineRuntimeError) ||
-                error.code !== 'NOT_FOUND' ||
-                !(await this.#ensureTerminalContinuationZone(
-                  input,
-                  input.continuationTailAnchor,
-                  input.contextAfter,
-                  requesterClientName,
-                  documentVersion
-                ))
-              ) {
-                throw error
-              }
-
-              await this.#applyWriteActionToDocument(input, rollbackAction, requesterClientName)
-            }
+            await this.#rollbackZoneTextAfterInterruptedGeneration(
+              input,
+              rollbackZoneText,
+              requesterClientName,
+              documentVersion
+            )
           })
         } catch (rollbackError) {
           if (!shouldSilenceInlineGenerationError(rollbackError)) {
@@ -1345,6 +1351,11 @@ export class InlineRuntime {
       if (!generationAborted && generationError === null) {
         try {
           await this.#enqueueSessionWrite(input, async () => {
+            const currentZoneText = (await this.#readZoneText(input)) ?? ''
+            if (currentZoneText === zoneDraftText) {
+              return
+            }
+
             const action: InlineZoneWriteAction = {
               type: 'replace_range',
               fromOffset: 0,
@@ -1381,7 +1392,10 @@ export class InlineRuntime {
                 ? error.message
                 : 'Inline generation finished but failed to apply the generated content.'
           }
-          finalSession = baselineSession
+          finalSession =
+            input.mode === 'prompt'
+              ? sessionAfterInterruptedGeneration(finalSession, baselineSession)
+              : baselineSession
         }
       }
 

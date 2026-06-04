@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
 import type { InlineZoneSession } from '@lucentdocs/shared'
+import type { InlineSessionPreview } from './inline-session-preview'
 import type { AnimationPhase, FormatMarkName, InlineControlState } from './types'
 import { selectChoice } from './utils'
 
@@ -225,6 +226,8 @@ interface AIZoneSurfaceProps {
   state: InlineControlState
   stuck: boolean
   session: InlineZoneSession | null
+  sessionPreview?: InlineSessionPreview | null
+  serverGenerating?: boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
   onStop: (zoneId?: string) => void
@@ -245,6 +248,8 @@ export function AIZoneSurface({
   state,
   stuck,
   session,
+  sessionPreview = null,
+  serverGenerating = false,
   onAccept,
   onReject,
   onStop,
@@ -259,8 +264,15 @@ export function AIZoneSurface({
   const [followupPrompt, setFollowupPrompt] = useState('')
 
   const canSendFollowup = useMemo(
-    () => Boolean(zoneId && followupPrompt.trim() && !isProcessing),
-    [followupPrompt, isProcessing, zoneId]
+    () =>
+      Boolean(
+        zoneId && followupPrompt.trim() && !isProcessing && !serverGenerating
+      ),
+    [followupPrompt, isProcessing, serverGenerating, zoneId]
+  )
+
+  const showAssistantPreview = Boolean(
+    isProcessing && sessionPreview && (sessionPreview.assistantText || sessionPreview.tools.length > 0)
   )
 
   const handleSendFollowup = () => {
@@ -412,6 +424,32 @@ export function AIZoneSurface({
                 ) : null}
               </div>
             ))}
+            {showAssistantPreview ? (
+              <div className="rounded-md border border-dashed border-border/50 bg-muted/20 px-2 py-1.5 text-xs opacity-80">
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  AI (streaming)
+                </div>
+                {sessionPreview?.assistantText ? (
+                  <div className="streamdown prose prose-xs dark:prose-invert max-w-none leading-relaxed">
+                    <Streamdown>{sessionPreview.assistantText}</Streamdown>
+                  </div>
+                ) : null}
+                {sessionPreview && sessionPreview.tools.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {sessionPreview.tools.map((tool) => (
+                      <span
+                        key={`preview-${tool.toolName}`}
+                        className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      >
+                        <Search className="size-2.5" />
+                        {tool.toolName.replace(/_/g, ' ')}
+                        {tool.state === 'pending' ? '…' : ''}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : isProcessing ? (
           <div className="flex items-center justify-center gap-2 px-2 py-3 text-muted-foreground">

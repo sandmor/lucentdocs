@@ -11,6 +11,7 @@ import {
 import { AIZoneSurface, SelectionComposeSurface } from './surfaces'
 import type { LoadingAnchor, ReviewZone } from './types'
 import type { SelectionRange } from '../selection/types'
+import { useEditorStore } from '@/lib/editor-store'
 
 interface MobileInlineAIDockProps {
   view: EditorView
@@ -50,6 +51,8 @@ export function MobileInlineAIDock({
   onDismissChoices,
   onInteractionChange,
 }: MobileInlineAIDockProps) {
+  const sessionPreviewsById = useEditorStore((s) => s.inlineSessionPreviewById)
+  const sessionStreamMetaById = useEditorStore((s) => s.inlineSessionStreamMetaById)
   const dockRef = useRef<HTMLDivElement>(null)
   const selectionRootRef = useRef<HTMLDivElement>(null)
   const viewportBottomOffset = useVisualViewportBottomOffset(true)
@@ -106,6 +109,19 @@ export function MobileInlineAIDock({
   }, [activeLoadingAnchor, activeReviewZone, showSelectionCompose, selection])
 
   const presence = useAnimatedPresence(Boolean(activeMode))
+
+  const activeSessionId =
+    activeMode?.kind === 'loading'
+      ? (activeMode.zone.sessionId ?? null)
+      : activeMode?.kind === 'review'
+        ? (activeMode.zone.sessionId ?? null)
+        : null
+  const activeSessionPreview = activeSessionId
+    ? (sessionPreviewsById[activeSessionId] ?? null)
+    : null
+  const activeServerGenerating = activeSessionId
+    ? Boolean(sessionStreamMetaById[activeSessionId]?.generating)
+    : false
 
   useEffect(() => {
     if (!presence.mounted || !dockRef.current) {
@@ -219,6 +235,8 @@ export function MobileInlineAIDock({
             state="processing"
             stuck={stuck}
             session={activeMode.zone.session}
+            sessionPreview={activeSessionPreview}
+            serverGenerating={activeServerGenerating}
             from={activeMode.zone.from}
             to={activeMode.zone.to}
             view={view}
@@ -239,6 +257,8 @@ export function MobileInlineAIDock({
             state={activeMode.zone.streaming ? 'processing' : 'review'}
             stuck={false}
             session={activeMode.zone.session}
+            sessionPreview={activeSessionPreview}
+            serverGenerating={activeServerGenerating}
             from={activeMode.zone.from}
             to={activeMode.zone.to}
             view={view}

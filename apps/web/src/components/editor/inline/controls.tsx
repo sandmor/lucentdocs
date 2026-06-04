@@ -39,6 +39,8 @@ export function InlineAIControls({
 }: InlineAIControlsProps) {
   const state = useAIWriterState(view)
   const sessionsById = useEditorStore((s) => s.inlineSessionsById)
+  const sessionPreviewsById = useEditorStore((s) => s.inlineSessionPreviewById)
+  const sessionStreamMetaById = useEditorStore((s) => s.inlineSessionStreamMetaById)
   const isCoarsePointer = useIsCoarsePointer()
   const hasSelection = Boolean(selection && selection.from < selection.to)
   const showSelectionCompose = Boolean(
@@ -100,6 +102,7 @@ export function InlineAIControls({
                 activeLoadingAnchor.zoneId ??
                 `loading-${activeLoadingAnchor.from}-${activeLoadingAnchor.to}`,
               zoneId: activeLoadingAnchor.zoneId,
+              sessionId: activeLoadingAnchor.sessionId,
               from: activeLoadingAnchor.from,
               to: activeLoadingAnchor.to,
               state: 'processing' as const,
@@ -110,6 +113,7 @@ export function InlineAIControls({
             ? {
                 key: activeReviewZone.id,
                 zoneId: activeReviewZone.id,
+                sessionId: activeReviewZone.sessionId,
                 from: activeReviewZone.from,
                 to: activeReviewZone.to,
                 state: activeReviewZone.streaming ? ('processing' as const) : ('review' as const),
@@ -119,6 +123,11 @@ export function InlineAIControls({
             : null
 
         if (!activeZone) return null
+
+        const sessionId = activeZone.sessionId ?? null
+        const serverGenerating = sessionId
+          ? Boolean(sessionStreamMetaById[sessionId]?.generating)
+          : false
 
         return (
           <AIZoneFloatingControl
@@ -130,6 +139,8 @@ export function InlineAIControls({
             state={activeZone.state}
             stuck={activeZone.stuck}
             session={activeZone.session}
+            sessionPreview={sessionId ? (sessionPreviewsById[sessionId] ?? null) : null}
+            serverGenerating={serverGenerating}
             onAccept={onAccept}
             onReject={onReject}
             onStop={onStop}

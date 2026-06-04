@@ -3,6 +3,15 @@ import type { EditorView } from 'prosemirror-view'
 import type { ConnectionStatus } from '@/lib/yjs-provider'
 import type { SelectionRange } from '@/components/editor/selection/types'
 import type { InlineZoneSession } from '@lucentdocs/shared'
+import {
+  areInlineSessionPreviewsEqual,
+  type InlineSessionPreview,
+} from '@/components/editor/inline/inline-session-preview'
+
+export interface InlineSessionStreamMeta {
+  generating: boolean
+  generationId: string | null
+}
 
 interface EditorStore {
   // Editor view reference (stable, doesn't cause re-renders on its own)
@@ -35,6 +44,12 @@ interface EditorStore {
   setSessions: (
     updater: (prev: Record<string, InlineZoneSession>) => Record<string, InlineZoneSession>
   ) => void
+
+  inlineSessionPreviewById: Record<string, InlineSessionPreview | null>
+  setSessionPreviewById: (sessionId: string, preview: InlineSessionPreview | null) => void
+
+  inlineSessionStreamMetaById: Record<string, InlineSessionStreamMeta>
+  setSessionStreamMetaById: (sessionId: string, meta: InlineSessionStreamMeta | null) => void
 
   // Editor session key (for forcing remount on restore)
   editorSessionKey: number
@@ -81,6 +96,49 @@ export const useEditorStore = create<EditorStore>((set) => ({
     }),
   setSessions: (updater) =>
     set((state) => ({ inlineSessionsById: updater(state.inlineSessionsById) })),
+
+  inlineSessionPreviewById: {},
+  setSessionPreviewById: (sessionId, preview) =>
+    set((state) => {
+      const current = state.inlineSessionPreviewById[sessionId] ?? null
+      if (preview === null) {
+        if (current === null) return state
+        const next = { ...state.inlineSessionPreviewById }
+        delete next[sessionId]
+        return { inlineSessionPreviewById: next }
+      }
+      if (areInlineSessionPreviewsEqual(current, preview)) return state
+      return {
+        inlineSessionPreviewById: {
+          ...state.inlineSessionPreviewById,
+          [sessionId]: preview,
+        },
+      }
+    }),
+
+  inlineSessionStreamMetaById: {},
+  setSessionStreamMetaById: (sessionId, meta) =>
+    set((state) => {
+      if (meta === null) {
+        if (state.inlineSessionStreamMetaById[sessionId] === undefined) return state
+        const next = { ...state.inlineSessionStreamMetaById }
+        delete next[sessionId]
+        return { inlineSessionStreamMetaById: next }
+      }
+      const current = state.inlineSessionStreamMetaById[sessionId]
+      if (
+        current?.generating === meta.generating &&
+        current?.generationId === meta.generationId
+      ) {
+        return state
+      }
+      return {
+        inlineSessionStreamMetaById: {
+          ...state.inlineSessionStreamMetaById,
+          [sessionId]: meta,
+        },
+      }
+    }),
 
   editorSessionKey: 0,
   bumpEditorSessionKey: () => set((state) => ({ editorSessionKey: state.editorSessionKey + 1 })),

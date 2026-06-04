@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
 import type { InlineZoneSession } from '@lucentdocs/shared'
+import type { InlineSessionPreview } from './inline-session-preview'
 import { useAnimatedPresence, useMountAnimationPhase, useSelectionComposeController } from './hooks'
 import { AI_ZONE_CONTROL_LAYOUT_EVENT, emitAIZoneControlLayoutChange } from './layout-events'
 import { AIZoneSurface, SelectionComposeSurface } from './surfaces'
@@ -173,6 +174,8 @@ interface AIZoneFloatingControlProps {
   state: InlineControlState
   stuck: boolean
   session: InlineZoneSession | null
+  sessionPreview?: InlineSessionPreview | null
+  serverGenerating?: boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
   onStop: (zoneId?: string) => void
@@ -188,6 +191,8 @@ export function AIZoneFloatingControl({
   state,
   stuck,
   session,
+  sessionPreview = null,
+  serverGenerating = false,
   onAccept,
   onReject,
   onStop,
@@ -393,6 +398,8 @@ export function AIZoneFloatingControl({
       state={state}
       stuck={stuck}
       session={session}
+      sessionPreview={sessionPreview}
+      serverGenerating={serverGenerating}
       from={from}
       to={to}
       view={view}

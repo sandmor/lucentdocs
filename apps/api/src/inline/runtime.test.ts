@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { docs } from '@y/websocket-server/utils'
-import { schema, type JsonObject } from '@lucentdocs/shared'
+import { schema, type InlineZoneWriteAction, type JsonObject } from '@lucentdocs/shared'
 import { createTestAdapter, type TestAdapter } from '../testing/factory.js'
 import { createYjsRuntime, type YjsRuntime } from '../yjs/runtime.js'
 import { createInlineRuntime, type InlineRuntime } from './runtime.js'
+import {
+  applyInlineZoneWriteActionToDoc,
+  getInlineZoneTextFromDoc,
+} from './zone-write.js'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -350,6 +354,103 @@ describe('InlineRuntime', () => {
 
       const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
       expect(extractDocText(live).endsWith('Once spark')).toBe(true)
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS
+      } else {
+        process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS = previousDelay
+      }
+    }
+  })
+
+  test('restores prompt-mode zone text after a cancelled generation with live writes', async () => {
+    const previousDelay = process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS
+    process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS = '50'
+
+    try {
+      const project = await adapter.services.projects.create('Story', {
+        ownerUserId: 'user_1',
+      })
+      const document = await adapter.services.documents.createForProject(
+        project.id,
+        'chapter-prompt-rollback.md'
+      )
+
+      if (!document) {
+        throw new Error('Expected a project document to be created.')
+      }
+
+      const sessionId = 'inline_session_prompt_rollback'
+      await yjsRuntime.replaceLiveDocumentContent(document.id, {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Lead ' },
+              {
+                type: 'ai_zone',
+                attrs: {
+                  id: 'zone_prompt',
+                  streaming: true,
+                  sessionId,
+                  originalSlice: null,
+                },
+                content: [{ type: 'text', text: 'original' }],
+              },
+            ],
+          },
+        ],
+      } as JsonObject)
+
+      const { generationId } = await inlineRuntime.startGeneration({
+        mode: 'prompt',
+        projectId: project.id,
+        documentId: document.id,
+        sessionId,
+        prompt: 'rewrite this',
+        selectionFrom: 0,
+        selectionTo: 100,
+        requesterClientName: 'test_client',
+      })
+
+      await sleep(10)
+
+      await yjsRuntime.applyProsemirrorTransform(document.id, {
+        transform: (currentDoc) => {
+          const action: InlineZoneWriteAction = {
+            type: 'replace_range',
+            fromOffset: 0,
+            toOffset: Number.MAX_SAFE_INTEGER,
+            content: 'partial',
+          }
+          const applied = applyInlineZoneWriteActionToDoc(currentDoc, sessionId, action)
+          return {
+            changed: applied.changed,
+            nextDoc: applied.nextDoc,
+            result: applied,
+          }
+        },
+      })
+
+      inlineRuntime.cancelGeneration(
+        { projectId: project.id, documentId: document.id, sessionId },
+        generationId
+      )
+
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        if (
+          !inlineRuntime.isGenerating({ projectId: project.id, documentId: document.id, sessionId })
+        ) {
+          break
+        }
+        await sleep(10)
+      }
+
+      const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+      const zoneText = getInlineZoneTextFromDoc(schema.nodeFromJSON(live), sessionId)
+      expect(zoneText.zoneFound).toBe(true)
+      expect(zoneText.text).toBe('original')
     } finally {
       if (previousDelay === undefined) {
         delete process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS

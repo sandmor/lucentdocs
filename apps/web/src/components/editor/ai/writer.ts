@@ -1,18 +1,17 @@
 import { TextSelection } from 'prosemirror-state'
 import { closeHistory } from 'prosemirror-history'
 import { EditorView } from 'prosemirror-view'
-import type { UIMessage } from 'ai'
 import { toast } from 'sonner'
 import { aiWriterPluginKey, getAIZones } from './writer-plugin'
-import { type InlineToolChip, type InlineZoneSession } from '@lucentdocs/shared'
+import { type InlineZoneSession } from '@lucentdocs/shared'
 import { StuckDetector } from './stuck-detector'
-import {
-  extractMessageTextFromPartsRaw,
-  extractToolPartsFromParts,
-  getMessageParts,
-} from './message-parts'
 import { createInlineSessionId, createZoneId } from './writer/ids'
 import { createEmptySession } from './writer/session-state'
+import { waitForInlineGeneration } from '../inline/inline-generation-wait'
+import {
+  emitInlineStreamActivity,
+  registerInlineStreamActivityHandler,
+} from '../inline/inline-stream-activity'
 import {
   createEmptyZoneSlice,
   createZoneNodeAttrs,
@@ -23,13 +22,7 @@ import {
   updateZoneNode,
   wrapSliceWithZoneNodes,
 } from './writer/zone-marks'
-import type {
-  AIBubblePresenceFrame,
-  AIWriterController,
-  AIWriterControllerOptions,
-  InlineStreamPayload,
-} from './writer/types'
-import { createUIMessageChunkPump } from './ui-message-chunk-pump'
+import type { AIWriterController, AIWriterControllerOptions, InlineStreamPayload } from './writer/types'
 import { getTrpcProxyClient } from '@/lib/trpc'
 
 export function createAIWriterController(
@@ -83,124 +76,6 @@ export function createAIWriterController(
   ) => {
     const currentSession = getSessionById(sessionId) ?? createEmptySession()
     setSessionById(sessionId, updater(currentSession))
-  }
-
-  const toToolChipState = (rawState: string): InlineToolChip['state'] =>
-    rawState === 'output-available' ? 'complete' : 'pending'
-
-  const areToolChipListsEqual = (left: InlineToolChip[], right: InlineToolChip[]): boolean => {
-    if (left.length !== right.length) return false
-    for (let index = 0; index < left.length; index += 1) {
-      if (left[index]?.toolName !== right[index]?.toolName) return false
-      if (left[index]?.state !== right[index]?.state) return false
-    }
-    return true
-  }
-
-  const extractInlineToolsFromMessage = (message: UIMessage): InlineToolChip[] => {
-    const tools: InlineToolChip[] = []
-
-    for (const part of extractToolPartsFromParts(getMessageParts(message))) {
-      const partType = typeof part.type === 'string' ? part.type : ''
-      const toolName =
-        partType === 'dynamic-tool'
-          ? typeof part.toolName === 'string'
-            ? part.toolName
-            : null
-          : partType.startsWith('tool-')
-            ? partType.replace(/^tool-/, '')
-            : null
-      if (!toolName) continue
-      if (toolName === 'write_zone' || toolName === 'write_zone_choices') continue
-
-      const rawState = typeof part.state === 'string' ? part.state : 'unknown'
-      const nextState = toToolChipState(rawState)
-      const existingIndex = tools.findIndex((tool) => tool.toolName === toolName)
-      if (existingIndex >= 0) {
-        tools[existingIndex] = {
-          ...tools[existingIndex],
-          state: nextState,
-        }
-      } else {
-        tools.push({
-          toolName,
-          state: nextState,
-        })
-      }
-    }
-
-    return tools
-  }
-
-  const upsertAssistantMessageInSession = (
-    session: InlineZoneSession,
-    assistantMessage: UIMessage
-  ): InlineZoneSession => {
-    const assistantText = extractMessageTextFromPartsRaw(getMessageParts(assistantMessage))
-    const assistantTools = extractInlineToolsFromMessage(assistantMessage)
-    const messages = [...session.messages]
-    const last = messages[messages.length - 1]
-    const fallbackId = last?.role === 'assistant' ? last.id : `inline-assistant-${Date.now()}`
-    const assistantId =
-      typeof assistantMessage.id === 'string' && assistantMessage.id.trim()
-        ? assistantMessage.id
-        : fallbackId
-
-    const assistant = {
-      id: assistantId,
-      role: 'assistant' as const,
-      text: assistantText,
-      tools: assistantTools,
-    }
-
-    if (last?.role === 'assistant') {
-      const unchanged =
-        last.id === assistant.id &&
-        last.text === assistant.text &&
-        areToolChipListsEqual(last.tools, assistant.tools)
-      if (unchanged) {
-        return session
-      }
-      messages[messages.length - 1] = assistant
-    } else {
-      messages.push(assistant)
-    }
-
-    return {
-      ...session,
-      messages,
-    }
-  }
-
-  const getAssistantSeedMessage = (session: InlineZoneSession | null): UIMessage | null => {
-    if (!session?.messages?.length) return null
-    const latestAssistant = [...session.messages]
-      .reverse()
-      .find((message) => message.role === 'assistant')
-    if (!latestAssistant) return null
-
-    return {
-      id: latestAssistant.id,
-      role: 'assistant',
-      parts: [{ type: 'text', text: latestAssistant.text }],
-    }
-  }
-
-  const resolveZoneIdForSession = (view: EditorView, sessionId: string): string | null => {
-    const zone = getAIZones(view).find((entry) => entry.sessionId === sessionId)
-    if (zone) return zone.id
-
-    const pluginState = aiWriterPluginKey.getState(view.state)
-    if (pluginState?.sessionId === sessionId && pluginState.zoneId) {
-      return pluginState.zoneId
-    }
-
-    return null
-  }
-
-  const publishBubblePresence = (bubble: Omit<AIBubblePresenceFrame, 'ownerClientId'>): void => {
-    if (!bubblePresence) return
-    bubblePresence.publish(bubble)
   }
 
   const clearBubblePresence = (sessionId: string): void => {
@@ -261,22 +136,9 @@ export function createAIWriterController(
     stuckDetector.reset()
     setStreamingState(true)
 
-    let observeUnsubscribe: { unsubscribe: () => void } | null = null
-    let activeGenerationId: string | null = null
-    let lastInlineEventSeq = 0
-    const chunkPump = createUIMessageChunkPump({
-      emitIntervalMs: 48,
-      isScopeActive: (scopeId) => scopeId === sessionId,
-      onGeneratingChange: onStreamingChange ?? undefined,
-      onMessage: (nextMessage) => {
-        updateZoneSession(sessionId, (current) =>
-          upsertAssistantMessageInSession(current, nextMessage)
-        )
-        stuckDetector.onChunk()
-      },
-      onError: (error) => {
-        console.warn('Inline stream chunk pump failed', { error })
-      },
+    const unregisterStreamActivity = registerInlineStreamActivityHandler((activeSessionId) => {
+      if (activeSessionId !== sessionId) return
+      stuckDetector.onChunk()
     })
 
     try {
@@ -286,130 +148,19 @@ export function createAIWriterController(
         return
       }
 
-      let resolveGenerationDone: (() => void) | null = null
-      let rejectGenerationDone: ((error: Error) => void) | null = null
-      let generationDoneSettled = false
+      let activeGenerationId: string | null = null
       let cancelRequested = false
 
-      const settleGenerationDone = () => {
-        if (generationDoneSettled) return
-        generationDoneSettled = true
-        resolveGenerationDone?.()
-      }
-
-      const rejectGeneration = (error: Error) => {
-        if (generationDoneSettled) return
-        generationDoneSettled = true
-        rejectGenerationDone?.(error)
-      }
-
-      const generationDone = new Promise<void>((resolve, reject) => {
-        resolveGenerationDone = resolve
-        rejectGenerationDone = reject
-      })
-
       const requestServerCancel = (generationId: string) => {
-        const payload = {
-          projectId: toolScope.projectId!,
-          documentId: toolScope.documentId!,
-          sessionId,
-          generationId,
-        }
-        void trpcClient.inline.cancelGeneration.mutate(payload).catch(() => {})
+        void trpcClient.inline.cancelGeneration
+          .mutate({
+            projectId: toolScope.projectId!,
+            documentId: toolScope.documentId!,
+            sessionId,
+            generationId,
+          })
+          .catch(() => {})
       }
-
-      observeUnsubscribe = trpcClient.inline.observeSession.subscribe(
-        {
-          projectId: toolScope.projectId,
-          documentId: toolScope.documentId,
-          sessionId,
-        },
-        {
-          onData: (event) => {
-            if (requestAbortController.signal.aborted) return
-            if (event.seq <= lastInlineEventSeq) return
-
-            if (lastInlineEventSeq > 0 && event.seq > lastInlineEventSeq + 1) {
-              console.warn('Inline stream sequence gap detected', {
-                previousSeq: lastInlineEventSeq,
-                nextSeq: event.seq,
-                sessionId,
-              })
-            }
-            lastInlineEventSeq = event.seq
-
-            if (event.type === 'stream-chunk') {
-              if (!activeGenerationId || activeGenerationId !== event.generationId) {
-                activeGenerationId = event.generationId
-                const seed = getAssistantSeedMessage(getSessionById(sessionId))
-                chunkPump.start(event.generationId, seed, sessionId)
-              } else if (chunkPump.getGenerationId() !== event.generationId) {
-                const seed = getAssistantSeedMessage(getSessionById(sessionId))
-                chunkPump.start(event.generationId, seed, sessionId)
-              }
-
-              stuckDetector.onChunk()
-              chunkPump.enqueue(event.chunk)
-              return
-            }
-
-            if (!activeGenerationId && event.generating && event.generationId) {
-              activeGenerationId = event.generationId
-            }
-
-            let nextSession = event.session ?? null
-            if (event.generating && nextSession && activeGenerationId) {
-              const localSession = getSessionById(sessionId)
-              const hasLocalAssistant = Boolean(
-                localSession?.messages.some((message) => message.role === 'assistant')
-              )
-              if (hasLocalAssistant) {
-                nextSession = {
-                  ...nextSession,
-                  messages: [...localSession!.messages],
-                }
-              }
-            }
-
-            setSessionById(sessionId, nextSession)
-            if (event.generating && event.generationId) {
-              const zoneId = resolveZoneIdForSession(view, sessionId)
-              if (zoneId) {
-                publishBubblePresence({
-                  sessionId,
-                  zoneId,
-                  generationId: event.generationId,
-                  seq: event.seq,
-                  text: event.draftText ?? '',
-                  updatedAt: Date.now(),
-                })
-              }
-            } else {
-              clearBubblePresence(sessionId)
-            }
-
-            if (event.generating) {
-              stuckDetector.onChunk()
-            } else {
-              chunkPump.stop()
-            }
-
-            if (event.error) {
-              rejectGeneration(new Error(event.error))
-              return
-            }
-
-            if (activeGenerationId && !event.generating) {
-              settleGenerationDone()
-            }
-          },
-          onError: (error) => {
-            rejectGeneration(
-              error instanceof Error ? error : new Error('Inline stream subscription failed')
-            )
-          },
-        }
-      )
 
       requestAbortController.signal.addEventListener(
         'abort',
@@ -418,16 +169,10 @@ export function createAIWriterController(
           abortPolicies.delete(requestAbortController)
           const shouldCancelServer = abortPolicy?.cancelServerOnAbort ?? true
 
-          if (shouldCancelServer) {
+          if (shouldCancelServer && activeGenerationId) {
             cancelRequested = true
-            if (activeGenerationId) {
-              requestServerCancel(activeGenerationId)
-            }
+            requestServerCancel(activeGenerationId)
           }
-
-          const abortError = new Error('Inline generation aborted')
-          abortError.name = 'AbortError'
-          rejectGeneration(abortError)
         },
         { once: true }
       )
@@ -451,12 +196,15 @@ export function createAIWriterController(
               selectionTo: payload.selectionTo,
               requesterClientName: getRequesterClientName() ?? undefined,
             })
+
       activeGenerationId = started.generationId
+      emitInlineStreamActivity(sessionId)
+
       if (cancelRequested) {
         requestServerCancel(started.generationId)
       }
 
-      await generationDone
+      await waitForInlineGeneration(sessionId, started.generationId, requestAbortController.signal)
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         return
@@ -464,8 +212,7 @@ export function createAIWriterController(
       const message = error instanceof Error ? error.message : 'AI streaming error'
       handleAIError(view, message)
     } finally {
-      observeUnsubscribe?.unsubscribe()
-      chunkPump.stop()
+      unregisterStreamActivity()
       clearBubblePresence(sessionId)
 
       if (requestId === currentRequestId && abortController === requestAbortController) {
@@ -667,7 +414,11 @@ export function createAIWriterController(
 
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt) return false
-    const sessionId = zone.sessionId ?? createInlineSessionId()
+    if (!zone.sessionId) {
+      toast.error('This AI zone has no conversation history. Accept or reject it and try again.')
+      return false
+    }
+    const sessionId = zone.sessionId
 
     const tr = view.state.tr
     tr.setMeta(aiWriterPluginKey, {

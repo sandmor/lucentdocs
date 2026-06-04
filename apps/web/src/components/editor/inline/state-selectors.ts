@@ -12,6 +12,7 @@ export function resolveActiveLoadingAnchor(
   if (activeZone) {
     return {
       zoneId: activeZone.id,
+      sessionId: activeZone.sessionId,
       from: activeZone.nodeFrom,
       to: activeZone.nodeTo,
       session: activeZone.sessionId ? (sessionsById[activeZone.sessionId] ?? null) : null,
@@ -25,6 +26,7 @@ export function resolveActiveLoadingAnchor(
 
   return {
     zoneId: state.zoneId ?? undefined,
+    sessionId: state.sessionId,
     from: Math.min(from, to),
     to: Math.max(from, to),
     session: state.sessionId ? (sessionsById[state.sessionId] ?? null) : null,
@@ -41,6 +43,7 @@ export function resolveReviewZones(
     .filter((zone) => zone.id !== loadingZoneId)
     .map((zone) => ({
       id: zone.id,
+      sessionId: zone.sessionId,
       from: zone.nodeFrom,
       to: zone.nodeTo,
       streaming: zone.streaming,
@@ -52,6 +55,7 @@ export function resolveReviewZones(
     if (!hasMark && state.from !== null && state.to !== null) {
       zonesFromMarks.push({
         id: state.zoneId,
+        sessionId: state.sessionId,
         from: Math.min(state.from, state.to),
         to: Math.max(state.from, state.to),
         streaming: state.streaming,
