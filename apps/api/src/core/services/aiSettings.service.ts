@@ -1,5 +1,7 @@
 import { nanoid } from 'nanoid'
 import type { AiModelSourceType } from '@lucentdocs/shared'
+import type { AiProviderCustomHeaders } from '@lucentdocs/shared'
+import { normalizeCustomHeaders } from '@lucentdocs/shared'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 import type { AiApiKeyEntity, AiProviderConfigEntity } from '../../core/ports/aiSettings.port.js'
@@ -34,6 +36,7 @@ export interface AiProviderConfigRecord {
   baseURL: string
   model: string
   apiKeyId: string | null
+  customHeaders: AiProviderCustomHeaders
   sortOrder: number
 }
 
@@ -59,6 +62,7 @@ export interface RuntimeProviderSelection {
   baseURL: string
   model: string
   apiKey: string
+  customHeaders: AiProviderCustomHeaders
 }
 
 export interface AiSettingsService {
@@ -74,6 +78,7 @@ export interface AiSettingsService {
       baseURL: string
       model: string
       apiKeyId: string | null
+      customHeaders?: AiProviderCustomHeaders
     }>
   }): Promise<AiSettingsSnapshot>
   createApiKey(input: {
@@ -356,6 +361,7 @@ export function createAiSettingsService(
             baseURL: bootstrapDefaults.baseURL,
             model: bootstrapDefaults.model,
             apiKeyId: bootstrapApiKeyId,
+            customHeaders: {},
             sortOrder: 0,
             createdAt: now,
             updatedAt: now,
@@ -383,6 +389,7 @@ export function createAiSettingsService(
               embeddingSource.baseURL,
               generationProviders[0]?.apiKeyId ?? bootstrapApiKeyId
             ),
+            customHeaders: {},
             sortOrder: 0,
             createdAt: now,
             updatedAt: now,
@@ -417,6 +424,7 @@ export function createAiSettingsService(
           baseURL: resolveProviderBaseURLOrThrow(provider.type, provider.baseURL),
           model: normalizeModelForUsage(provider.usage, provider.type, provider.model),
           apiKeyId: resolveSnapshotApiKeyId(provider),
+          customHeaders: normalizeCustomHeaders(provider.customHeaders),
           sortOrder: provider.sortOrder,
         })),
         embeddingProviders: embeddingProviders.map((provider) => ({
@@ -428,6 +436,7 @@ export function createAiSettingsService(
           baseURL: resolveProviderBaseURLOrThrow(provider.type, provider.baseURL),
           model: normalizeModelForUsage(provider.usage, provider.type, provider.model),
           apiKeyId: resolveSnapshotApiKeyId(provider),
+          customHeaders: normalizeCustomHeaders(provider.customHeaders),
           sortOrder: provider.sortOrder,
         })),
         apiKeys: apiKeys.map((key) => ({
@@ -470,6 +479,7 @@ export function createAiSettingsService(
           baseURL: resolveProviderBaseURLOrThrow(type, provider.baseURL),
           model: requireModel(provider.model),
           apiKeyId: provider.apiKeyId,
+          customHeaders: normalizeCustomHeaders(provider.customHeaders),
           sortOrder: index,
           createdAt: previous?.createdAt ?? now,
           updatedAt: now,
@@ -647,6 +657,7 @@ export function createAiSettingsService(
           baseURL: provider.baseURL,
           model: provider.model,
           apiKey: '',
+          customHeaders: normalizeCustomHeaders(provider.customHeaders),
         }
       }
 
@@ -657,6 +668,7 @@ export function createAiSettingsService(
         baseURL: provider.baseURL,
         model: provider.model,
         apiKey: selectedKey.apiKey,
+        customHeaders: normalizeCustomHeaders(provider.customHeaders),
       }
     },
   }

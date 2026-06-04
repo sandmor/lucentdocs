@@ -39,6 +39,7 @@ function createAiSettingsServiceMock(): AiSettingsService {
       baseURL: OPENROUTER_BASE_URL,
       model: 'openai/text-embedding-3-small',
       apiKey: 'test-key',
+      customHeaders: {},
     }),
   }
 }
@@ -102,6 +103,49 @@ describe('EmbeddingProvider', () => {
     await expect(provider.embed(['a', 'b'])).rejects.toThrow(
       'Embedding response entry 1 has 2 dimensions, expected 3.'
     )
+  })
+
+  test('forwards custom headers without overriding authorization', async () => {
+    let capturedHeaders: HeadersInit | undefined
+    const service = createAiSettingsServiceMock()
+    service.resolveProviderByConfigId = async (configId: string) => ({
+      providerConfigId: configId,
+      providerId: 'openrouter',
+      type: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      model: 'openai/text-embedding-3-small',
+      apiKey: 'test-key',
+      customHeaders: {
+        authorization: 'Bearer custom',
+        'X-Custom': 'gateway',
+      },
+    })
+
+    configureEmbeddingProvider(service, {
+      fetchImpl: (async (_input, init) => {
+        capturedHeaders = init?.headers
+        return new Response(
+          JSON.stringify({
+            data: [{ embedding: [0.1, 0.2, 0.3] }],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      }) as unknown as typeof fetch,
+    })
+    configureEmbeddingModelSelection(createEmbeddingModelSelectionMock())
+
+    const provider = await getEmbeddingProvider()
+    await provider.embed(['hello'])
+
+    expect(capturedHeaders).toMatchObject({
+      authorization: 'Bearer test-key',
+      'X-Custom': 'gateway',
+      accept: 'application/json',
+      'content-type': 'application/json',
+    })
   })
 
   test('reset clears fetch override and uses global fetch afterwards', async () => {

@@ -3,6 +3,8 @@ import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { AiModelSourceType } from '@lucentdocs/shared'
+import type { AiProviderCustomHeaders } from '@lucentdocs/shared'
+import { fingerprintCustomHeaders } from '@lucentdocs/shared'
 import type { AiSettingsService } from '../core/services/aiSettings.service.js'
 import type { AiModelSelectionService } from '../core/services/aiModelSelection.service.js'
 import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
@@ -15,6 +17,7 @@ export interface AiConfig {
     model: string
   }
   apiKey: string
+  customHeaders: AiProviderCustomHeaders
 }
 
 interface ResolvedProvider {
@@ -34,6 +37,7 @@ interface RuntimeProviderSelection {
   baseURL: string
   model: string
   apiKey: string
+  customHeaders: AiProviderCustomHeaders
 }
 
 // Cached across requests until configuration changes, so repeated generations do
@@ -82,6 +86,7 @@ function toAiConfig(selection: RuntimeProviderSelection): AiConfig {
   return {
     provider,
     apiKey: selection.apiKey,
+    customHeaders: selection.customHeaders,
     source: {
       type: selection.type,
       baseURL: selection.baseURL,
@@ -133,7 +138,28 @@ function buildProviderCacheKey(config: AiConfig, providerConfigId: string): stri
     config.source.type,
     config.source.baseURL,
     config.source.model,
+    fingerprintCustomHeaders(config.customHeaders),
   ].join('|')
+}
+
+function providerClientOptions(config: AiConfig): {
+  apiKey?: string
+  baseURL: string
+  headers?: Record<string, string>
+} {
+  const options = {
+    baseURL: config.source.baseURL,
+    ...(Object.keys(config.customHeaders).length > 0 ? { headers: config.customHeaders } : {}),
+  }
+
+  if (config.provider === 'openai-compatible' && !config.apiKey) {
+    return options
+  }
+
+  return {
+    ...options,
+    apiKey: config.apiKey,
+  }
 }
 
 async function resolveProviderConfig(scope?: AiModelRuntimeScope): Promise<{
@@ -159,22 +185,20 @@ async function getProvider(scope?: AiModelRuntimeScope): Promise<ResolvedProvide
     throw new Error('Missing API key for the active provider configuration.')
   }
 
+  const clientOptions = providerClientOptions(config)
+
   const created = Promise.resolve(
     config.provider === 'anthropic'
       ? {
           config,
-          model: createAnthropic({
-            apiKey: config.apiKey,
-            baseURL: source.baseURL,
-          })(source.model),
+          model: createAnthropic(clientOptions)(source.model),
         }
       : config.provider === 'openrouter'
         ? {
             config,
             model: createOpenAICompatible({
               name: 'openrouter',
-              apiKey: config.apiKey,
-              baseURL: source.baseURL,
+              ...clientOptions,
             })(source.model),
           }
         : config.provider === 'openai-compatible'
@@ -182,16 +206,12 @@ async function getProvider(scope?: AiModelRuntimeScope): Promise<ResolvedProvide
               config,
               model: createOpenAICompatible({
                 name: 'openai-compatible',
-                ...(config.apiKey ? { apiKey: config.apiKey } : {}),
-                baseURL: source.baseURL,
+                ...clientOptions,
               })(source.model),
             }
           : {
               config,
-              model: createOpenAI({
-                apiKey: config.apiKey,
-                baseURL: source.baseURL,
-              })(source.model),
+              model: createOpenAI(clientOptions)(source.model),
             }
   ).catch((error) => {
     providerPromises.delete(cacheKey)

@@ -76,6 +76,7 @@ const SCHEMA = `
     baseUrl TEXT NOT NULL,
     model TEXT NOT NULL,
     apiKeyId TEXT,
+    customHeaders TEXT NOT NULL DEFAULT '{}',
     sortOrder INTEGER NOT NULL,
     createdAt INTEGER NOT NULL,
     updatedAt INTEGER NOT NULL,

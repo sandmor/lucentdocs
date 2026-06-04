@@ -357,6 +357,7 @@ export function normalizeProvider(provider: AiProviderDraft): AiProviderDraft {
     baseURL: provider.baseURL.trim() || AI_PROVIDER_DEFAULT_BASE_URLS[type],
     model: provider.model.trim(),
     apiKeyId: provider.apiKeyId,
+    customHeaders: provider.customHeaders ?? {},
   }
 }
 
@@ -388,6 +389,7 @@ export function createProviderDraft(
     baseURL: option.apiBaseURL || AI_PROVIDER_DEFAULT_BASE_URLS[type],
     model,
     apiKeyId: null,
+    customHeaders: {},
   }
 }
 
@@ -422,9 +424,16 @@ export function sourceCatalogCacheKey(
   providerId: string,
   type: string,
   baseURL: string,
-  apiKeyId: string | null
+  apiKeyId: string | null,
+  customHeaders: Record<string, string> = {}
 ): string {
-  return `${kind}|${providerId.trim().toLowerCase()}|${type}|${baseURL.trim().toLowerCase()}|${apiKeyId ?? 'none'}`
+  const headerEntries = Object.entries(customHeaders)
+    .filter(([key, value]) => key.trim() && value.trim())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key.trim()}=${value.trim()}`)
+    .join('&')
+
+  return `${kind}|${providerId.trim().toLowerCase()}|${type}|${baseURL.trim().toLowerCase()}|${apiKeyId ?? 'none'}|${headerEntries || 'none'}`
 }
 
 export function serializeAiDraft(draft: AiDraftState): string {
@@ -437,6 +446,7 @@ export function serializeAiDraft(draft: AiDraftState): string {
       baseURL: provider.baseURL,
       model: provider.model,
       apiKeyId: provider.apiKeyId,
+      customHeaders: provider.customHeaders,
     })),
     activeProviderId: draft.activeProviderId,
   })

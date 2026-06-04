@@ -1,4 +1,6 @@
 import type { AiModelSourceType } from '@lucentdocs/shared'
+import type { AiProviderCustomHeaders } from '@lucentdocs/shared'
+import { mergeProviderRequestHeaders } from '@lucentdocs/shared'
 import type {
   AiSettingsService,
   RuntimeProviderSelection,
@@ -13,6 +15,7 @@ const TEST_FAKE_EMBEDDINGS_ENV = 'LUCENTDOCS_TEST_FAKE_EMBEDDINGS'
 export interface EmbeddingConfig {
   provider: 'openai' | 'openai-compatible' | 'openrouter'
   apiKey: string
+  customHeaders: AiProviderCustomHeaders
   source: {
     providerConfigId: string
     providerId: string
@@ -147,6 +150,7 @@ function toEmbeddingConfig(selection: RuntimeProviderSelection): EmbeddingConfig
   return {
     provider,
     apiKey: selection.apiKey,
+    customHeaders: selection.customHeaders,
     source: {
       providerConfigId: selection.providerConfigId,
       providerId: selection.providerId,
@@ -287,11 +291,14 @@ async function createProvider(config: EmbeddingConfig): Promise<EmbeddingProvide
       const fetchImpl = embeddingFetchOverride ?? globalThis.fetch
       const response = await fetchImpl(buildEmbeddingsEndpoint(config.source.baseURL), {
         method: 'POST',
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/json',
-          ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-        },
+        headers: mergeProviderRequestHeaders(
+          {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
+          },
+          config.customHeaders
+        ),
         body: JSON.stringify({
           model: config.source.model,
           input: inputs,

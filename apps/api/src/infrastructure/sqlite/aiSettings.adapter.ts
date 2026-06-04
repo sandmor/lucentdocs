@@ -6,6 +6,7 @@ import type {
   UpsertAiProviderConfigInput,
 } from '../../core/ports/aiSettings.port.js'
 import { normalizeModelSourceType } from '../../core/ai/provider-types.js'
+import { normalizeCustomHeaders } from '@lucentdocs/shared'
 import type { AiProviderUsage } from '../../core/ai/provider-usage.js'
 import type { SqliteConnection } from './connection.js'
 
@@ -18,6 +19,7 @@ interface ProviderRow {
   baseUrl: string
   model: string
   apiKeyId: string | null
+  customHeaders: string
   sortOrder: number
   createdAt: number
   updatedAt: number
@@ -43,6 +45,7 @@ function fromProviderRow(row: ProviderRow): AiProviderConfigEntity {
     baseURL: row.baseUrl,
     model: row.model,
     apiKeyId: row.apiKeyId,
+    customHeaders: normalizeCustomHeaders(row.customHeaders),
     sortOrder: row.sortOrder,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -66,7 +69,7 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
 
   async listProviderConfigs(usage: AiProviderUsage): Promise<AiProviderConfigEntity[]> {
     const rows = this.connection.all<ProviderRow>(
-      `SELECT id, usage, name, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt
+      `SELECT id, usage, name, providerId, type, baseUrl, model, apiKeyId, customHeaders, sortOrder, createdAt, updatedAt
        FROM ai_provider_configs
        WHERE usage = ?
        ORDER BY sortOrder ASC, createdAt ASC`,
@@ -78,8 +81,8 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
   async upsertProviderConfig(input: UpsertAiProviderConfigInput): Promise<void> {
     this.connection.run(
       `INSERT INTO ai_provider_configs
-        (id, usage, name, providerId, type, baseUrl, model, apiKeyId, sortOrder, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, usage, name, providerId, type, baseUrl, model, apiKeyId, customHeaders, sortOrder, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          usage = excluded.usage,
          name = excluded.name,
@@ -88,6 +91,7 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
          baseUrl = excluded.baseUrl,
          model = excluded.model,
          apiKeyId = excluded.apiKeyId,
+         customHeaders = excluded.customHeaders,
          sortOrder = excluded.sortOrder,
          updatedAt = excluded.updatedAt`,
       [
@@ -99,6 +103,7 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
         input.baseURL,
         input.model,
         input.apiKeyId,
+        JSON.stringify(input.customHeaders),
         input.sortOrder,
         input.createdAt,
         input.updatedAt,

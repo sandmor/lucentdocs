@@ -5,7 +5,9 @@ import {
   PERSISTED_CONFIG_KEYS,
   editableConfigSchema,
   normalizeBaseURL,
+  normalizeCustomHeaders,
   parseAndNormalizeHttpBaseURL,
+  type AiProviderCustomHeaders,
   type PersistedAppConfig,
 } from '@lucentdocs/shared'
 import { type ConfigStateSnapshot, type ConfigValueSource } from '../../config/manager.js'
@@ -80,6 +82,11 @@ function buildConfigPayload(state: ConfigStateSnapshot) {
   }
 }
 
+const customHeadersInputSchema = z
+  .record(z.string(), z.string())
+  .optional()
+  .transform((value): AiProviderCustomHeaders => normalizeCustomHeaders(value))
+
 const sourceCatalogInputSchema = z.object({
   usage: PROVIDER_USAGE_SCHEMA,
   providerId: z.string().min(1),
@@ -88,6 +95,7 @@ const sourceCatalogInputSchema = z.object({
     .string()
     .refine((value) => value.trim() === '' || isValidHttpBaseURL(value), 'Invalid base URL.'),
   apiKeyId: z.string().nullable().optional(),
+  customHeaders: customHeadersInputSchema,
   forceRefresh: z.boolean().optional(),
 })
 
@@ -101,6 +109,7 @@ const aiProviderInputSchema = z.object({
     .refine((value) => value.trim() === '' || isValidHttpBaseURL(value), 'Invalid base URL.'),
   model: z.string().trim().min(1, 'Model is required.'),
   apiKeyId: z.string().nullable(),
+  customHeaders: customHeadersInputSchema,
 })
 
 const updateProvidersInputSchema = z.object({
@@ -161,6 +170,7 @@ export const configRouter = router({
           baseURL: normalizeBaseURL(provider.baseURL),
           model: provider.model.trim(),
           apiKeyId: provider.apiKeyId,
+          customHeaders: provider.customHeaders,
         })),
       })
 
@@ -236,6 +246,7 @@ export const configRouter = router({
       input.usage,
       {
         forceRefresh: input.forceRefresh === true,
+        customHeaders: input.customHeaders,
       }
     )
   }),

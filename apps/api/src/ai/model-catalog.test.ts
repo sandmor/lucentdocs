@@ -453,4 +453,49 @@ describe('getSourceModelCatalog', () => {
     expect(first.provider.models[0]?.id).toBe('embedding-a')
     expect(second.provider.models[0]?.id).toBe('embedding-b')
   })
+
+  test('forwards custom headers without overriding authorization', async () => {
+    let capturedHeaders: HeadersInit | undefined
+
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+
+      if (url === MODELS_DEV_URL) {
+        return jsonResponse(modelsDevPayload)
+      }
+
+      if (url === 'https://openrouter.ai/api/v1/embeddings/models') {
+        capturedHeaders = init?.headers
+        return jsonResponse({
+          data: [{ id: 'embedding-custom', context_length: 1024 }],
+        })
+      }
+
+      return new Response('not found', { status: 404 })
+    }) as typeof fetch
+
+    await getSourceModelCatalog(
+      {
+        providerId: 'openrouter',
+        type: 'openrouter',
+        baseURL: 'https://openrouter.ai/api/v1',
+      },
+      'key-a',
+      'embedding',
+      {
+        forceRefresh: true,
+        customHeaders: {
+          authorization: 'Bearer custom',
+          'X-Custom': 'gateway',
+        },
+      }
+    )
+
+    expect(capturedHeaders).toMatchObject({
+      authorization: 'Bearer key-a',
+      'X-Custom': 'gateway',
+      accept: 'application/json',
+    })
+  })
 })

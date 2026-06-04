@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { AiModelSourceType } from '@lucentdocs/shared'
+import type { AiProviderCustomHeaders } from '@lucentdocs/shared'
+import { fingerprintCustomHeaders, mergeProviderRequestHeaders } from '@lucentdocs/shared'
 import { AI_PROVIDER_DEFAULT_BASE_URLS, normalizeBaseURL } from '../core/ai/provider-types.js'
 
 const MODELS_DEV_API_URL = 'https://models.dev/api.json'
@@ -502,14 +504,16 @@ interface OpenRouterFetchResult {
 async function fetchModelsFromOpenRouter(
   baseURL: string,
   apiKey: string,
-  usage: ModelCatalogUsage
+  usage: ModelCatalogUsage,
+  customHeaders: AiProviderCustomHeaders = {}
 ): Promise<OpenRouterFetchResult> {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-  }
-  if (apiKey) {
-    headers.authorization = `Bearer ${apiKey}`
-  }
+  const headers = mergeProviderRequestHeaders(
+    {
+      accept: 'application/json',
+      ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+    },
+    customHeaders
+  )
 
   if (usage === 'embedding') {
     const embeddingsEndpoint = buildEmbeddingsModelsEndpoint(baseURL)
@@ -582,26 +586,27 @@ interface ProviderFetchResult {
 async function fetchModelsFromProvider(
   source: Pick<ModelCatalogProviderSummary, 'type' | 'apiBaseURL'>,
   apiKey: string,
-  usage: ModelCatalogUsage
+  usage: ModelCatalogUsage,
+  customHeaders: AiProviderCustomHeaders = {}
 ): Promise<ProviderFetchResult> {
   if (source.type === 'openrouter') {
-    return fetchModelsFromOpenRouter(source.apiBaseURL, apiKey, usage)
+    return fetchModelsFromOpenRouter(source.apiBaseURL, apiKey, usage, customHeaders)
   }
 
   const endpoint = buildModelsEndpoint(source.apiBaseURL)
-  const headers: Record<string, string> = {
+  const defaultHeaders: Record<string, string> = {
     accept: 'application/json',
   }
 
   if (source.type === 'anthropic') {
-    headers['x-api-key'] = apiKey
-    headers['anthropic-version'] = '2023-06-01'
+    defaultHeaders['x-api-key'] = apiKey
+    defaultHeaders['anthropic-version'] = '2023-06-01'
   } else {
-    headers.authorization = `Bearer ${apiKey}`
+    defaultHeaders.authorization = `Bearer ${apiKey}`
   }
 
   const response = await fetch(endpoint, {
-    headers,
+    headers: mergeProviderRequestHeaders(defaultHeaders, customHeaders),
     signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
   })
 
@@ -647,8 +652,9 @@ export async function getSourceModelCatalog(
   },
   apiKey: string,
   usage: ModelCatalogUsage,
-  options: { forceRefresh?: boolean } = {}
+  options: { forceRefresh?: boolean; customHeaders?: AiProviderCustomHeaders } = {}
 ): Promise<SourceModelCatalogResult> {
+  const customHeaders = options.customHeaders ?? {}
   const modelsDev = await tryGetModelsDevCatalogData(options.forceRefresh === true)
   const baseURL = normalizeBaseURL(source.baseURL) || AI_PROVIDER_DEFAULT_BASE_URLS[source.type]
   const modelsDevProviderRaw =
@@ -668,7 +674,7 @@ export async function getSourceModelCatalog(
     }
   }
 
-  const cacheKey = `${source.providerId}|${source.type}|${baseURL}|${usage}|${fingerprintApiKey(apiKey)}`
+  const cacheKey = `${source.providerId}|${source.type}|${baseURL}|${usage}|${fingerprintApiKey(apiKey)}|${fingerprintCustomHeaders(customHeaders)}`
   const cached = providerCache.get(cacheKey)
 
   if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) {
@@ -686,7 +692,8 @@ export async function getSourceModelCatalog(
         apiBaseURL: baseURL,
       },
       apiKey,
-      usage
+      usage,
+      customHeaders
     )
 
     const result: ModelCatalogProvider = {

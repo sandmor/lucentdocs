@@ -36,6 +36,7 @@ export type AiProviderDraft = {
   baseURL: string
   model: string
   apiKeyId: string | null
+  customHeaders: Record<string, string>
 }
 
 export type AiApiKeySummary = {

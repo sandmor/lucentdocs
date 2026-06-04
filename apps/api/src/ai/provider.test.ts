@@ -24,6 +24,7 @@ describe('getLanguageModel', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-b',
       apiKey: '',
+      customHeaders: {},
     }))
 
     configureAiProvider({
@@ -59,6 +60,7 @@ describe('getLanguageModel', () => {
         baseURL: 'https://example.test/v1',
         model: 'model-b',
         apiKey: '',
+        customHeaders: {},
       }),
     } as unknown as AiSettingsService)
     configureAiModelSelection({

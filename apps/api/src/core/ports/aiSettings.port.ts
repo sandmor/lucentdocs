@@ -1,4 +1,5 @@
 import type { AiModelSourceType } from '@lucentdocs/shared'
+import type { AiProviderCustomHeaders } from '@lucentdocs/shared'
 import type { AiProviderUsage } from '../ai/provider-usage.js'
 
 export interface AiProviderConfigEntity {
@@ -10,6 +11,7 @@ export interface AiProviderConfigEntity {
   baseURL: string
   model: string
   apiKeyId: string | null
+  customHeaders: AiProviderCustomHeaders
   sortOrder: number
   createdAt: number
   updatedAt: number
@@ -34,6 +36,7 @@ export interface UpsertAiProviderConfigInput {
   baseURL: string
   model: string
   apiKeyId: string | null
+  customHeaders: AiProviderCustomHeaders
   sortOrder: number
   createdAt: number
   updatedAt: number

@@ -92,6 +92,12 @@ export {
   parseAndNormalizeHttpBaseURL,
   normalizeProviderBaseURL,
 } from './ai-provider.js'
+export type { AiProviderCustomHeaders } from './ai-provider-headers.js'
+export {
+  normalizeCustomHeaders,
+  mergeProviderRequestHeaders,
+  fingerprintCustomHeaders,
+} from './ai-provider-headers.js'
 export type {
   PromptMode,
   PromptSystemSlot,

@@ -243,6 +243,7 @@ export function AdminConfigPage() {
           baseURL: provider.baseURL,
           model: provider.model,
           apiKeyId: provider.apiKeyId,
+          customHeaders: provider.customHeaders,
         })),
       },
       {
@@ -369,7 +370,8 @@ export function AdminConfigPage() {
         provider.providerId,
         provider.type,
         provider.baseURL,
-        provider.apiKeyId
+        provider.apiKeyId,
+        provider.customHeaders
       )
 
       setLoadingSourceCatalogMap((current) => ({ ...current, [key]: true }))
@@ -381,6 +383,7 @@ export function AdminConfigPage() {
           type: provider.type,
           baseURL: provider.baseURL,
           apiKeyId: provider.apiKeyId,
+          customHeaders: provider.customHeaders,
           forceRefresh: options.forceRefresh === true,
         })
 
@@ -432,7 +435,8 @@ export function AdminConfigPage() {
             provider.providerId,
             provider.type,
             provider.baseURL,
-            provider.apiKeyId
+            provider.apiKeyId,
+            provider.customHeaders
           )
           if (sourceCatalogMap[key] || loadingSourceCatalogMap[key] || sourceCatalogErrorMap[key]) {
             continue
@@ -571,7 +575,8 @@ export function AdminConfigPage() {
           provider.providerId,
           provider.type,
           provider.baseURL,
-          provider.apiKeyId
+          provider.apiKeyId,
+          provider.customHeaders
         )
         const dynamicCatalog = sourceCatalogMap[key]
         const embeddingOption = embeddingProviderOptionByValue.get(provider.providerId)

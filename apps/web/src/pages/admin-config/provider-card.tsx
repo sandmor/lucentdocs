@@ -37,6 +37,7 @@ import type {
   ProviderWithCatalog,
 } from './types'
 import { defaultModelForProvider, formatInternalModelName, hasCatalogModels } from './constants'
+import { CustomHeadersEditor } from './custom-headers-editor'
 
 interface ProviderCardProps {
   kind: ProviderSectionKind
@@ -444,6 +445,14 @@ export function ProviderCard({
               : `${keyOptions.length - 1} key${keyOptions.length > 2 ? 's' : ''} for this URL.`}
           </FieldDescription>
         </Field>
+
+        <CustomHeadersEditor
+          providerId={provider.id}
+          headers={provider.customHeaders}
+          onChange={(customHeaders) => {
+            onUpdate(provider.id, { customHeaders })
+          }}
+        />
       </div>
     </div>
   )
