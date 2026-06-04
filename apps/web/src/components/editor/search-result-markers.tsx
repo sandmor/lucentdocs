@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { EditorView } from 'prosemirror-view'
+import {
+  computeLeftGutterContainerX,
+  getRangeBandRect,
+} from './side-elements/layout'
 import { subscribeEditorView } from './prosemirror/view-store'
 
 export interface SearchResultMarker {
@@ -26,7 +30,6 @@ interface MarkerSnapshot {
 }
 
 const MARKER_WIDTH = 4
-const MARKER_OFFSET = 14
 const MIN_MARKER_HEIGHT = 18
 
 export function SearchResultMarkers({ view, container, markers }: SearchResultMarkersProps) {
@@ -109,7 +112,7 @@ function collectMarkerSnapshot(
     .map((marker): MarkerRect | null => {
       const from = clampPosition(marker.from, docSize)
       const to = clampPosition(Math.max(marker.to, marker.from), docSize)
-      const rect = getRangeRect(view, from, Math.max(from, to))
+      const rect = getRangeBandRect(view, from, Math.max(from, to))
       if (!rect) return null
 
       return {
@@ -123,46 +126,13 @@ function collectMarkerSnapshot(
   if (markerRects.length === 0) return null
 
   return {
-    left: editorRect.left - containerRect.left - MARKER_OFFSET,
+    left: computeLeftGutterContainerX(editorRect, containerRect, 0),
     markers: markerRects,
   }
 }
 
 function clampPosition(position: number, docSize: number): number {
   return Math.max(1, Math.min(position, docSize))
-}
-
-function getRangeRect(view: EditorView, from: number, to: number): DOMRect | null {
-  try {
-    const range = document.createRange()
-    const fromDOM = view.domAtPos(from)
-    const toDOM = view.domAtPos(to)
-    range.setStart(fromDOM.node, fromDOM.offset)
-    range.setEnd(toDOM.node, toDOM.offset)
-
-    const rects = Array.from(range.getClientRects()).filter(
-      (rect) => rect.width > 0 && rect.height > 0
-    )
-    range.detach()
-
-    if (rects.length > 0) {
-      const top = Math.min(...rects.map((rect) => rect.top))
-      const bottom = Math.max(...rects.map((rect) => rect.bottom))
-      return new DOMRect(0, top, 1, Math.max(1, bottom - top))
-    }
-  } catch {
-    // Fall through to coordinate-based marker placement.
-  }
-
-  try {
-    const start = view.coordsAtPos(from)
-    const end = view.coordsAtPos(to)
-    const top = Math.min(start.top, end.top)
-    const bottom = Math.max(start.bottom, end.bottom)
-    return new DOMRect(0, top, 1, Math.max(1, bottom - top))
-  } catch {
-    return null
-  }
 }
 
 function sameSnapshot(previous: MarkerSnapshot | null, next: MarkerSnapshot | null): boolean {

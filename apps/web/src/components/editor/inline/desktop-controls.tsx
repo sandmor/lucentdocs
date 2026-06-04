@@ -7,6 +7,11 @@ import { AI_ZONE_CONTROL_LAYOUT_EVENT, emitAIZoneControlLayoutChange } from './l
 import { AIZoneSurface, SelectionComposeSurface } from './surfaces'
 import type { InlineControlState } from './types'
 import {
+  clampSideElementToViewport,
+  computeLeftGutterViewportX,
+  getEditorContentRect,
+} from '../side-elements/layout'
+import {
   applyPosition,
   COLLISION_PADDING,
   getSelectionRect,
@@ -306,6 +311,19 @@ export function AIZoneFloatingControl({
       const requestId = ++positionRequestId
 
       if (anchorRect) {
+        if (isMinimized) {
+          const editorRect = getEditorContentRect(view)
+          const rect = el.getBoundingClientRect()
+          const width = Math.max(rect.width, el.offsetWidth, 40)
+          const height = Math.max(rect.height, el.offsetHeight, 40)
+          const x = computeLeftGutterViewportX(editorRect, width)
+          const y = anchorRect.y + 8
+          const clamped = clampSideElementToViewport(x, y, width, height)
+          if (cancelled || requestId !== positionRequestId) return
+          applyComputedPosition(clamped.x, clamped.y)
+          return
+        }
+
         const virtualEl = {
           getBoundingClientRect: () => anchorRect,
           contextElement: view.dom as HTMLElement,
@@ -315,7 +333,7 @@ export function AIZoneFloatingControl({
           const result = await computePosition(virtualEl, el, {
             placement: 'bottom-start',
             middleware: [
-              offset({ mainAxis: 8, crossAxis: isMinimized ? -48 : 0 }),
+              offset({ mainAxis: 8 }),
               shift({ padding: 8, crossAxis: true }),
               {
                 name: 'forceY',
