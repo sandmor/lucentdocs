@@ -12,6 +12,47 @@ export function resolveMarkType(view: EditorView, markName: FormatMarkName): Mar
   return view.state.schema.marks[markName] ?? null
 }
 
+export function isInCodeBlock(view: EditorView): boolean {
+  const { from, to, empty } = view.state.selection
+  return selectionTouchesCodeBlock(view, from, to, empty)
+}
+
+/**
+ * True when the range (or cursor when empty) is inside or overlaps a code_block.
+ */
+export function selectionTouchesCodeBlock(
+  view: EditorView,
+  from: number,
+  to: number,
+  empty = from === to
+): boolean {
+  if (empty) {
+    return view.state.doc.resolve(from).parent.type.name === 'code_block'
+  }
+
+  let touches = false
+  view.state.doc.nodesBetween(from, to, (node) => {
+    if (node.type.name === 'code_block') {
+      touches = true
+      return false
+    }
+  })
+  return touches
+}
+
+export function shouldShowSelectionCompose(
+  view: EditorView,
+  selection: SelectionRange | null
+): boolean {
+  if (!selection || selection.from >= selection.to) return false
+  return !selectionTouchesCodeBlock(view, selection.from, selection.to)
+}
+
+export function canApplyFormatMark(view: EditorView, markName: FormatMarkName): boolean {
+  if (isInCodeBlock(view)) return false
+  return Boolean(resolveMarkType(view, markName))
+}
+
 export function isMarkActive(view: EditorView, markName: FormatMarkName): boolean {
   const markType = resolveMarkType(view, markName)
   if (!markType) return false

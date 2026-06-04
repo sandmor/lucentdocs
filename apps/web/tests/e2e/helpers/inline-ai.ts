@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 export type PWPage = Page
 
@@ -23,6 +23,13 @@ export async function createProject(page: PWPage, title: string) {
   await page.getByPlaceholder('The Great Novel...').fill(title)
   await page.getByRole('button', { name: 'Create' }).click()
   await waitForEditorConnected(page)
+}
+
+export async function openSelectionAskAI(toolbar: Locator) {
+  const askAiButton = toolbar.locator('[data-action="ask-ai"]')
+  await expect(askAiButton).toBeVisible()
+  await askAiButton.click()
+  await expect(toolbar.locator('textarea')).toBeVisible()
 }
 
 export async function startInlineGeneration(page: PWPage) {

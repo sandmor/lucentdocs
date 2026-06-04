@@ -144,10 +144,12 @@ export function SelectionComposeFloatingControl({
   return createPortal(
     <SelectionComposeSurface
       rootRef={rootRef}
-      className="ai-inline-controls ai-selection-toolbar ai-inline-animated ai-inline-animated-desktop fixed z-40 flex w-[min(94vw,420px)] flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md duration-150 dark:shadow-black/40 dark:ring-white/10"
+      className="ai-inline-controls ai-selection-toolbar ai-inline-animated ai-inline-animated-desktop fixed z-40 flex overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md duration-150 dark:shadow-black/40 dark:ring-white/10"
       animationPhase={presence.phase}
+      selectionKey={controls.selectionKey}
       prompt={controls.prompt}
       markActive={controls.markActive}
+      formatEnabled={controls.formatEnabled}
       onPromptChange={controls.setPrompt}
       onToggleMark={controls.runToggleMark}
       onSubmit={controls.handleSubmit}

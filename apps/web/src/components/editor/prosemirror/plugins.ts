@@ -1,6 +1,6 @@
-import { type EditorState, Plugin } from 'prosemirror-state'
+import { Plugin, type Command, type EditorState } from 'prosemirror-state'
 import { keymap } from 'prosemirror-keymap'
-import { baseKeymap } from 'prosemirror-commands'
+import { baseKeymap, toggleMark } from 'prosemirror-commands'
 import { history, undo, redo } from 'prosemirror-history'
 import { inputRules, wrappingInputRule, textblockTypeInputRule } from 'prosemirror-inputrules'
 import { dropCursor } from 'prosemirror-dropcursor'
@@ -9,7 +9,10 @@ import * as Y from 'yjs'
 import { ySyncPlugin, yUndoPlugin, undo as yUndo, redo as yRedo } from 'y-prosemirror'
 import type { Node as PMNode } from 'prosemirror-model'
 import { schema } from '@lucentdocs/shared'
+import type { MarkType } from 'prosemirror-model'
 import { createAIWriterPlugin, type AIWriterActionHandlers } from '../ai/writer-plugin'
+import { isInCodeBlock } from '../inline/utils'
+import { buildCodeBlockKeymapCommand } from './code-block-keymap'
 import { installYjsSelectionPatch } from './yjs-selection-patch'
 
 export type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>
@@ -50,6 +53,37 @@ function buildCollaborationPlugins(options: CollaborationOptions): Plugin[] {
   return [ySyncPlugin(options.yjsFragment, { mapping: options.yjsMapping })]
 }
 
+function toggleMarkOutsideCodeBlock(markType: MarkType): Command {
+  const command = toggleMark(markType)
+  return (state, dispatch, view) => {
+    if (view && isInCodeBlock(view)) return false
+    return command(state, dispatch, view)
+  }
+}
+
+function buildFormatKeymap() {
+  const bindings: Record<string, Command> = {}
+
+  const strong = schema.marks.strong
+  const em = schema.marks.em
+  const code = schema.marks.code
+
+  if (strong) {
+    bindings['Mod-b'] = toggleMarkOutsideCodeBlock(strong)
+    bindings['Mod-B'] = toggleMarkOutsideCodeBlock(strong)
+  }
+  if (em) {
+    bindings['Mod-i'] = toggleMarkOutsideCodeBlock(em)
+    bindings['Mod-I'] = toggleMarkOutsideCodeBlock(em)
+  }
+  if (code) {
+    bindings['Mod-e'] = toggleMarkOutsideCodeBlock(code)
+    bindings['Mod-E'] = toggleMarkOutsideCodeBlock(code)
+  }
+
+  return keymap(bindings)
+}
+
 export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   const { aiHandlers, collaboration } = options
 
@@ -88,6 +122,8 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
     )
   }
 
+  plugins.push(buildFormatKeymap())
+  plugins.push(keymap(buildCodeBlockKeymapCommand()))
   plugins.push(keymap(baseKeymap))
   plugins.push(dropCursor())
   plugins.push(gapCursor())

@@ -12,6 +12,7 @@ import {
 } from './state-selectors'
 import type { SelectionRange } from '../selection/types'
 import { useEditorStore } from '@/lib/editor-store'
+import { shouldShowSelectionCompose } from './utils'
 
 interface InlineAIControlsProps {
   view: EditorView | null
@@ -40,6 +41,9 @@ export function InlineAIControls({
   const sessionsById = useEditorStore((s) => s.inlineSessionsById)
   const isCoarsePointer = useIsCoarsePointer()
   const hasSelection = Boolean(selection && selection.from < selection.to)
+  const showSelectionCompose = Boolean(
+    view && hasSelection && shouldShowSelectionCompose(view, selection)
+  )
 
   const activeLoadingAnchor = useMemo(
     () => resolveActiveLoadingAnchor(state, sessionsById),
@@ -64,7 +68,7 @@ export function InlineAIControls({
       <MobileInlineAIDock
         view={view}
         selection={selection}
-        hasSelection={hasSelection}
+        showSelectionCompose={showSelectionCompose}
         activeLoadingAnchor={activeLoadingAnchor}
         reviewZones={reviewZones}
         stuck={Boolean(state?.stuck)}
@@ -84,7 +88,7 @@ export function InlineAIControls({
       <SelectionComposeFloatingControl
         view={view}
         selection={selection}
-        visible={hasSelection && !state?.active}
+        visible={showSelectionCompose && !state?.active}
         onGenerate={onGenerate}
         onInteractionChange={onInteractionChange}
       />

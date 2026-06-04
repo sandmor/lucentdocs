@@ -1,7 +1,7 @@
 import type { InlineZoneSession } from '@lucentdocs/shared'
 
 export type InlineControlState = 'compose' | 'processing' | 'review'
-export type FormatMarkName = 'strong' | 'em'
+export type FormatMarkName = 'strong' | 'em' | 'code'
 export type AnimationPhase = 'enter' | 'idle' | 'exit'
 
 export interface LoadingAnchor {

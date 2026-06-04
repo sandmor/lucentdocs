@@ -22,6 +22,7 @@ export function EditorToolbar({
   titleDisabled,
 }: EditorToolbarProps) {
   const isGenerating = useEditorStore((s) => s.isGenerating)
+
   return (
     <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card/70 px-3 py-2 shadow-sm backdrop-blur">
       <Input

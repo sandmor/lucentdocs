@@ -15,12 +15,14 @@ import { InlineAIControls } from './inline/controls'
 import { useAIWriterState } from './inline/hooks'
 import { RemotePresenceOverlay } from './collaboration/remote-presence-overlay'
 import { createAIBubbleNodeViews } from './collaboration/ai-bubble-node-view'
+import { createCodeBlockNodeView } from './nodes/code-block-node-view'
 import { AIBubblePresenceStore } from './collaboration/ai-bubble-presence'
 import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
 import { SearchResultMarkers, type SearchResultMarker } from './search-result-markers'
 import { emitAIStateChange } from './ai/writer-store'
 import { getSelectionRangeInView, hasActiveDomSelection } from './selection/dom-selection'
+import { selectionTouchesCodeBlock, shouldShowSelectionCompose } from './inline/utils'
 import { useInlineSessions } from './inline/use-sessions'
 import { emitEditorViewChange } from './prosemirror/view-store'
 import { getLocalPresenceUser, installLocalPresenceUser } from './prosemirror/presence'
@@ -289,7 +291,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       state,
       scrollThreshold: 150,
       scrollMargin: 150,
-      nodeViews: createAIBubbleNodeViews(bubblePresence),
+      nodeViews: {
+        ...createAIBubbleNodeViews(bubblePresence),
+        ...createCodeBlockNodeView(),
+      },
       dispatchTransaction(tr) {
         const newState = view.state.apply(tr)
         view.updateState(newState)
@@ -318,6 +323,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
             if (!viewIsFocused && !interacting) {
               return null
             }
+            if (selectionTouchesCodeBlock(view, from, to)) {
+              return null
+            }
             return { from, to }
           }
 
@@ -329,7 +337,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
               }
               const mappedFrom = tr.mapping.map(previous.from, 1)
               const mappedTo = tr.mapping.map(previous.to, -1)
-              if (mappedFrom < mappedTo) {
+              if (mappedFrom < mappedTo && !selectionTouchesCodeBlock(view, mappedFrom, mappedTo)) {
                 return { from: mappedFrom, to: mappedTo }
               }
             }
@@ -377,6 +385,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
             setStoreSelectionRange(null)
             setSelectionRange(null)
           }
+        }
+        return
+      }
+
+      if (selectionTouchesCodeBlock(view, selection.from, selection.to)) {
+        const prevRange = useEditorStore.getState().selectionRange
+        if (prevRange !== null) {
+          setStoreSelectionRange(null)
+          setSelectionRange(null)
         }
         return
       }
@@ -514,6 +531,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
       const { from, to, empty } = viewRef.current.state.selection
       const next = empty ? null : { from, to }
+      if (next && selectionTouchesCodeBlock(viewRef.current, next.from, next.to)) {
+        setStoreSelectionRange(null)
+        setSelectionRange(null)
+        return
+      }
       setStoreSelectionRange(next)
       setSelectionRange(next)
     },
@@ -537,6 +559,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         selection={selectionRange}
         onGenerate={(prompt, selection) => {
           if (!viewRef.current || !aiControllerRef.current) return false
+          if (!shouldShowSelectionCompose(viewRef.current, selection)) return false
           const started = aiControllerRef.current.startAIPromptAtRange(
             viewRef.current,
             prompt,
@@ -586,7 +609,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       <SelectionFakeOverlay
         view={editorView}
         selection={selectionRange}
-        visible={Boolean(editorView && selectionRange && !isEditorFocused)}
+        visible={Boolean(
+          editorView &&
+            selectionRange &&
+            !isEditorFocused &&
+            shouldShowSelectionCompose(editorView, selectionRange)
+        )}
       />
     </div>
   )

@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { toggleMark } from 'prosemirror-commands'
 import type { EditorView } from 'prosemirror-view'
 import type { AIWriterState } from '../ai/writer-plugin'
 import { getAIStateSnapshot, subscribeAIState } from '../ai/writer-store'
 import type { AnimationPhase, FormatMarkName } from './types'
-import { isMarkActive, resolveMarkType } from './utils'
+import { canApplyFormatMark, isMarkActive, resolveMarkType } from './utils'
 import type { SelectionRange } from '../selection/types'
 
 export function useAIWriterState(view: EditorView | null): AIWriterState | null {
@@ -96,8 +96,14 @@ export function useSelectionComposeController(
 ) {
   const [prompt, setPrompt] = useState('')
 
+  useEffect(() => {
+    setPrompt('')
+  }, [selection?.from, selection?.to])
+
   const runToggleMark = useCallback(
     (markName: FormatMarkName) => {
+      if (!canApplyFormatMark(view, markName)) return
+
       const markType = resolveMarkType(view, markName)
       if (!markType) return
 
@@ -114,6 +120,13 @@ export function useSelectionComposeController(
   const markActive = {
     strong: isMarkActive(view, 'strong'),
     em: isMarkActive(view, 'em'),
+    code: isMarkActive(view, 'code'),
+  }
+
+  const formatEnabled = {
+    strong: canApplyFormatMark(view, 'strong'),
+    em: canApplyFormatMark(view, 'em'),
+    code: canApplyFormatMark(view, 'code'),
   }
 
   const handleSubmit = useCallback(() => {
@@ -130,7 +143,9 @@ export function useSelectionComposeController(
     prompt,
     setPrompt,
     markActive,
+    formatEnabled,
     runToggleMark,
     handleSubmit,
+    selectionKey: selection ? `${selection.from}:${selection.to}` : '',
   }
 }

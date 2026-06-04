@@ -12,7 +12,7 @@
     "test:e2e": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} NODE_ENV=test playwright test"
   },
   "dependencies": {
-    "@base-ui/react": "^1.2.0",
+    "@base-ui/react": "^1.5.0",
     "@codemirror/lang-json": "^6.0.2",
     "@dnd-kit/core": "^6.3.1",
     "@floating-ui/dom": "^1.7.5",

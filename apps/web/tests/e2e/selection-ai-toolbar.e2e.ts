@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test'
-import { createProject, selectEditorText, startInlineGeneration } from './helpers/inline-ai'
+import {
+  createProject,
+  openSelectionAskAI,
+  selectEditorText,
+  startInlineGeneration,
+} from './helpers/inline-ai'
 
 test('selection toolbar sends prompt and keeps editor unchanged without tool write actions', async ({
   page,
@@ -15,6 +20,7 @@ test('selection toolbar sends prompt and keeps editor unchanged without tool wri
   await expect(selectionToolbar).toBeVisible()
   await expect(page.locator('.ai-selection-overlay')).toHaveCount(0)
 
+  await openSelectionAskAI(selectionToolbar)
   const promptInput = selectionToolbar.locator('textarea')
   await promptInput.fill('Make this more cosmic')
   await expect(page.locator('.ai-selection-overlay').first()).toBeVisible()
@@ -41,6 +47,7 @@ test('undo after selection rewrite request restores original paragraph text', as
   const selectionToolbar = page.locator('.ai-selection-toolbar')
   await expect(selectionToolbar).toBeVisible()
 
+  await openSelectionAskAI(selectionToolbar)
   const promptInput = selectionToolbar.locator('textarea')
   await promptInput.fill('Rewrite this')
   const submitShortcut = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'

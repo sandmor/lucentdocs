@@ -15,7 +15,7 @@ import type { SelectionRange } from '../selection/types'
 interface MobileInlineAIDockProps {
   view: EditorView
   selection: SelectionRange | null
-  hasSelection: boolean
+  showSelectionCompose: boolean
   activeLoadingAnchor: LoadingAnchor | null
   reviewZones: ReviewZone[]
   stuck: boolean
@@ -38,7 +38,7 @@ function setDockLayoutVariables(offset: number, reserve: number): void {
 export function MobileInlineAIDock({
   view,
   selection,
-  hasSelection,
+  showSelectionCompose,
   activeLoadingAnchor,
   reviewZones,
   stuck,
@@ -57,7 +57,7 @@ export function MobileInlineAIDock({
 
   const selectionControls = useSelectionComposeController(
     view,
-    hasSelection ? selection : null,
+    showSelectionCompose ? selection : null,
     onGenerate
   )
 
@@ -82,7 +82,7 @@ export function MobileInlineAIDock({
   }, [reviewZones, activeReviewZone])
 
   const activeMode = useMemo(() => {
-    if (hasSelection && selection) {
+    if (showSelectionCompose && selection) {
       return {
         kind: 'selection' as const,
       }
@@ -103,7 +103,7 @@ export function MobileInlineAIDock({
     }
 
     return null
-  }, [activeLoadingAnchor, activeReviewZone, hasSelection, selection])
+  }, [activeLoadingAnchor, activeReviewZone, showSelectionCompose, selection])
 
   const presence = useAnimatedPresence(Boolean(activeMode))
 
@@ -198,8 +198,10 @@ export function MobileInlineAIDock({
             rootRef={selectionRootRef}
             className="ai-inline-controls ai-selection-toolbar ai-inline-animated ai-inline-animated-mobile ai-inline-mobile-panel flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background/95 font-sans text-[13px] shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10"
             animationPhase={presence.phase}
+            selectionKey={selectionControls.selectionKey}
             prompt={selectionControls.prompt}
             markActive={selectionControls.markActive}
+            formatEnabled={selectionControls.formatEnabled}
             onPromptChange={selectionControls.setPrompt}
             onToggleMark={selectionControls.runToggleMark}
             onSubmit={selectionControls.handleSubmit}

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bold, Check, Italic, Loader2, Minus, Pen, Search, StopCircle, X } from 'lucide-react'
+import { Bold, Check, Italic, Loader2, Minus, Pen, Search, StopCircle, X, Code, Sparkles } from 'lucide-react'
 import type { EditorView } from 'prosemirror-view'
 import { Streamdown } from 'streamdown'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
@@ -13,10 +14,17 @@ interface SelectionComposeSurfaceProps {
   rootRef: { current: HTMLDivElement | null }
   className: string
   animationPhase?: AnimationPhase
+  selectionKey: string
   prompt: string
   markActive: {
     strong: boolean
     em: boolean
+    code: boolean
+  }
+  formatEnabled: {
+    strong: boolean
+    em: boolean
+    code: boolean
   }
   onPromptChange: (value: string) => void
   onToggleMark: (markName: FormatMarkName) => void
@@ -29,14 +37,22 @@ export function SelectionComposeSurface({
   rootRef,
   className,
   animationPhase = 'idle',
+  selectionKey,
   prompt,
   markActive,
+  formatEnabled,
   onPromptChange,
   onToggleMark,
   onSubmit,
   onInteractionChange,
   showShortcutHint,
 }: SelectionComposeSurfaceProps) {
+  const [isAIModeExpanded, setIsAIModeExpanded] = useState(false)
+
+  useEffect(() => {
+    setIsAIModeExpanded(false)
+  }, [selectionKey])
+
   useEffect(() => {
     return () => {
       onInteractionChange(false)
@@ -63,7 +79,7 @@ export function SelectionComposeSurface({
       ref={(node) => {
         rootRef.current = node
       }}
-      className={className}
+      className={cn(className, isAIModeExpanded ? 'w-[min(94vw,420px)] flex-col' : 'w-max items-center')}
       data-testid="ai-inline-controls"
       data-state="compose"
       data-ai-phase={animationPhase}
@@ -80,33 +96,14 @@ export function SelectionComposeSurface({
         }
       }}
     >
-      <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-          <Pen className="size-3" />
-          Selection
-        </span>
-      </div>
-
-      <div className="space-y-2 p-2">
-        <Textarea
-          value={prompt}
-          onChange={(event) => onPromptChange(event.target.value)}
-          placeholder="Describe what should change..."
-          className="min-h-18 text-sm"
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-              event.preventDefault()
-              onSubmit()
-            }
-          }}
-        />
-
-        <div className="flex items-center gap-1 px-1">
+      {!isAIModeExpanded ? (
+        <div className="flex items-center gap-1 p-1">
           <Button
             variant={markActive.strong ? 'secondary' : 'ghost'}
             size="icon-xs"
             data-action="format-bold"
             title="Bold"
+            disabled={!formatEnabled.strong}
             onPointerDown={(event) => event.preventDefault()}
             onClick={(event) => {
               event.preventDefault()
@@ -121,6 +118,7 @@ export function SelectionComposeSurface({
             size="icon-xs"
             data-action="format-italic"
             title="Italic"
+            disabled={!formatEnabled.em}
             onPointerDown={(event) => event.preventDefault()}
             onClick={(event) => {
               event.preventDefault()
@@ -130,25 +128,88 @@ export function SelectionComposeSurface({
           >
             <Italic className="size-3" />
           </Button>
-        </div>
-
-        <div className="flex items-center justify-between gap-2 px-1">
-          {showShortcutHint ? (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-              Send with
-              <Kbd>Ctrl/Cmd</Kbd>
-              <Kbd>Enter</Kbd>
-            </span>
-          ) : (
-            <span className="text-[11px] text-muted-foreground">Rewrite selection</span>
-          )}
-
-          <Button size="xs" onClick={onSubmit} disabled={!prompt.trim()}>
-            <Pen className="size-3" data-icon="inline-start" />
-            Rewrite
+          <Button
+            variant={markActive.code ? 'secondary' : 'ghost'}
+            size="icon-xs"
+            data-action="format-code"
+            title="Inline Code"
+            disabled={!formatEnabled.code}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              onToggleMark('code')
+            }}
+          >
+            <Code className="size-3" />
+          </Button>
+          <div className="mx-1 h-3 w-px bg-border" />
+          <Button
+            variant="ghost"
+            size="xs"
+            data-action="ask-ai"
+            className="text-primary hover:text-primary hover:bg-primary/10"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={(e) => {
+              e.preventDefault()
+              setIsAIModeExpanded(true)
+            }}
+          >
+            <Sparkles className="size-3" data-icon="inline-start" />
+            Ask AI
           </Button>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-2">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+              <Sparkles className="size-3" />
+              Ask AI
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground hover:bg-foreground/5 h-5 w-5"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => setIsAIModeExpanded(false)}
+            >
+              <X className="size-3" />
+            </Button>
+          </div>
+
+          <div className="space-y-2 p-2">
+            <Textarea
+              value={prompt}
+              onChange={(event) => onPromptChange(event.target.value)}
+              placeholder="Describe what should change..."
+              className="min-h-18 text-sm"
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault()
+                  onSubmit()
+                }
+              }}
+            />
+
+            <div className="flex items-center justify-between gap-2 px-1">
+              {showShortcutHint ? (
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                  Send with
+                  <Kbd>Ctrl/Cmd</Kbd>
+                  <Kbd>Enter</Kbd>
+                </span>
+              ) : (
+                <span className="text-[11px] text-muted-foreground">Rewrite selection</span>
+              )}
+
+              <Button size="xs" onClick={onSubmit} disabled={!prompt.trim()}>
+                <Sparkles className="size-3" data-icon="inline-start" />
+                Rewrite
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
