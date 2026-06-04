@@ -122,7 +122,7 @@ describe('EmbeddingProvider', () => {
     })
 
     configureEmbeddingProvider(service, {
-      fetchImpl: (async (_input, init) => {
+      fetchImpl: (async (_input: RequestInfo | URL, init?: RequestInit) => {
         capturedHeaders = init?.headers
         return new Response(
           JSON.stringify({

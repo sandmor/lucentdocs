@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react'
 import { toggleMark } from 'prosemirror-commands'
 import type { EditorView } from 'prosemirror-view'
 import type { AIWriterState } from '../ai/writer-plugin'
@@ -94,11 +94,14 @@ export function useSelectionComposeController(
   selection: SelectionRange | null,
   onGenerate: (prompt: string, selection: SelectionRange) => boolean
 ) {
+  const selectionKey = selection ? `${selection.from}:${selection.to}` : ''
   const [prompt, setPrompt] = useState('')
+  const [promptSelectionKey, setPromptSelectionKey] = useState(selectionKey)
 
-  useEffect(() => {
+  if (promptSelectionKey !== selectionKey) {
+    setPromptSelectionKey(selectionKey)
     setPrompt('')
-  }, [selection?.from, selection?.to])
+  }
 
   const runToggleMark = useCallback(
     (markName: FormatMarkName) => {

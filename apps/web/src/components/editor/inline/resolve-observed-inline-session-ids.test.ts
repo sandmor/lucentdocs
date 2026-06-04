@@ -14,6 +14,10 @@ function aiState(overrides: Partial<AIWriterState> = {}): AIWriterState {
     sessionId: null,
     streaming: false,
     stuck: false,
+    originalSlice: null,
+    originalFrom: null,
+    originalSelectionFrom: null,
+    originalSelectionTo: null,
     zones: [],
     ...overrides,
   }

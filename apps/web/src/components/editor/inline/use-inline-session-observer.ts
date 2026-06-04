@@ -237,5 +237,7 @@ export function useInlineSessionObserver({
       }
       subscriptions.clear()
     }
+    // sessionIdsKey captures sessionIds content without unstable array identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sessionIdsKey
   }, [documentId, projectId, sessionIdsKey])
 }

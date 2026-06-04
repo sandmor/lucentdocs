@@ -165,7 +165,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   { projectId, documentId, onConnectionChange, className, searchResultMarkers = [] },
   ref
 ) {
-  const editorShellRef = useRef<HTMLDivElement>(null)
+  const [editorShell, setEditorShell] = useState<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const selectionToolbarInteractingRef = useRef(false)
@@ -583,7 +583,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   )
 
   return (
-    <div ref={editorShellRef} className="relative flex-1 flex flex-col">
+    <div ref={setEditorShell} className="relative flex-1 flex flex-col">
       <div ref={containerRef} className={className} />
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
@@ -643,7 +643,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       <RemotePresenceOverlay view={editorView} awareness={presenceAwareness} />
       <SearchResultMarkers
         view={editorView}
-        container={editorShellRef.current}
+        container={editorShell}
         markers={searchResultMarkers}
       />
       <SelectionFakeOverlay

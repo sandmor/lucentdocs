@@ -39,11 +39,7 @@ interface CustomHeadersEditorProps {
   onChange: (headers: Record<string, string>) => void
 }
 
-export function CustomHeadersEditor({
-  providerId,
-  headers,
-  onChange,
-}: CustomHeadersEditorProps) {
+export function CustomHeadersEditor({ providerId, headers, onChange }: CustomHeadersEditorProps) {
   const rows = headersToRows(headers)
 
   const updateRows = (nextRows: HeaderRow[]) => {
@@ -87,7 +83,9 @@ export function CustomHeadersEditor({
               disabled={rows.length <= 1 && !row.key && !row.value}
               onClick={() => {
                 const nextRows = rows.filter((_, itemIndex) => itemIndex !== index)
-                updateRows(nextRows.length > 0 ? nextRows : [{ id: `row-${Date.now()}`, key: '', value: '' }])
+                updateRows(
+                  nextRows.length > 0 ? nextRows : [{ id: `row-${Date.now()}`, key: '', value: '' }]
+                )
               }}
               title="Remove header"
             >

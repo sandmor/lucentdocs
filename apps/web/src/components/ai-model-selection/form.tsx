@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { AiModelSelectionScopeType } from '@lucentdocs/shared'
 import { Button } from '@/components/ui/button'
 import { Field, FieldContent, FieldDescription, FieldLabel } from '@/components/ui/field'
@@ -73,17 +73,19 @@ export function AiModelSelectionForm({
     () => normalizeDirectSelection(directSelection, availableProviders),
     [directSelection, availableProviders]
   )
-  const [mode, setMode] = useState<'inherit' | 'custom'>(
-    allowInherit && normalizedDirectSelection === null ? 'inherit' : 'custom'
-  )
-  const [selectedId, setSelectedId] = useState<string>(
-    normalizedDirectSelection ?? resolvedProviderConfigId
-  )
+  const derivedMode = allowInherit && normalizedDirectSelection === null ? 'inherit' : 'custom'
+  const derivedSelectedId = normalizedDirectSelection ?? resolvedProviderConfigId
+  const syncToken = `${allowInherit}\0${normalizedDirectSelection}\0${resolvedProviderConfigId}`
 
-  useEffect(() => {
-    setMode(allowInherit && normalizedDirectSelection === null ? 'inherit' : 'custom')
-    setSelectedId(normalizedDirectSelection ?? resolvedProviderConfigId)
-  }, [allowInherit, normalizedDirectSelection, resolvedProviderConfigId])
+  const [mode, setMode] = useState<'inherit' | 'custom'>(derivedMode)
+  const [selectedId, setSelectedId] = useState<string>(derivedSelectedId)
+  const [lastSyncToken, setLastSyncToken] = useState(syncToken)
+
+  if (lastSyncToken !== syncToken) {
+    setLastSyncToken(syncToken)
+    setMode(derivedMode)
+    setSelectedId(derivedSelectedId)
+  }
 
   const resolvedProvider = useMemo(
     () => availableProviders.find((p) => p.id === resolvedProviderConfigId),

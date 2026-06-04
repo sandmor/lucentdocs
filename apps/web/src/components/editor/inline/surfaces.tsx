@@ -61,10 +61,12 @@ export function SelectionComposeSurface({
   showShortcutHint,
 }: SelectionComposeSurfaceProps) {
   const [isAIModeExpanded, setIsAIModeExpanded] = useState(false)
+  const [expandedSelectionKey, setExpandedSelectionKey] = useState(selectionKey)
 
-  useEffect(() => {
+  if (expandedSelectionKey !== selectionKey) {
+    setExpandedSelectionKey(selectionKey)
     setIsAIModeExpanded(false)
-  }, [selectionKey])
+  }
 
   useEffect(() => {
     return () => {
