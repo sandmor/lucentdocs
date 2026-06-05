@@ -134,8 +134,19 @@ async function setupWebRuntime(app: Express): Promise<ViteDevServer | null> {
 
   const compression = (await import('compression')).default
   const sirv = (await import('sirv')).default
+  const clientRoot = path.join(WEB_ROOT, 'dist/client')
+  const assetsRoot = path.join(clientRoot, 'assets')
+
   app.use(compression())
-  app.use('/', sirv(path.join(WEB_ROOT, 'dist/client'), { extensions: [] }))
+  app.use(
+    '/assets',
+    sirv(assetsRoot, {
+      maxAge: 31536000,
+      immutable: true,
+      gzip: true,
+    })
+  )
+  app.use('/', sirv(clientRoot, { extensions: [] }))
   return null
 }
 

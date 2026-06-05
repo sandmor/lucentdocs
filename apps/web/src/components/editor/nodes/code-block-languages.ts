@@ -1,84 +1,137 @@
-import { refractor } from 'refractor'
+import { LANGUAGE_ALIASES, normalizeLanguage, PLAIN_LANGUAGE } from '@/lib/code-block-language-id'
+import { AVAILABLE_LANGUAGES, isAvailableLanguage } from '@/lib/refractor-languages'
 
-export const PLAIN_LANGUAGE = 'plain'
-
-export const LANGUAGE_ALIASES: Record<string, string> = {
-  text: PLAIN_LANGUAGE,
-  plain: PLAIN_LANGUAGE,
-  plaintext: PLAIN_LANGUAGE,
-  js: 'javascript',
-  ts: 'typescript',
-  py: 'python',
-  sh: 'bash',
-  shell: 'bash',
-  yml: 'yaml',
-  md: 'markdown',
-  html: 'markup',
-  xml: 'markup',
-  svg: 'markup',
-  cs: 'csharp',
-  dotnet: 'csharp',
-  kt: 'kotlin',
-  kts: 'kotlin',
-  rb: 'ruby',
-  objc: 'objectivec',
-}
+export { LANGUAGE_ALIASES, PLAIN_LANGUAGE }
 
 const DISPLAY_NAMES: Record<string, string> = {
   plain: 'Plain Text',
   markup: 'HTML',
-  javascript: 'JavaScript',
-  typescript: 'TypeScript',
-  css: 'CSS',
-  json: 'JSON',
-  python: 'Python',
-  rust: 'Rust',
-  go: 'Go',
-  bash: 'Bash',
-  markdown: 'Markdown',
-  sql: 'SQL',
-  java: 'Java',
-  kotlin: 'Kotlin',
-  csharp: 'C#',
+  aspnet: 'ASP.NET',
+  autohotkey: 'AutoHotkey',
+  bbcode: 'BBCode',
+  cilkc: 'Cilk C',
+  cilkcpp: 'Cilk C++',
+  clike: 'C-like',
   cpp: 'C++',
-  c: 'C',
-  yaml: 'YAML',
-  php: 'PHP',
-  ruby: 'Ruby',
-  swift: 'Swift',
-  lua: 'Lua',
-  perl: 'Perl',
-  sass: 'Sass',
-  scss: 'SCSS',
-  less: 'Less',
-  diff: 'Diff',
-  ini: 'INI',
-  makefile: 'Makefile',
-  vbnet: 'VB.NET',
-  arduino: 'Arduino',
+  csharp: 'C#',
+  dataweave: 'DataWeave',
+  editorconfig: 'EditorConfig',
+  fsharp: 'F#',
+  graphql: 'GraphQL',
+  ignore: '.ignore',
+  javadoc: 'JavaDoc',
+  javadoclike: 'JavaDoc-like',
+  javastacktrace: 'Java Stacktrace',
+  jsdoc: 'JSDoc',
+  jsstacktrace: 'JS Stacktrace',
+  nand2tetris: 'Nand2Tetris',
+  'nand2tetris-hdl': 'Nand2Tetris HDL',
   objectivec: 'Objective-C',
-  regex: 'Regex',
+  opencl: 'OpenCL',
+  openqasm: 'OpenQASM',
+  pcaxis: 'PC-Axis',
+  peoplecode: 'PeopleCode',
+  phpdoc: 'PHPDoc',
+  'plant-uml': 'PlantUML',
+  powerquery: 'Power Query',
+  powershell: 'PowerShell',
+  promql: 'PromQL',
+  purebasic: 'PureBasic',
+  qsharp: 'Q#',
+  robotframework: 'Robot Framework',
+  supercollider: 'SuperCollider',
+  systemd: 'systemd',
+  't4-cs': 'T4 C#',
+  't4-vb': 'T4 VB',
+  uorazor: 'UO Razor',
+  vbnet: 'VB.NET',
+  wasm: 'Wasm',
 }
 
-const ACRONYMS = new Set(['css', 'json', 'sql', 'php', 'yaml', 'ini', 'cpp'])
+const ACRONYMS = new Set([
+  'abap',
+  'abnf',
+  'apl',
+  'aql',
+  'asm6502',
+  'bbj',
+  'bnf',
+  'bqn',
+  'bsl',
+  'c',
+  'cf',
+  'cil',
+  'cobol',
+  'css',
+  'csv',
+  'd',
+  'dax',
+  'dns',
+  'ebnf',
+  'ejs',
+  'erb',
+  'ftl',
+  'gd',
+  'glsl',
+  'gml',
+  'gn',
+  'hcl',
+  'hdl',
+  'hlsl',
+  'hpkp',
+  'hsts',
+  'html',
+  'http',
+  'icu',
+  'idl',
+  'iecst',
+  'ini',
+  'j',
+  'jq',
+  'js',
+  'json',
+  'json5',
+  'jsonp',
+  'jsx',
+  'llvm',
+  'lolcode',
+  'n1ql',
+  'n4js',
+  'nasm',
+  'nginx',
+  'nsis',
+  'php',
+  'plsql',
+  'q',
+  'qml',
+  'r',
+  'rest',
+  'sas',
+  'scss',
+  'sml',
+  'sparql',
+  'spl',
+  'sqf',
+  'sql',
+  'tcl',
+  'toml',
+  'ts',
+  'tsx',
+  'tt2',
+  'uri',
+  'wgsl',
+  'xml',
+  'yaml',
+])
 
-const BUNDLED_LANGUAGES = [...refractor.listLanguages()].sort()
-
-export function normalizeLanguage(language: string | null | undefined): string {
-  if (!language?.trim()) return PLAIN_LANGUAGE
-  const lower = language.toLowerCase().trim().split(/\s+/)[0] ?? ''
-  return LANGUAGE_ALIASES[lower] ?? lower
-}
-
-const PICKER_LANGUAGES = BUNDLED_LANGUAGES.filter(
+const PICKER_LANGUAGES = AVAILABLE_LANGUAGES.filter(
   (lang) => normalizeLanguage(lang) === lang && lang !== PLAIN_LANGUAGE
 )
 
+export { normalizeLanguage }
+
 export function isHighlightableLanguage(language: string | null | undefined): boolean {
-  if (!language?.trim()) return false
-  const normalized = normalizeLanguage(language)
-  if (normalized === PLAIN_LANGUAGE) return false
-  return refractor.registered(normalized)
+  return isAvailableLanguage(language)
 }
 
 export function toStoredLanguage(language: string): string {
@@ -109,17 +162,39 @@ export function formatLanguageName(language: string): string {
   const normalized = normalizeLanguage(language)
   if (normalized === PLAIN_LANGUAGE) return DISPLAY_NAMES.plain
   if (DISPLAY_NAMES[normalized]) return DISPLAY_NAMES[normalized]!
+
+  // Smartly format multi-word strings (e.g. 'js-extras' -> 'JS Extras', 'shell-session' -> 'Shell Session')
+  if (normalized.includes('-')) {
+    return normalized
+      .split('-')
+      .map((part) => {
+        if (ACRONYMS.has(part)) return part.toUpperCase()
+        return part.charAt(0).toUpperCase() + part.slice(1)
+      })
+      .join(' ')
+  }
+
+  // Handle distinct acronyms
   if (ACRONYMS.has(normalized)) return normalized.toUpperCase()
+
+  // Catch dynamic `*script` languages (handles TypeScript, JavaScript, GDScript, etc.)
   if (normalized.endsWith('script')) {
     const prefix = normalized.slice(0, -6)
     if (!prefix) return 'Script'
-    return prefix.charAt(0).toUpperCase() + prefix.slice(1) + 'Script'
+
+    const formattedPrefix = ACRONYMS.has(prefix)
+      ? prefix.toUpperCase()
+      : prefix.charAt(0).toUpperCase() + prefix.slice(1)
+
+    return formattedPrefix + 'Script'
   }
+
+  // Fallback to standard Title Case
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }
 
 export function getBundledLanguages(): readonly string[] {
-  return BUNDLED_LANGUAGES
+  return AVAILABLE_LANGUAGES
 }
 
 export interface LanguagePickerOption {

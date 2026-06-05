@@ -1,7 +1,9 @@
 import { createRoot, type Root } from 'react-dom/client'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import type { EditorView, NodeView, ViewMutationRecord } from 'prosemirror-view'
-import { getHighlightedHTML } from '../prosemirror/syntax-highlighter'
+import { getHighlightedHTMLAsync } from '../prosemirror/syntax-highlighter'
+
+const HIGHLIGHT_DEBOUNCE_MS = 75
 import { CodeBlockCopyButton, CodeBlockLanguageSelector } from './code-block-node-view-controls'
 
 export class CodeBlockNodeView implements NodeView {
@@ -20,6 +22,8 @@ export class CodeBlockNodeView implements NodeView {
   private highlightPre: HTMLElement
   private highlightCode: HTMLElement
   private highlightFrame: number | null = null
+  private highlightDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  private highlightGeneration = 0
   private syncHighlightScroll = () => {
     this.highlightPre.style.transform = `translateX(-${this.preElement.scrollLeft}px)`
   }
@@ -114,17 +118,33 @@ export class CodeBlockNodeView implements NodeView {
   }
 
   private updateHighlighting() {
-    if (this.highlightFrame !== null) {
-      cancelAnimationFrame(this.highlightFrame)
+    if (this.highlightDebounceTimer !== null) {
+      clearTimeout(this.highlightDebounceTimer)
     }
 
-    this.highlightFrame = requestAnimationFrame(() => {
-      this.highlightFrame = null
-      const language = this.node.attrs.language || ''
-      const content = this.node.textContent
-      this.highlightCode.innerHTML = getHighlightedHTML(content, language)
-      this.syncHighlightScroll()
-    })
+    this.highlightDebounceTimer = setTimeout(() => {
+      this.highlightDebounceTimer = null
+      if (this.highlightFrame !== null) {
+        cancelAnimationFrame(this.highlightFrame)
+      }
+
+      this.highlightFrame = requestAnimationFrame(() => {
+        this.highlightFrame = null
+        void this.runHighlighting()
+      })
+    }, HIGHLIGHT_DEBOUNCE_MS)
+  }
+
+  private async runHighlighting() {
+    const generation = ++this.highlightGeneration
+    const language = this.node.attrs.language || ''
+    const content = this.node.textContent
+    const html = await getHighlightedHTMLAsync(content, language)
+
+    if (generation !== this.highlightGeneration) return
+
+    this.highlightCode.innerHTML = html
+    this.syncHighlightScroll()
   }
 
   update(node: ProseMirrorNode): boolean {
@@ -174,10 +194,15 @@ export class CodeBlockNodeView implements NodeView {
 
   destroy() {
     this.preElement.removeEventListener('scroll', this.syncHighlightScroll)
+    if (this.highlightDebounceTimer !== null) {
+      clearTimeout(this.highlightDebounceTimer)
+      this.highlightDebounceTimer = null
+    }
     if (this.highlightFrame !== null) {
       cancelAnimationFrame(this.highlightFrame)
       this.highlightFrame = null
     }
+    this.highlightGeneration++
     if (this.reactRoot) {
       this.reactRoot.unmount()
       this.reactRoot = null

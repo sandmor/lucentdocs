@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build --outDir dist/client && vite build --ssr src/entry-server.tsx --outDir dist/server",
+    "generate:refractor-manifest": "node ./scripts/generate-refractor-manifest.mjs",
+    "build": "bun run generate:refractor-manifest && vite build --outDir dist/client && vite build --ssr src/entry-server.tsx --outDir dist/server",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun test src/",
