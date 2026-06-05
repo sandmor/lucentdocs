@@ -75,6 +75,7 @@ interface DocumentListRowProps {
   onSettingsDocument: (documentId: string) => void
   onDeleteDocument: (documentId: string) => void
   onExportDocument: (documentId: string) => void
+  onCopyDocumentAsMarkdown: (documentId: string) => void
   onRenameDirectory: (path: string) => void
   onMoveDirectory: (path: string) => void
   onDeleteDirectory: (path: string) => void
@@ -126,6 +127,7 @@ function DirectoryListRow({
           onSettingsDocument={actionProps.onSettingsDocument}
           onDeleteDocument={actionProps.onDeleteDocument}
           onExportDocument={actionProps.onExportDocument}
+          onCopyDocumentAsMarkdown={actionProps.onCopyDocumentAsMarkdown}
           onRenameDirectory={actionProps.onRenameDirectory}
           onMoveDirectory={actionProps.onMoveDirectory}
           onDeleteDirectory={actionProps.onDeleteDirectory}
@@ -179,6 +181,7 @@ function DocumentFileListRow({
           onSettingsDocument={actionProps.onSettingsDocument}
           onDeleteDocument={actionProps.onDeleteDocument}
           onExportDocument={actionProps.onExportDocument}
+          onCopyDocumentAsMarkdown={actionProps.onCopyDocumentAsMarkdown}
           onRenameDirectory={actionProps.onRenameDirectory}
           onMoveDirectory={actionProps.onMoveDirectory}
           onDeleteDirectory={actionProps.onDeleteDirectory}

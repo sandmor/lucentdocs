@@ -292,7 +292,6 @@ function buildLimitsConfig(rawConfig: PersistedAppConfig): LimitsConfig {
     promptUserChars: rawConfig.maxPromptUserChars,
     docImportChars: rawConfig.maxDocImportChars,
     docImportBatchDocs: rawConfig.maxDocImportBatchDocs,
-    docExportChars: rawConfig.maxDocExportChars,
     promptExcerptChars: rawConfig.maxPromptExcerptChars,
   }
 }

@@ -107,6 +107,7 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
               onSettingsDocument={browser.handleSettingsDocument}
               onDeleteDocument={browser.handleDeleteDocument}
               onExportDocument={browser.handleExportDocument}
+              onCopyDocumentAsMarkdown={browser.handleCopyDocumentAsMarkdown}
               onRenameDirectory={browser.handleRenameDirectory}
               onMoveDirectory={browser.handleMoveDirectory}
               onDeleteDirectory={browser.handleDeleteDirectory}

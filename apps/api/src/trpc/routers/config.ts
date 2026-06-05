@@ -280,7 +280,6 @@ export const configRouter = router({
       maxPromptUserChars: input.maxPromptUserChars,
       maxDocImportChars: input.maxDocImportChars,
       maxDocImportBatchDocs: input.maxDocImportBatchDocs,
-      maxDocExportChars: input.maxDocExportChars,
       maxPromptExcerptChars: input.maxPromptExcerptChars,
     }
 

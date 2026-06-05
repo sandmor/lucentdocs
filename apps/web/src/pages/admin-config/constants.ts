@@ -128,7 +128,7 @@ export const LIMIT_FIELD_ROWS = [
     columnsClassName: 'sm:grid-cols-2',
   },
   {
-    keys: ['maxDocImportChars', 'maxDocImportBatchDocs', 'maxDocExportChars'],
+    keys: ['maxDocImportChars', 'maxDocImportBatchDocs'],
     columnsClassName: 'sm:grid-cols-2',
   },
   {
@@ -291,11 +291,6 @@ export const VISIBLE_FIELD_META: Record<
     id: 'max-doc-import-batch-docs',
     label: 'Doc import batch docs',
     description: 'Max documents per batch import request.',
-  },
-  maxDocExportChars: {
-    id: 'max-doc-export',
-    label: 'Doc export chars',
-    description: 'Max characters for document export.',
   },
   maxPromptExcerptChars: {
     id: 'max-prompt-excerpt',

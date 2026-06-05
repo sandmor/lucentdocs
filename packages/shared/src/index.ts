@@ -8,6 +8,7 @@ export { schema } from './schema.js'
 export { parseContent, createDefaultContent } from './content.js'
 export {
   proseMirrorDocToMarkdown,
+  lucentMarkdownSerializer,
   type MarkdownParseError,
   type MarkdownResult,
 } from './markdown.js'

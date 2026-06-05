@@ -38,7 +38,6 @@ export interface PersistedAppConfig {
   maxPromptUserChars: number
   maxDocImportChars: number
   maxDocImportBatchDocs: number
-  maxDocExportChars: number
   maxPromptExcerptChars: number
 }
 
@@ -311,14 +310,6 @@ export const CONFIG_FIELD_DEFINITIONS: readonly ConfigFieldDefinition[] = [
     min: 1,
   },
   {
-    key: 'maxDocExportChars',
-    envVar: 'LIMITS_DOC_EXPORT_CHARS',
-    kind: 'int',
-    defaultValue: 100_000_000,
-    allowEmptyString: false,
-    min: 1,
-  },
-  {
     key: 'maxPromptExcerptChars',
     envVar: 'LIMITS_PROMPT_EXCERPT_CHARS',
     kind: 'int',
@@ -374,7 +365,6 @@ export const EDITABLE_CONFIG_KEYS = [
   'maxPromptUserChars',
   'maxDocImportChars',
   'maxDocImportBatchDocs',
-  'maxDocExportChars',
   'maxPromptExcerptChars',
 ] as const satisfies ReadonlyArray<PersistedConfigKey>
 
@@ -391,7 +381,6 @@ export const LIMITS_CONFIG_KEYS = [
   'maxPromptUserChars',
   'maxDocImportChars',
   'maxDocImportBatchDocs',
-  'maxDocExportChars',
   'maxPromptExcerptChars',
 ] as const satisfies ReadonlyArray<PersistedConfigKey>
 
@@ -417,7 +406,6 @@ export interface LimitsConfig {
   promptUserChars: number
   docImportChars: number
   docImportBatchDocs: number
-  docExportChars: number
   promptExcerptChars: number
 }
 
@@ -450,7 +438,6 @@ const limitsPromptSystemCharsField = CONFIG_FIELD_BY_KEY.maxPromptSystemChars
 const limitsPromptUserCharsField = CONFIG_FIELD_BY_KEY.maxPromptUserChars
 const limitsDocImportCharsField = CONFIG_FIELD_BY_KEY.maxDocImportChars
 const limitsDocImportBatchDocsField = CONFIG_FIELD_BY_KEY.maxDocImportBatchDocs
-const limitsDocExportCharsField = CONFIG_FIELD_BY_KEY.maxDocExportChars
 const limitsPromptExcerptCharsField = CONFIG_FIELD_BY_KEY.maxPromptExcerptChars
 
 const aiDefaultTempField = CONFIG_FIELD_BY_KEY.aiDefaultTemperature
@@ -577,10 +564,6 @@ export const editableConfigSchema = z
       .number()
       .int()
       .min(limitsDocImportBatchDocsField.min ?? 1),
-    maxDocExportChars: z
-      .number()
-      .int()
-      .min(limitsDocExportCharsField.min ?? 1),
     maxPromptExcerptChars: z
       .number()
       .int()

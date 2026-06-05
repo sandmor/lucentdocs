@@ -1,4 +1,12 @@
-import { ArrowRightLeft, Download, MoreHorizontal, Pencil, Settings2, Trash2 } from 'lucide-react'
+import {
+  ArrowRightLeft,
+  ClipboardCopy,
+  Download,
+  MoreHorizontal,
+  Pencil,
+  Settings2,
+  Trash2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -15,6 +23,7 @@ interface RowActionsMenuProps {
   onSettingsDocument: (documentId: string) => void
   onDeleteDocument: (documentId: string) => void
   onExportDocument: (documentId: string) => void
+  onCopyDocumentAsMarkdown: (documentId: string) => void
   onRenameDirectory: (path: string) => void
   onMoveDirectory: (path: string) => void
   onDeleteDirectory: (path: string) => void
@@ -27,6 +36,7 @@ export function RowActionsMenu({
   onSettingsDocument,
   onDeleteDocument,
   onExportDocument,
+  onCopyDocumentAsMarkdown,
   onRenameDirectory,
   onMoveDirectory,
   onDeleteDirectory,
@@ -64,6 +74,10 @@ export function RowActionsMenu({
             <DropdownMenuItem onClick={() => onExportDocument(item.id)}>
               <Download className="size-4" />
               Export
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onCopyDocumentAsMarkdown(item.id)}>
+              <ClipboardCopy className="size-4" />
+              Copy as MD
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={() => onDeleteDocument(item.id)}>
               <Trash2 className="size-4" />

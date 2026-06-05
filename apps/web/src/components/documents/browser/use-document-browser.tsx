@@ -14,8 +14,10 @@ import {
   type IndexingStrategy,
   normalizeDocumentPath,
   pathSegments,
+  proseMirrorDocToMarkdown,
 } from '@lucentdocs/shared'
 import { trpc } from '@/lib/trpc'
+import { useEditorStore } from '@/lib/editor-store'
 import { parseDropData } from './dnd-utils'
 import {
   basename,
@@ -872,10 +874,15 @@ export function useDocumentBrowser({
     [projectId, settingsDocumentId, updateDocumentEmbeddingModelMutation]
   )
 
+  const fetchDocumentMarkdown = useCallback(
+    (documentId: string) => utils.documents.export.fetch({ projectId, id: documentId }),
+    [projectId, utils.documents.export]
+  )
+
   const handleExportDocument = useCallback(
     async (documentId: string) => {
       try {
-        const result = await utils.documents.export.fetch({ projectId, id: documentId })
+        const result = await fetchDocumentMarkdown(documentId)
         const blob = new Blob([result.markdown], { type: 'text/markdown' })
         const url = URL.createObjectURL(blob)
         const link = document.createElement('a')
@@ -891,7 +898,38 @@ export function useDocumentBrowser({
         })
       }
     },
-    [projectId, utils.documents.export]
+    [fetchDocumentMarkdown]
+  )
+
+  const handleCopyDocumentAsMarkdown = useCallback(
+    async (documentId: string) => {
+      try {
+        let markdown: string | undefined
+
+        if (documentId === activeDocumentId) {
+          const editorView = useEditorStore.getState().editorView
+          if (editorView && !editorView.isDestroyed) {
+            const result = proseMirrorDocToMarkdown(editorView.state.doc.toJSON())
+            if (result.ok) {
+              markdown = result.value
+            }
+          }
+        }
+
+        if (markdown === undefined) {
+          const result = await fetchDocumentMarkdown(documentId)
+          markdown = result.markdown
+        }
+
+        await navigator.clipboard.writeText(markdown)
+        toast.success('Copied markdown to clipboard')
+      } catch (error) {
+        toast.error('Failed to copy markdown', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        })
+      }
+    },
+    [activeDocumentId, fetchDocumentMarkdown]
   )
 
   const handleImportDocument = useCallback(
@@ -1210,6 +1248,7 @@ export function useDocumentBrowser({
     handleSettingsDocument,
     handleDeleteDocument,
     handleExportDocument,
+    handleCopyDocumentAsMarkdown,
     handleRenameDirectory,
     handleMoveDirectory,
     handleDeleteDirectory,

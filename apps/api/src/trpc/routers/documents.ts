@@ -690,7 +690,6 @@ export const documentsRouter = router({
     )
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
-      const maxDocExportChars = configManager.getConfig().limits.docExportChars
       const doc = await ctx.services.documents.getForProject(input.projectId, input.id)
       if (!doc) {
         throw new TRPCError({
@@ -714,13 +713,6 @@ export const documentsRouter = router({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to serialize document to markdown',
-        })
-      }
-
-      if (markdown.length > maxDocExportChars) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Document export exceeds limit of ${maxDocExportChars} characters`,
         })
       }
 
