@@ -1,8 +1,9 @@
 import { TextSelection } from 'prosemirror-state'
-import { closeHistory } from 'prosemirror-history'
 import { EditorView } from 'prosemirror-view'
 import { toast } from 'sonner'
+import { AI_ZONE_ALLOWED_META } from './ai-zone-protection'
 import { aiWriterPluginKey, getAIZones } from './writer-plugin'
+import { stopYjsUndoCapture } from '../prosemirror/yjs-undo-capture'
 import { type InlineZoneSession } from '@lucentdocs/shared'
 import { StuckDetector } from './stuck-detector'
 import { createInlineSessionId, createZoneId } from './writer/ids'
@@ -43,6 +44,9 @@ export function createAIWriterController(
       documentId: undefined,
     }))
   const getRequesterClientName = options.getRequesterClientName ?? (() => null)
+  const isInlineAIControlsInteracting = options.isInlineAIControlsInteracting ?? (() => false)
+  const getCollaboratorDisplayName =
+    options.getCollaboratorDisplayName ?? (() => 'Collaborator')
   const getSessionById = options.getSessionById ?? (() => null)
   const setSessionById = options.setSessionById ?? (() => {})
   const bubblePresence = options.bubblePresence ?? null
@@ -217,11 +221,10 @@ export function createAIWriterController(
       handleAIError(view, message)
     } finally {
       unregisterStreamActivity()
-      clearBubblePresence(sessionId)
 
       if (requestId === currentRequestId && abortController === requestAbortController) {
         abortController = null
-        setStreamingState(false, view)
+        onStreamingChange?.(false)
       }
     }
   }
@@ -277,6 +280,8 @@ export function createAIWriterController(
 
       pos = lastInlinePos
     }
+    const preGenerationAnchor = view.state.selection.head
+
     const selection = view.state.selection
     if (!(selection.empty && selection.from === pos)) {
       const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, pos))
@@ -293,9 +298,7 @@ export function createAIWriterController(
       return
     }
 
-    const closeHistoryTr = closeHistory(view.state.tr)
-    closeHistoryTr.setMeta('addToHistory', false)
-    view.dispatch(closeHistoryTr)
+    stopYjsUndoCapture(view)
 
     const tr = view.state.tr
     try {
@@ -305,8 +308,15 @@ export function createAIWriterController(
       return
     }
     const zoneStart = tr.mapping.map(pos, -1)
-    tr.setMeta(aiWriterPluginKey, { type: 'start', pos: zoneStart, zoneId, sessionId })
+    tr.setMeta(aiWriterPluginKey, {
+      type: 'start',
+      pos: zoneStart,
+      zoneId,
+      sessionId,
+      preGenerationAnchor,
+    })
     tr.setMeta('addToHistory', true)
+    tr.setMeta(AI_ZONE_ALLOWED_META, true)
     view.dispatch(tr)
 
     void streamAIPrompt(
@@ -367,9 +377,9 @@ export function createAIWriterController(
       return false
     }
 
-    const closeHistoryTr = closeHistory(view.state.tr)
-    closeHistoryTr.setMeta('addToHistory', false)
-    view.dispatch(closeHistoryTr)
+    stopYjsUndoCapture(view)
+
+    const preGenerationAnchor = view.state.selection.head
 
     const tr = view.state.tr
     try {
@@ -388,8 +398,10 @@ export function createAIWriterController(
       originalFrom: from,
       selectionFrom: from,
       selectionTo: to,
+      preGenerationAnchor,
     })
     tr.setMeta('addToHistory', true)
+    tr.setMeta(AI_ZONE_ALLOWED_META, true)
     view.dispatch(tr)
 
     void streamAIPrompt(
@@ -518,7 +530,6 @@ export function createAIWriterController(
         const tr = view.state.tr.setMeta(aiWriterPluginKey, { type: 'reject' })
         tr.setMeta('addToHistory', false)
         view.dispatch(tr)
-        pruneInlineOrphans()
       }
       return
     }
@@ -535,8 +546,74 @@ export function createAIWriterController(
 
     tr.setMeta(aiWriterPluginKey, { type: 'reject' })
     tr.setMeta('addToHistory', true)
+    tr.setMeta(AI_ZONE_ALLOWED_META, true)
     view.dispatch(tr)
-    pruneInlineOrphans()
+  }
+
+  function notifySessionUndoAttribution(session: InlineZoneSession): void {
+    const requester = session.lastRequesterClientName
+    const localClient = getRequesterClientName()
+    if (!requester || !localClient || requester === localClient) return
+    toast.message(`Reverted ${getCollaboratorDisplayName(requester)}'s AI suggestion.`)
+  }
+
+  async function undoSessionTurn(view: EditorView, sessionId: string): Promise<void> {
+    const toolScope = getToolScope()
+    if (!toolScope.projectId || !toolScope.documentId) return
+
+    const sessionBefore = getSessionById(sessionId)
+
+    try {
+      const result = await trpcClient.inline.undoSessionTurn.mutate({
+        projectId: toolScope.projectId,
+        documentId: toolScope.documentId,
+        sessionId,
+        requesterClientName: getRequesterClientName() ?? undefined,
+      })
+      if (sessionBefore) {
+        notifySessionUndoAttribution(sessionBefore)
+      }
+      setSessionById(sessionId, result.session)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to undo AI turn'
+      toast.error(message)
+    }
+  }
+
+  async function redoSessionTurn(view: EditorView, sessionId: string): Promise<void> {
+    const toolScope = getToolScope()
+    if (!toolScope.projectId || !toolScope.documentId) return
+
+    try {
+      const result = await trpcClient.inline.redoSessionTurn.mutate({
+        projectId: toolScope.projectId,
+        documentId: toolScope.documentId,
+        sessionId,
+        requesterClientName: getRequesterClientName() ?? undefined,
+      })
+      setSessionById(sessionId, result.session)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to redo AI turn'
+      toast.error(message)
+    }
+  }
+
+  async function restoreAcceptedSession(view: EditorView, sessionId: string): Promise<void> {
+    const toolScope = getToolScope()
+    if (!toolScope.projectId || !toolScope.documentId) return
+
+    try {
+      const result = await trpcClient.inline.restoreAcceptedSessionZone.mutate({
+        projectId: toolScope.projectId,
+        documentId: toolScope.documentId,
+        sessionId,
+        requesterClientName: getRequesterClientName() ?? undefined,
+      })
+      setSessionById(sessionId, result.session)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to restore AI suggestion'
+      toast.error(message)
+    }
   }
 
   function cancelAI(
@@ -611,6 +688,12 @@ export function createAIWriterController(
     rejectAI,
     cancelAI,
     detachAI,
+    getSessionById,
+    isInlineAIControlsInteracting,
+    getCollaboratorDisplayName,
+    undoSessionTurn,
+    redoSessionTurn,
+    restoreAcceptedSession,
   }
 }
 

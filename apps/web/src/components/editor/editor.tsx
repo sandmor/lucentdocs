@@ -35,9 +35,17 @@ import { selectionTouchesCodeBlock, shouldShowSelectionCompose } from './inline/
 import { useInlineSessions } from './inline/use-sessions'
 import { useInlineSessionObserver } from './inline/use-inline-session-observer'
 import { resolveObservedInlineSessionIds } from './inline/resolve-observed-inline-session-ids'
-import { getAIZones } from './ai/writer-plugin'
+import {
+  aiWriterPluginKey,
+  getAIZones,
+  sessionIdsWithEndedZoneStreaming,
+} from './ai/writer-plugin'
 import { emitEditorViewChange } from './prosemirror/view-store'
-import { getLocalPresenceUser, installLocalPresenceUser } from './prosemirror/presence'
+import {
+  getLocalPresenceUser,
+  installLocalPresenceUser,
+  normalizePresenceUser,
+} from './prosemirror/presence'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
 import { useEditorStore } from '@/lib/editor-store'
 
@@ -170,6 +178,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const selectionToolbarInteractingRef = useRef(false)
+  const inlineAIControlsInteractingRef = useRef(false)
   const aiControllerRef = useRef<AIWriterController | null>(null)
   const providerRef = useRef<ReturnType<typeof createYjsProvider> | null>(null)
   const bubblePresenceRef = useRef<AIBubblePresenceStore | null>(null)
@@ -294,6 +303,30 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         if (typeof clientId !== 'number') return null
         return `yjs_client_${clientId}`
       },
+      isInlineAIControlsInteracting() {
+        return inlineAIControlsInteractingRef.current
+      },
+      getCollaboratorDisplayName(clientName) {
+        if (!clientName) return 'Collaborator'
+        const localClient = providerRef.current?.doc.clientID
+        if (typeof localClient === 'number' && clientName === `yjs_client_${localClient}`) {
+          return 'you'
+        }
+
+        const match = clientName.match(/^yjs_client_(\d+)$/)
+        if (!match) return 'Collaborator'
+
+        const clientId = Number(match[1])
+        const awareness = providerRef.current?.awareness
+        if (!awareness) return 'Collaborator'
+
+        const state = awareness.getStates().get(clientId)
+        const userState =
+          state && typeof state === 'object' && !Array.isArray(state)
+            ? (state as Record<string, unknown>).user
+            : undefined
+        return normalizePresenceUser(userState, clientId).name
+      },
       getSessionById(sessionId) {
         return useEditorStore.getState().inlineSessionsById[sessionId] ?? null
       },
@@ -314,12 +347,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           yjsFragment: type,
           yjsMapping: mapping as ProsemirrorMapping,
         },
+        aiWriterController: aiController,
         aiHandlers: {
-          onAccept() {
-            if (viewRef.current) aiController.acceptAI(viewRef.current)
+          onAccept(zoneId) {
+            if (viewRef.current) aiController.acceptAI(viewRef.current, zoneId)
           },
-          onReject() {
-            if (viewRef.current) aiController.rejectAI(viewRef.current)
+          onReject(zoneId) {
+            if (viewRef.current) aiController.rejectAI(viewRef.current, zoneId)
           },
           onCancelAI(view, options) {
             aiController.cancelAI(view, options)
@@ -338,8 +372,16 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         ...createCodeBlockNodeView(),
       },
       dispatchTransaction(tr) {
+        const previousZones = aiWriterPluginKey.getState(view.state)?.zones ?? []
         const newState = view.state.apply(tr)
         view.updateState(newState)
+
+        if (tr.docChanged) {
+          const nextZones = aiWriterPluginKey.getState(newState)?.zones ?? []
+          for (const sessionId of sessionIdsWithEndedZoneStreaming(previousZones, nextZones)) {
+            bubblePresence.clear(sessionId)
+          }
+        }
 
         emitEditorViewChange(view)
         emitAIStateChange(view)
@@ -499,7 +541,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       setIsLoading(true)
       setStoreIsGenerating(false)
       useEditorStore.getState().setSessions(() => ({}))
+      useEditorStore.getState().clearDismissedRestoreSuggestions()
       selectionToolbarInteractingRef.current = false
+      inlineAIControlsInteractingRef.current = false
     }
   }, [
     projectId,
@@ -562,6 +606,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
   const handleMobileBlockBarInteractionChange = useCallback((interacting: boolean) => {
     setMobileBlockBarInteracting(interacting)
+  }, [])
+
+  const handleInlineAIInteractionChange = useCallback((interacting: boolean) => {
+    inlineAIControlsInteractingRef.current = interacting
   }, [])
 
   const handleToolbarInteractionChange = useCallback(
@@ -644,7 +692,34 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           if (!viewRef.current || !aiControllerRef.current) return false
           return aiControllerRef.current.dismissChoicesForZone(viewRef.current, zoneId)
         }}
+        onUndoTurn={(zoneId) => {
+          if (!viewRef.current || !aiControllerRef.current || !zoneId) return
+          const sessionId = getAIZones(viewRef.current).find((zone) => zone.id === zoneId)
+            ?.sessionId
+          if (!sessionId) return
+          void aiControllerRef.current.undoSessionTurn(viewRef.current, sessionId)
+        }}
+        onRedoTurn={(zoneId) => {
+          if (!viewRef.current || !aiControllerRef.current || !zoneId) return
+          const sessionId = getAIZones(viewRef.current).find((zone) => zone.id === zoneId)
+            ?.sessionId
+          if (!sessionId) return
+          void aiControllerRef.current.redoSessionTurn(viewRef.current, sessionId)
+        }}
+        onRestoreAcceptedSession={(sessionId) => {
+          if (!viewRef.current || !aiControllerRef.current) return
+          void aiControllerRef.current.restoreAcceptedSession(viewRef.current, sessionId)
+        }}
         onInteractionChange={handleToolbarInteractionChange}
+        onInlineAIInteractionChange={handleInlineAIInteractionChange}
+        getCollaboratorDisplayName={(clientName) =>
+          aiControllerRef.current?.getCollaboratorDisplayName(clientName) ?? 'Collaborator'
+        }
+        getLocalClientName={() => {
+          const clientId = providerRef.current?.doc.clientID
+          if (typeof clientId !== 'number') return null
+          return `yjs_client_${clientId}`
+        }}
         mobileBlockBarInteracting={mobileBlockBarInteracting}
         onBlockBarInteractionChange={handleMobileBlockBarInteractionChange}
       />

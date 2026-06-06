@@ -29,8 +29,25 @@ interface MobileInlineAIDockProps {
   onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
+  onUndoTurn: (zoneId: string) => void
+  onRedoTurn: (zoneId: string) => void
   onInteractionChange: (interacting: boolean) => void
+  onInlineAIInteractionChange: (interacting: boolean) => void
+  getCollaboratorDisplayName: (clientName: string | null | undefined) => string
+  getLocalClientName: () => string | null
   onBlockBarInteractionChange: (interacting: boolean) => void
+}
+
+function resolveSuggestedByLabel(
+  session: { lastRequesterClientName?: string } | null,
+  localClientName: string | null,
+  getCollaboratorDisplayName: (clientName: string | null | undefined) => string
+): string | null {
+  if (!session?.lastRequesterClientName) return null
+  if (localClientName && session.lastRequesterClientName === localClientName) {
+    return 'Suggested by you'
+  }
+  return `Suggested by ${getCollaboratorDisplayName(session.lastRequesterClientName)}`
 }
 
 function setDockLayoutVariables(offset: number, reserve: number): void {
@@ -53,7 +70,12 @@ export function MobileInlineAIDock({
   onStop,
   onContinuePrompt,
   onDismissChoices,
+  onUndoTurn,
+  onRedoTurn,
   onInteractionChange,
+  onInlineAIInteractionChange,
+  getCollaboratorDisplayName,
+  getLocalClientName,
   mobileBlockBarInteracting,
   onBlockBarInteractionChange,
 }: MobileInlineAIDockProps) {
@@ -147,6 +169,13 @@ export function MobileInlineAIDock({
   const activeServerGenerating = activeSessionId
     ? Boolean(sessionStreamMetaById[activeSessionId]?.generating)
     : false
+  const localClientName = getLocalClientName()
+  const activeSuggestedByLabel =
+    activeMode?.kind === 'loading'
+      ? resolveSuggestedByLabel(activeMode.zone.session, localClientName, getCollaboratorDisplayName)
+      : activeMode?.kind === 'review'
+        ? resolveSuggestedByLabel(activeMode.zone.session, localClientName, getCollaboratorDisplayName)
+        : null
 
   useEffect(() => {
     if (!dockVisible || !dockRef.current) {
@@ -270,6 +299,10 @@ export function MobileInlineAIDock({
             onStop={onStop}
             onContinuePrompt={onContinuePrompt}
             onDismissChoices={onDismissChoices}
+            onUndoTurn={onUndoTurn}
+            onRedoTurn={onRedoTurn}
+            onInteractionChange={onInlineAIInteractionChange}
+            suggestedByLabel={activeSuggestedByLabel}
           />
         ) : null}
 
@@ -292,6 +325,10 @@ export function MobileInlineAIDock({
             onStop={onStop}
             onContinuePrompt={onContinuePrompt}
             onDismissChoices={onDismissChoices}
+            onUndoTurn={onUndoTurn}
+            onRedoTurn={onRedoTurn}
+            onInteractionChange={onInlineAIInteractionChange}
+            suggestedByLabel={activeSuggestedByLabel}
           />
         ) : null}
 

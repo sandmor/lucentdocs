@@ -8,8 +8,22 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react'
+import type { EditorView } from 'prosemirror-view'
+import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import type { ActiveBlockInfo, BlockActionId } from '../prosemirror/block-resolve'
 import { supportsTurnInto } from '../prosemirror/block-resolve'
+
+const PROTECTED_BLOCK_ACTIONS = new Set<BlockActionId>([
+  'turn-into-paragraph',
+  'turn-into-code',
+  'duplicate',
+  'delete',
+])
+
+function isBlockedByProtectedZone(view: EditorView | undefined, info: ActiveBlockInfo): boolean {
+  if (!view) return false
+  return blockOverlapsProtectedZone(view, info.pos, info.node.nodeSize)
+}
 
 export interface BlockMenuItem {
   id: BlockActionId
@@ -64,13 +78,24 @@ export const moreBlockMenuItems: BlockMenuItem[] = [
   },
 ]
 
+export function isProtectedBlockAction(action: BlockActionId): boolean {
+  return PROTECTED_BLOCK_ACTIONS.has(action) || action === 'move-up' || action === 'move-down'
+}
+
 export const mobilePrimaryIcons = {
   insert: Plus,
   turnInto: Pilcrow,
   more: MoreHorizontal,
 } as const
 
-export function isBlockMenuItemEnabled(item: BlockMenuItem, info: ActiveBlockInfo): boolean {
+export function isBlockMenuItemEnabled(
+  item: BlockMenuItem,
+  info: ActiveBlockInfo,
+  view?: EditorView
+): boolean {
+  if (PROTECTED_BLOCK_ACTIONS.has(item.id) && isBlockedByProtectedZone(view, info)) {
+    return false
+  }
   return item.isEnabled?.(info) ?? true
 }
 

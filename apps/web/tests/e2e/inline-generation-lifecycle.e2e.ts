@@ -26,8 +26,8 @@ test('inline stop aborts an in-flight continuation without inserting output', as
   await expect(editor).not.toContainText('spark')
 })
 
-test('undo after continuation start removes zone and preserves original text', async ({ page }) => {
-  await createProject(page, 'Inline Undo Zone Creation')
+test('undo during streaming is blocked and leaves the document unchanged', async ({ page }) => {
+  await createProject(page, 'Inline Undo Blocked While Streaming')
 
   const editor = page.locator('.ProseMirror')
   await editor.click()
@@ -37,10 +37,91 @@ test('undo after continuation start removes zone and preserves original text', a
   const undoShortcut = process.platform === 'darwin' ? 'Meta+z' : 'Control+z'
   await page.keyboard.press(undoShortcut)
 
-  await expect(page.locator('.ai-generating-text')).toHaveCount(0)
-  await expect(page.locator('.ai-writer-floating-controls')).toHaveCount(0)
+  await expect(page.locator('.ai-generating-text')).toHaveCount(1)
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toBeVisible()
   await expect(editor).toContainText('Once')
   await expect(editor).not.toContainText('spark')
+})
+
+test('reject after completion reverts the assistant suggestion', async ({ page }) => {
+  await createProject(page, 'Inline Session Reject After Completion')
+
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('Once ')
+  await startInlineGeneration(page)
+
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toHaveCount(
+    0,
+    {
+      timeout: 20_000,
+    }
+  )
+  await expect(editor).toContainText(/Once\s*spark/)
+
+  await page.locator('.ai-writer-floating-controls').click()
+  await page.locator('.ai-writer-floating-controls [data-action="reject"]').click()
+
+  await expect(editor).toContainText('Once')
+  await expect(editor).not.toContainText('spark')
+})
+
+test('accept then restore and reject reverts the assistant suggestion', async ({ page }) => {
+  await createProject(page, 'Inline Accept Restore Reject')
+
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('Once ')
+  await startInlineGeneration(page)
+
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toHaveCount(
+    0,
+    {
+      timeout: 20_000,
+    }
+  )
+
+  await page.locator('.ai-writer-floating-controls [data-action="accept"]').first().click()
+  await expect(page.locator('.ai-generating-text')).toHaveCount(0)
+  await expect(editor).toContainText(/Once\s*spark/)
+
+  await page
+    .locator('[data-testid="restore-suggestion-chip"] [data-action="restore-suggestion"]')
+    .click()
+
+  await expect(page.locator('.ai-generating-text')).toHaveCount(1)
+  await expect(page.locator('.ai-writer-floating-controls')).toBeVisible()
+
+  await page.locator('.ai-writer-floating-controls [data-action="reject"]').click()
+  await expect(editor).toContainText('Once')
+  await expect(editor).not.toContainText('spark')
+})
+
+test('dismiss restore suggestion chip hides it for the current editor session', async ({
+  page,
+}) => {
+  await createProject(page, 'Inline Restore Chip Dismiss')
+
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('Once ')
+  await startInlineGeneration(page)
+
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toHaveCount(
+    0,
+    {
+      timeout: 20_000,
+    }
+  )
+
+  await page.locator('.ai-writer-floating-controls [data-action="accept"]').first().click()
+  await expect(page.locator('.ai-generating-text')).toHaveCount(0)
+
+  const restoreChip = page.locator('[data-testid="restore-suggestion-chip"]')
+  await expect(restoreChip).toBeVisible()
+
+  await restoreChip.locator('[data-action="dismiss-restore-suggestion"]').click()
+  await expect(restoreChip).toHaveCount(0)
 })
 
 test('inline generation continues after initiator disconnect and reconnecting client receives completion', async ({

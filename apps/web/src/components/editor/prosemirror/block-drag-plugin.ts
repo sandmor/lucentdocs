@@ -1,6 +1,11 @@
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import type { Node as PMNode } from 'prosemirror-model'
+import {
+  blockOverlapsProtectedZone,
+  getProtectedZoneRanges,
+  rangeOverlapsProtectedZone,
+} from '../ai/ai-zone-protection'
 
 export const blockDragPluginKey = new PluginKey('block-drag')
 
@@ -119,14 +124,26 @@ export const blockDragPlugin = new Plugin({
           })
         )
 
+        const sourcePos = draggedBlockPos
+        const sourceSize = draggedBlockNode.nodeSize
+
+        if (blockOverlapsProtectedZone(view, sourcePos, sourceSize)) {
+          clearDraggedBlock()
+          return true
+        }
+
         const insertPos = resolveInsertPos(view, event)
         if (insertPos === null) {
           clearDraggedBlock()
           return true
         }
 
-        const sourcePos = draggedBlockPos
-        const sourceSize = draggedBlockNode.nodeSize
+        if (
+          rangeOverlapsProtectedZone(getProtectedZoneRanges(view), insertPos, insertPos + 1)
+        ) {
+          clearDraggedBlock()
+          return true
+        }
 
         if (insertPos === sourcePos || insertPos === sourcePos + sourceSize) {
           clearDraggedBlock()

@@ -1,8 +1,8 @@
-import { Fragment, type Node as ProseMirrorNode } from 'prosemirror-model'
+import { Fragment, Slice, type Node as ProseMirrorNode } from 'prosemirror-model'
 import { Transform } from 'prosemirror-transform'
 import {
   type InlineZoneWriteAction,
-  hasMeaningfulGap,
+  gapBreaksZoneSegmentChain,
   parseZoneNodeAttrs,
   createWrappedZoneSliceFromText,
   type AIZoneAttrs,
@@ -60,7 +60,7 @@ function collectSessionZones(doc: ProseMirrorNode, sessionId: string): SessionZo
       return false
     }
 
-    if (hasMeaningfulGap(doc, existing.nodeTo, segment.nodeFrom)) {
+    if (gapBreaksZoneSegmentChain(doc, existing.nodeTo, segment.nodeFrom)) {
       return false
     }
 
@@ -228,6 +228,63 @@ export function applyInlineZoneWriteActionToDoc(
   }
 }
 
+/**
+ * Commits final zone text and clears streaming on every segment in one transform.
+ */
+export function finalizeInlineZoneInDoc(
+  doc: ProseMirrorNode,
+  sessionId: string,
+  content: string
+): { changed: boolean; nextDoc: ProseMirrorNode; zoneFound: boolean } {
+  const zone = resolveSessionZone(doc, sessionId)
+  if (!zone) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const zoneType = doc.type.schema.nodes.ai_zone
+  if (!zoneType) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const zoneText = doc.textBetween(zone.nodeFrom, zone.nodeTo, '\n\n', '\n')
+  const finalizedAttrs: AIZoneAttrs = {
+    id: zone.id,
+    streaming: false,
+    sessionId: zone.sessionId,
+    originalSlice: zone.originalSlice,
+  }
+
+  if (zoneText === content) {
+    return setInlineZoneStreamingInDoc(doc, sessionId, false)
+  }
+
+  const wrappedReplacement = createWrappedZoneSliceFromText(
+    doc,
+    zone.nodeFrom,
+    zone.nodeTo,
+    content,
+    zoneType,
+    finalizedAttrs
+  )
+
+  const tr = new Transform(doc)
+  tr.replaceRange(zone.nodeFrom, zone.nodeTo, wrappedReplacement)
+
+  return {
+    changed: !tr.doc.eq(doc),
+    nextDoc: tr.doc,
+    zoneFound: true,
+  }
+}
+
 export function setInlineZoneStreamingInDoc(
   doc: ProseMirrorNode,
   sessionId: string,
@@ -265,6 +322,151 @@ export function setInlineZoneStreamingInDoc(
     if (!node || node.type !== zoneType) continue
     tr.setNodeMarkup(segmentFrom, zoneType, attrs)
   }
+
+  return {
+    changed: !tr.doc.eq(doc),
+    nextDoc: tr.doc,
+    zoneFound: true,
+  }
+}
+
+export function removeSessionZoneFromDoc(
+  doc: ProseMirrorNode,
+  sessionId: string
+): { changed: boolean; nextDoc: ProseMirrorNode; zoneFound: boolean } {
+  const zone = resolveSessionZone(doc, sessionId)
+  if (!zone) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const zoneType = doc.type.schema.nodes.ai_zone
+  if (!zoneType) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  let originalSlice: Slice | null = null
+  doc.nodesBetween(zone.nodeFrom, zone.nodeTo, (node) => {
+    if (originalSlice || node.type !== zoneType) return
+    if (typeof node.attrs.originalSlice !== 'string' || !node.attrs.originalSlice) return
+    try {
+      originalSlice = Slice.fromJSON(doc.type.schema, JSON.parse(node.attrs.originalSlice))
+    } catch {
+      originalSlice = null
+    }
+  })
+
+  const tr = new Transform(doc)
+  tr.delete(zone.nodeFrom, zone.nodeTo)
+  if (originalSlice) {
+    const insertPos = Math.min(zone.nodeFrom, tr.doc.content.size)
+    tr.replace(insertPos, insertPos, originalSlice)
+  }
+
+  return {
+    changed: !tr.doc.eq(doc),
+    nextDoc: tr.doc,
+    zoneFound: true,
+  }
+}
+
+function findAcceptedTextRange(
+  doc: ProseMirrorNode,
+  zoneText: string,
+  contextBefore: string | null,
+  contextAfter: string | null
+): { from: number; to: number } | null {
+  if (!zoneText) return null
+
+  const docEnd = doc.content.size
+  const tailAnchor = (contextBefore ?? '').slice(-64)
+  const headAnchor = (contextAfter ?? '').slice(0, 64)
+
+  for (let from = 0; from <= docEnd; from++) {
+    for (let to = from + 1; to <= docEnd; to++) {
+      const slice = doc.textBetween(from, to, '\n\n', '\n')
+      if (slice !== zoneText) continue
+
+      if (tailAnchor.length > 0) {
+        const beforeStart = Math.max(0, from - Math.min(512, tailAnchor.length * 8))
+        const before = doc.textBetween(beforeStart, from, '\n\n', '\n')
+        if (!before.endsWith(tailAnchor)) continue
+      }
+
+      if (headAnchor.length > 0) {
+        const afterEnd = Math.min(docEnd, to + Math.min(512, headAnchor.length * 8))
+        const after = doc.textBetween(to, afterEnd, '\n\n', '\n')
+        if (!after.startsWith(headAnchor)) continue
+      }
+
+      return { from, to }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Re-wraps accepted inline AI text as a non-streaming zone when no live zone exists.
+ */
+export function restoreAcceptedSessionZoneInDoc(
+  doc: ProseMirrorNode,
+  sessionId: string,
+  zoneText: string,
+  contextBefore: string | null,
+  contextAfter: string | null
+): { changed: boolean; nextDoc: ProseMirrorNode; zoneFound: boolean } {
+  const existingZone = resolveSessionZone(doc, sessionId)
+  if (existingZone) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: true,
+    }
+  }
+
+  const range = findAcceptedTextRange(doc, zoneText, contextBefore, contextAfter)
+  if (!range) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const zoneType = doc.type.schema.nodes.ai_zone
+  if (!zoneType) {
+    return {
+      changed: false,
+      nextDoc: doc,
+      zoneFound: false,
+    }
+  }
+
+  const attrs: AIZoneAttrs = {
+    id: `zone_${sessionId}`,
+    streaming: false,
+    sessionId,
+    originalSlice: null,
+  }
+  const wrappedReplacement = createWrappedZoneSliceFromText(
+    doc,
+    range.from,
+    range.to,
+    zoneText,
+    zoneType,
+    attrs
+  )
+
+  const tr = new Transform(doc)
+  tr.replaceRange(range.from, range.to, wrappedReplacement)
 
   return {
     changed: !tr.doc.eq(doc),

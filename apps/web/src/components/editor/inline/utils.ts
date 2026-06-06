@@ -1,5 +1,6 @@
 import type { MarkType } from 'prosemirror-model'
 import type { EditorView } from 'prosemirror-view'
+import { AI_ZONE_ALLOWED_META } from '../ai/ai-zone-protection'
 import { aiWriterPluginKey } from '../ai/writer-plugin'
 import type { FormatMarkName } from './types'
 import type { SelectionRange } from '../selection/types'
@@ -105,6 +106,7 @@ export function selectChoice(
   tr.delete(safeFrom, safeTo)
   tr.insertText(choice, safeFrom)
   tr.setMeta('addToHistory', true)
+  tr.setMeta(AI_ZONE_ALLOWED_META, true)
   view.dispatch(tr)
 }
 

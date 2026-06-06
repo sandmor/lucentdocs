@@ -1,10 +1,72 @@
 import { expect, test } from '@playwright/test'
 import {
   createProject,
+  openSelectionAskAI,
   placeCaretAtText,
   placeCaretInsideZoneMiddle,
   selectEditorText,
+  startInlineGeneration,
 } from './helpers/inline-ai'
+
+async function startPromptRewrite(
+  page: import('@playwright/test').Page,
+  selectedText: string,
+  prompt: string
+) {
+  const selectionToolbar = page.locator('.ai-selection-toolbar')
+  await expect(selectionToolbar).toBeVisible({ timeout: 8_000 })
+  await openSelectionAskAI(selectionToolbar)
+  const promptInput = selectionToolbar.locator('textarea')
+  await expect(promptInput).toBeVisible()
+  await promptInput.fill(prompt)
+  const submitShortcut = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'
+  await promptInput.press(submitShortcut)
+}
+
+test('block handle stays hidden while a paragraph contains a pending AI zone', async ({ page }) => {
+  await createProject(page, 'Yjs AI Zone Block Handle')
+
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('Once ')
+  await startInlineGeneration(page)
+
+  await expect(page.locator('.ai-generating-text')).toHaveCount(1, { timeout: 8_000 })
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toBeVisible({
+    timeout: 8_000,
+  })
+
+  const paragraph = editor.locator('p').first()
+  const box = await paragraph.boundingBox()
+  if (!box) {
+    throw new Error('Expected paragraph bounding box for block-handle hover.')
+  }
+
+  await page.mouse.move(box.x + 4, box.y + box.height / 2)
+  await expect(page.locator('.block-handle')).toHaveCount(0)
+})
+
+test('select-all delete does not remove a pending AI zone', async ({ page }) => {
+  await createProject(page, 'Yjs AI Zone Block Delete Guard')
+
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('Once ')
+  await startInlineGeneration(page)
+
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toHaveCount(0, {
+    timeout: 20_000,
+  })
+  await expect(editor).toContainText(/Once\s*spark/)
+
+  const selectAll = process.platform === 'darwin' ? 'Meta+a' : 'Control+a'
+  await page.keyboard.press(selectAll)
+  await page.keyboard.press('Backspace')
+  await page.keyboard.press('Delete')
+
+  await expect(editor).toContainText(/Once\s*spark/)
+  await expect(page.locator('.ai-generating-text')).toHaveCount(1)
+})
 
 test('remote client cannot edit inside active AI zone', async ({ browser, page }) => {
   await createProject(page, 'Yjs AI Zone Protection')
@@ -24,11 +86,7 @@ test('remote client cannot edit inside active AI zone', async ({ browser, page }
     await editorOne.click()
     await page.keyboard.type('Once world')
     await selectEditorText(page, 'world')
-
-    const selectionToolbar = page.locator('.ai-selection-toolbar')
-    await expect(selectionToolbar).toBeVisible({ timeout: 8_000 })
-    await selectionToolbar.locator('textarea').fill('Rewrite while protected')
-    await selectionToolbar.getByRole('button', { name: 'Rewrite' }).click()
+    await startPromptRewrite(page, 'world', 'Rewrite while protected')
 
     await expect(
       secondPage.locator('.ai-writer-floating-controls[data-state="processing"]')
@@ -73,11 +131,7 @@ test('local caret stays outside the zone across remote updates while AI is proce
     await page.keyboard.type('Tail line')
 
     await selectEditorText(page, 'Start')
-
-    const selectionToolbar = page.locator('.ai-selection-toolbar')
-    await expect(selectionToolbar).toBeVisible({ timeout: 8_000 })
-    await selectionToolbar.locator('textarea').fill('slow rewrite')
-    await selectionToolbar.getByRole('button', { name: 'Rewrite' }).click()
+    await startPromptRewrite(page, 'Start', 'slow rewrite')
 
     await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toBeVisible(
       {

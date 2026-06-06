@@ -181,6 +181,10 @@ interface AIZoneFloatingControlProps {
   onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
+  onUndoTurn?: (zoneId: string) => void
+  onRedoTurn?: (zoneId: string) => void
+  onInteractionChange?: (interacting: boolean) => void
+  suggestedByLabel?: string | null
 }
 
 export function AIZoneFloatingControl({
@@ -198,6 +202,10 @@ export function AIZoneFloatingControl({
   onStop,
   onContinuePrompt,
   onDismissChoices,
+  onUndoTurn,
+  onRedoTurn,
+  onInteractionChange,
+  suggestedByLabel,
 }: AIZoneFloatingControlProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [isMinimized, setIsMinimized] = useState(false)
@@ -408,6 +416,10 @@ export function AIZoneFloatingControl({
       onStop={onStop}
       onContinuePrompt={onContinuePrompt}
       onDismissChoices={onDismissChoices}
+      onUndoTurn={onUndoTurn}
+      onRedoTurn={onRedoTurn}
+      onInteractionChange={onInteractionChange}
+      suggestedByLabel={suggestedByLabel}
     />,
     portalTarget
   )

@@ -1,7 +1,18 @@
 import { type Node as ProseMirrorNode, type Slice } from 'prosemirror-model'
-import { Plugin, PluginKey } from 'prosemirror-state'
+import { Plugin, PluginKey, TextSelection } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
-import { hasMeaningfulGap, parseZoneNodeAttrs } from '@lucentdocs/shared'
+import { ySyncPluginKey } from 'y-prosemirror'
+import { gapBreaksZoneSegmentChain, parseZoneNodeAttrs } from '@lucentdocs/shared'
+import {
+  AI_ZONE_ALLOWED_META,
+  getProtectionRangesForZones,
+  getProtectedZoneRangesFromZones,
+  positionStrictlyInsideZoneContent,
+  selectionHeadStrictlyInsideZones,
+  shouldFilterAIZoneDocumentTransaction,
+} from './ai-zone-protection'
+import { resolvePendingReviewZone } from './ai-zone-undo-target'
+import { consumeAbsoluteSelectionSnapshotBeforeRemoteTx } from '../prosemirror/yjs-selection-patch'
 
 interface AIZoneSegment {
   nodeFrom: number
@@ -30,12 +41,14 @@ export interface AIWriterState {
   originalFrom: number | null
   originalSelectionFrom: number | null
   originalSelectionTo: number | null
+  preGenerationAnchor: number | null
+  userPlacedCaretInZone: boolean
   zones: AIZone[]
 }
 
 export interface AIWriterActionHandlers {
-  onAccept: () => void
-  onReject: () => void
+  onAccept: (zoneId?: string) => void
+  onReject: (zoneId?: string) => void
   onCancelAI: (view: EditorView, options?: { preserveDoc?: boolean }) => void
 }
 
@@ -68,6 +81,8 @@ function isAIWriterStateEqual(a: AIWriterState, b: AIWriterState): boolean {
   if (a.originalFrom !== b.originalFrom) return false
   if (a.originalSelectionFrom !== b.originalSelectionFrom) return false
   if (a.originalSelectionTo !== b.originalSelectionTo) return false
+  if (a.preGenerationAnchor !== b.preGenerationAnchor) return false
+  if (a.userPlacedCaretInZone !== b.userPlacedCaretInZone) return false
   if (a.zones.length !== b.zones.length) return false
   for (let i = 0; i < a.zones.length; i++) {
     if (!isAIZoneEqual(a.zones[i], b.zones[i])) return false
@@ -98,7 +113,7 @@ function collectInvalidAIZoneNodePositions(
     }
 
     const previousNodeTo = lastNodeToById.get(parsed.id)
-    if (previousNodeTo !== undefined && hasMeaningfulGap(doc, previousNodeTo, pos)) {
+    if (previousNodeTo !== undefined && gapBreaksZoneSegmentChain(doc, previousNodeTo, pos)) {
       positions.push(pos)
       return false
     }
@@ -138,7 +153,7 @@ function collectAIZones(doc: ProseMirrorNode): AIZone[] {
       return false
     }
 
-    if (hasMeaningfulGap(doc, existing.nodeTo, segment.nodeFrom)) {
+    if (gapBreaksZoneSegmentChain(doc, existing.nodeTo, segment.nodeFrom)) {
       return false
     }
 
@@ -178,25 +193,67 @@ function createInactiveState(zones: AIZone[] = []): AIWriterState {
     originalFrom: null,
     originalSelectionFrom: null,
     originalSelectionTo: null,
+    preGenerationAnchor: null,
+    userPlacedCaretInZone: false,
     zones,
   }
 }
 
-function protectedRanges(state: AIWriterState): Array<{ from: number; to: number }> {
-  const ranges: Array<{ from: number; to: number }> = []
-
-  for (const zone of state.zones) {
-    if (zone.nodeFrom < zone.nodeTo) {
-      ranges.push({ from: zone.nodeFrom, to: zone.nodeTo })
+function mapPositionThroughTransactions(
+  position: number,
+  transactions: readonly { docChanged: boolean; mapping: { map: (pos: number, bias?: number) => number } }[]
+): number {
+  let mapped = position
+  for (const transaction of transactions) {
+    if (transaction.docChanged) {
+      mapped = transaction.mapping.map(mapped, -1)
     }
   }
+  return mapped
+}
 
-  return ranges
+function getWriterMeta(
+  transaction: import('prosemirror-state').Transaction
+): { type?: string } | undefined {
+  return transaction.getMeta(aiWriterPluginKey) as { type?: string } | undefined
+}
+
+function shouldRevertIllegalInsideZoneSelection(
+  transactions: readonly import('prosemirror-state').Transaction[],
+  oldState: import('prosemirror-state').EditorState,
+  doc: ProseMirrorNode,
+  currentHead: number,
+  snapshot: { anchor: number; head: number }
+): { anchor: number; head: number } | null {
+  const oldZones = collectAIZones(oldState.doc)
+  const newZones = collectAIZones(doc)
+  const wasInside = selectionHeadStrictlyInsideZones(snapshot.head, oldZones, oldState.doc)
+  const nowInside = selectionHeadStrictlyInsideZones(currentHead, newZones, doc)
+  if (!nowInside || wasInside) return null
+
+  const anchor = mapPositionThroughTransactions(snapshot.anchor, transactions)
+  const head = mapPositionThroughTransactions(snapshot.head, transactions)
+  const docSize = doc.content.size
+  return {
+    anchor: Math.max(0, Math.min(anchor, docSize)),
+    head: Math.max(0, Math.min(head, docSize)),
+  }
+}
+
+function protectedRanges(state: AIWriterState, doc: ProseMirrorNode): Array<{ from: number; to: number }> {
+  return getProtectionRangesForZones(doc, state.zones)
 }
 
 function findZoneById(zones: AIZone[], zoneId: string | null): AIZone | null {
   if (!zoneId) return null
   return zones.find((zone) => zone.id === zoneId) ?? null
+}
+
+function findAddedPendingReviewZones(doc: ProseMirrorNode, previousDoc: ProseMirrorNode): AIZone[] {
+  const previousIds = new Set(collectAIZones(previousDoc).map((zone) => zone.id))
+  return collectAIZones(doc).filter(
+    (zone) => !zone.streaming && zone.sessionId && !previousIds.has(zone.id)
+  )
 }
 
 export function getPrimaryAIZoneFromState(state: AIWriterState | null | undefined): AIZone | null {
@@ -215,9 +272,36 @@ export function getAIZones(view: EditorView): AIZone[] {
   return state?.zones ?? []
 }
 
+export function sessionIdsWithEndedZoneStreaming(
+  previousZones: AIZone[],
+  nextZones: AIZone[]
+): string[] {
+  const endedSessionIds: string[] = []
+
+  for (const previousZone of previousZones) {
+    if (!previousZone.streaming || !previousZone.sessionId) continue
+
+    const nextZone = nextZones.find(
+      (zone) =>
+        zone.id === previousZone.id &&
+        (zone.sessionId ?? null) === (previousZone.sessionId ?? null)
+    )
+    if (nextZone && !nextZone.streaming) {
+      endedSessionIds.push(previousZone.sessionId)
+    }
+  }
+
+  return endedSessionIds
+}
+
 export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
   return new Plugin({
     key: aiWriterPluginKey,
+    filterTransaction(tr, state) {
+      const pluginState = aiWriterPluginKey.getState(state)
+      const ranges = getProtectedZoneRangesFromZones(state.doc, pluginState?.zones ?? [])
+      return !shouldFilterAIZoneDocumentTransaction(tr, ranges)
+    },
     state: {
       init(_config, instanceState): AIWriterState {
         const zones = collectAIZones(instanceState.doc)
@@ -241,6 +325,9 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
             originalFrom: meta.originalSlice ? (meta.originalFrom ?? null) : null,
             originalSelectionFrom: meta.selectionFrom ?? meta.pos,
             originalSelectionTo: meta.selectionTo ?? meta.pos,
+            preGenerationAnchor:
+              typeof meta.preGenerationAnchor === 'number' ? meta.preGenerationAnchor : null,
+            userPlacedCaretInZone: false,
           }
         }
 
@@ -256,8 +343,44 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
           next = { ...next, stuck: false }
         }
 
+        if (meta?.type === 'resume_review') {
+          const zones = collectAIZones(tr.doc)
+          const zoneId = typeof meta.zoneId === 'string' ? meta.zoneId : null
+          const zone = findZoneById(zones, zoneId)
+          if (zone) {
+            next = {
+              ...next,
+              active: true,
+              zoneId: zone.id,
+              sessionId:
+                typeof meta.sessionId === 'string' ? meta.sessionId : (zone.sessionId ?? null),
+              from: zone.nodeFrom,
+              to: zone.nodeTo,
+              streaming: false,
+              stuck: false,
+              originalSlice: null,
+              originalFrom: null,
+              originalSelectionFrom: null,
+              originalSelectionTo: null,
+              preGenerationAnchor: null,
+              userPlacedCaretInZone: false,
+            }
+          }
+        }
+
         if (meta?.type === 'stop' || meta?.type === 'accept' || meta?.type === 'reject') {
           next = createInactiveState(next.zones)
+        }
+
+        if (tr.selectionSet) {
+          const zones = collectAIZones(tr.doc)
+          const activeZone = findZoneById(zones, next.zoneId)
+          if (activeZone && !next.streaming) {
+            const head = tr.selection.head
+            if (positionStrictlyInsideZoneContent(head, activeZone)) {
+              next = { ...next, userPlacedCaretInZone: true }
+            }
+          }
         }
 
         if (tr.docChanged) {
@@ -292,39 +415,115 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
         return isAIWriterStateEqual(value, next) ? value : next
       },
     },
-    appendTransaction(transactions, _oldState, newState) {
-      if (!transactions.some((transaction) => transaction.docChanged)) {
-        return null
-      }
-
-      const pluginState = aiWriterPluginKey.getState(newState)
-      const activeZoneId = pluginState?.zoneId ?? null
-      const invalidPositions = collectInvalidAIZoneNodePositions(newState.doc, activeZoneId)
-      if (invalidPositions.length === 0) {
-        return null
-      }
-
-      const zoneType = newState.schema.nodes.ai_zone
-      if (!zoneType) {
+    appendTransaction(transactions, oldState, newState) {
+      const docChanged = transactions.some((transaction) => transaction.docChanged)
+      const hadStreamingStop = transactions.some(
+        (transaction) => getWriterMeta(transaction)?.type === 'streaming_stop'
+      )
+      if (!docChanged && !hadStreamingStop) {
         return null
       }
 
       const tr = newState.tr
-      for (const position of invalidPositions) {
-        const mappedFrom = tr.mapping.map(position, -1)
-        const node = tr.doc.nodeAt(mappedFrom)
-        if (!node || node.type !== zoneType) {
-          continue
-        }
+      let changed = false
 
-        tr.replaceWith(mappedFrom, mappedFrom + node.nodeSize, node.content)
+      if (docChanged) {
+        const pluginState = aiWriterPluginKey.getState(newState)
+        const activeZoneId = pluginState?.zoneId ?? null
+        const invalidPositions = collectInvalidAIZoneNodePositions(newState.doc, activeZoneId)
+        const zoneType = newState.schema.nodes.ai_zone
+
+        if (zoneType) {
+          for (const position of invalidPositions) {
+            const mappedFrom = tr.mapping.map(position, -1)
+            const node = tr.doc.nodeAt(mappedFrom)
+            if (!node || node.type !== zoneType) {
+              continue
+            }
+
+            tr.replaceWith(mappedFrom, mappedFrom + node.nodeSize, node.content)
+            changed = true
+          }
+        }
       }
 
-      if (!tr.docChanged) {
+      const wasRemoteYjs = transactions.some(
+        (transaction) =>
+          transaction.docChanged &&
+          (transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)
+            ?.isChangeOrigin === true
+      )
+      const absoluteSnapshot = wasRemoteYjs
+        ? consumeAbsoluteSelectionSnapshotBeforeRemoteTx()
+        : null
+      if (absoluteSnapshot) {
+        const restored = shouldRevertIllegalInsideZoneSelection(
+          transactions,
+          oldState,
+          tr.doc,
+          newState.selection.head,
+          absoluteSnapshot
+        )
+        if (restored) {
+          tr.setSelection(TextSelection.create(tr.doc, restored.anchor, restored.head))
+          changed = true
+        }
+      }
+
+      if (hadStreamingStop) {
+        const pluginState = aiWriterPluginKey.getState(newState)
+        const activeZone = pluginState?.zoneId
+          ? findZoneById(collectAIZones(tr.doc), pluginState.zoneId)
+          : null
+        if (activeZone && pluginState && !pluginState.userPlacedCaretInZone) {
+          const wasInside = selectionHeadStrictlyInsideZones(
+            oldState.selection.head,
+            collectAIZones(oldState.doc),
+            oldState.doc
+          )
+          const nowInside = selectionHeadStrictlyInsideZones(
+            newState.selection.head,
+            [activeZone],
+            tr.doc
+          )
+          if (!wasInside && nowInside) {
+            const anchor = mapPositionThroughTransactions(oldState.selection.anchor, transactions)
+            const head = mapPositionThroughTransactions(oldState.selection.head, transactions)
+            const docSize = tr.doc.content.size
+            tr.setSelection(
+              TextSelection.create(
+                tr.doc,
+                Math.max(0, Math.min(anchor, docSize)),
+                Math.max(0, Math.min(head, docSize))
+              )
+            )
+            changed = true
+          }
+        }
+      }
+
+      if (docChanged) {
+        const pluginState = aiWriterPluginKey.getState(newState)
+        if (!pluginState?.active) {
+          const addedPendingZones = findAddedPendingReviewZones(tr.doc, oldState.doc)
+          if (addedPendingZones.length === 1) {
+            const zone = addedPendingZones[0]!
+            tr.setMeta(aiWriterPluginKey, {
+              type: 'resume_review',
+              zoneId: zone.id,
+              sessionId: zone.sessionId,
+            })
+            changed = true
+          }
+        }
+      }
+
+      if (!changed) {
         return null
       }
 
       tr.setMeta('addToHistory', false)
+      tr.setMeta(AI_ZONE_ALLOWED_META, true)
       return tr
     },
     props: {
@@ -334,7 +533,7 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
           return false
         }
 
-        const ranges = protectedRanges(pluginState)
+        const ranges = protectedRanges(pluginState, view.state.doc)
         if (ranges.length === 0) return false
 
         if (from === to && ranges.some((range) => from > range.from && from < range.to)) {
@@ -353,7 +552,7 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
           return false
         }
 
-        const ranges = protectedRanges(pluginState)
+        const ranges = protectedRanges(pluginState, view.state.doc)
         if (ranges.length === 0) return false
 
         const selection = view.state.selection
@@ -368,29 +567,27 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
         const pluginState = aiWriterPluginKey.getState(view.state)
         if (!pluginState) return false
 
-        if (pluginState.active) {
+        const pendingReviewZone = resolvePendingReviewZone(view)
+        const canUseReviewShortcuts =
+          pendingReviewZone !== null || (pluginState.active && pluginState.zoneId !== null)
+
+        if (canUseReviewShortcuts) {
+          const zoneId = pendingReviewZone?.id ?? pluginState.zoneId ?? undefined
+
           if (event.key === 'Tab') {
             event.preventDefault()
-            handlers.onAccept()
+            handlers.onAccept(zoneId)
             return true
           }
 
           if (event.key === 'Escape') {
             event.preventDefault()
-            handlers.onReject()
+            handlers.onReject(zoneId)
             return true
-          }
-
-          if (
-            ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey)) ||
-            ((event.key === 'y' || event.key === 'Y') && (event.metaKey || event.ctrlKey))
-          ) {
-            handlers.onCancelAI(view, { preserveDoc: true })
-            return false
           }
         }
 
-        const ranges = protectedRanges(pluginState)
+        const ranges = protectedRanges(pluginState, view.state.doc)
         if (ranges.length === 0) return false
 
         const selection = view.state.selection
@@ -412,7 +609,7 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
         if (
           event.key === 'Backspace' &&
           selection.empty &&
-          ranges.some((range) => selection.from > range.from && selection.from <= range.to)
+          ranges.some((range) => selection.from > range.from && selection.from < range.to)
         ) {
           event.preventDefault()
           return true

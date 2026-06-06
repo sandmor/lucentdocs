@@ -1,8 +1,10 @@
 import { useMemo } from 'react'
 import type { EditorView } from 'prosemirror-view'
+import type { InlineZoneSession } from '@lucentdocs/shared'
 import { AIZoneFloatingControl, SelectionComposeFloatingControl } from './desktop-controls'
 import { useAIWriterState, useIsCoarsePointer } from './hooks'
 import { MobileInlineAIDock } from './mobile-dock'
+import { RestoreSuggestionChip } from './restore-suggestion-chip'
 
 import type { ReviewZone } from './types'
 import {
@@ -13,6 +15,19 @@ import {
 import type { SelectionRange } from '../selection/types'
 import { useEditorStore } from '@/lib/editor-store'
 import { shouldShowSelectionCompose } from './utils'
+import { getAIZones } from '../ai/writer-plugin'
+
+function resolveSuggestedByLabel(
+  session: InlineZoneSession | null,
+  localClientName: string | null,
+  getCollaboratorDisplayName: (clientName: string | null | undefined) => string
+): string | null {
+  if (!session?.lastRequesterClientName) return null
+  if (localClientName && session.lastRequesterClientName === localClientName) {
+    return 'Suggested by you'
+  }
+  return `Suggested by ${getCollaboratorDisplayName(session.lastRequesterClientName)}`
+}
 
 interface InlineAIControlsProps {
   view: EditorView | null
@@ -23,7 +38,13 @@ interface InlineAIControlsProps {
   onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
+  onUndoTurn: (zoneId: string) => void
+  onRedoTurn: (zoneId: string) => void
+  onRestoreAcceptedSession: (sessionId: string) => void
   onInteractionChange: (interacting: boolean) => void
+  onInlineAIInteractionChange: (interacting: boolean) => void
+  getCollaboratorDisplayName: (clientName: string | null | undefined) => string
+  getLocalClientName: () => string | null
   mobileBlockBarInteracting: boolean
   onBlockBarInteractionChange: (interacting: boolean) => void
 }
@@ -37,12 +58,20 @@ export function InlineAIControls({
   onStop,
   onContinuePrompt,
   onDismissChoices,
+  onUndoTurn,
+  onRedoTurn,
+  onRestoreAcceptedSession,
   onInteractionChange,
+  onInlineAIInteractionChange,
+  getCollaboratorDisplayName,
+  getLocalClientName,
   mobileBlockBarInteracting,
   onBlockBarInteractionChange,
 }: InlineAIControlsProps) {
   const state = useAIWriterState(view)
   const sessionsById = useEditorStore((s) => s.inlineSessionsById)
+  const dismissedRestoreSessionIds = useEditorStore((s) => s.dismissedRestoreSessionIds)
+  const dismissRestoreSuggestion = useEditorStore((s) => s.dismissRestoreSuggestion)
   const sessionPreviewsById = useEditorStore((s) => s.inlineSessionPreviewById)
   const sessionStreamMetaById = useEditorStore((s) => s.inlineSessionStreamMetaById)
   const isCoarsePointer = useIsCoarsePointer()
@@ -67,6 +96,24 @@ export function InlineAIControls({
     [state, activeLoadingAnchor, reviewZones]
   )
 
+  const localClientName = getLocalClientName()
+
+  const restorableSessions = useMemo(() => {
+    if (!view) return []
+    const liveSessionIds = new Set(
+      getAIZones(view)
+        .map((zone) => zone.sessionId)
+        .filter((sessionId): sessionId is string => Boolean(sessionId))
+    )
+
+    return Object.entries(sessionsById).flatMap(([sessionId, session]) => {
+      if ((session.turnCheckpoints?.length ?? 0) === 0) return []
+      if (liveSessionIds.has(sessionId)) return []
+      if (dismissedRestoreSessionIds[sessionId]) return []
+      return [{ sessionId, session }]
+    })
+  }, [dismissedRestoreSessionIds, sessionsById, view, state?.zones])
+
   if (!view) return null
 
   if (isCoarsePointer) {
@@ -84,7 +131,12 @@ export function InlineAIControls({
         onStop={onStop}
         onContinuePrompt={onContinuePrompt}
         onDismissChoices={onDismissChoices}
+        onUndoTurn={onUndoTurn}
+        onRedoTurn={onRedoTurn}
         onInteractionChange={onInteractionChange}
+        onInlineAIInteractionChange={onInlineAIInteractionChange}
+        getCollaboratorDisplayName={getCollaboratorDisplayName}
+        getLocalClientName={getLocalClientName}
         mobileBlockBarInteracting={mobileBlockBarInteracting}
         onBlockBarInteractionChange={onBlockBarInteractionChange}
       />
@@ -93,6 +145,17 @@ export function InlineAIControls({
 
   return (
     <>
+      {restorableSessions.map(({ sessionId, session }) => (
+        <RestoreSuggestionChip
+          key={`restore-${sessionId}`}
+          view={view}
+          sessionId={sessionId}
+          session={session}
+          onRestore={onRestoreAcceptedSession}
+          onDismiss={dismissRestoreSuggestion}
+        />
+      ))}
+
       <SelectionComposeFloatingControl
         view={view}
         selection={selection}
@@ -152,6 +215,14 @@ export function InlineAIControls({
             onStop={onStop}
             onContinuePrompt={onContinuePrompt}
             onDismissChoices={onDismissChoices}
+            onUndoTurn={onUndoTurn}
+            onRedoTurn={onRedoTurn}
+            onInteractionChange={onInlineAIInteractionChange}
+            suggestedByLabel={resolveSuggestedByLabel(
+              activeZone.session,
+              localClientName,
+              getCollaboratorDisplayName
+            )}
           />
         )
       })()}

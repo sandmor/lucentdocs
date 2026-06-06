@@ -134,6 +134,66 @@ export const inlineRouter = router({
       }
     }),
 
+  undoSessionTurn: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        sessionId: idSchema,
+        requesterClientName: idSchema.optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      try {
+        const session = await ctx.inlineRuntime.undoSessionTurn(input, input.requesterClientName)
+        return { session }
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
+  redoSessionTurn: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        sessionId: idSchema,
+        requesterClientName: idSchema.optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      try {
+        const session = await ctx.inlineRuntime.redoSessionTurn(input, input.requesterClientName)
+        return { session }
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
+  restoreAcceptedSessionZone: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        sessionId: idSchema,
+        requesterClientName: idSchema.optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      try {
+        const session = await ctx.inlineRuntime.restoreAcceptedSessionZone(
+          input,
+          input.requesterClientName
+        )
+        return { session }
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
   cancelGeneration: protectedProcedure
     .input(
       z.object({

@@ -1,5 +1,6 @@
 import type { EditorView } from 'prosemirror-view'
 import { TextSelection } from 'prosemirror-state'
+import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import type { ActiveBlockInfo } from './block-resolve'
 import { canMoveBlockDown, canMoveBlockUp } from './block-resolve'
 
@@ -8,6 +9,10 @@ function moveBlock(view: EditorView, info: ActiveBlockInfo, direction: -1 | 1): 
   const { doc } = state
   const { pos, node } = info
   const nodeSize = node.nodeSize
+
+  if (blockOverlapsProtectedZone(view, pos, nodeSize)) {
+    return false
+  }
 
   if (direction === -1 && !canMoveBlockUp(doc, pos)) return false
   if (direction === 1 && !canMoveBlockDown(doc, pos, nodeSize)) return false

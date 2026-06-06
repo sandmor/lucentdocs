@@ -10,6 +10,8 @@ import type { Node as PMNode } from 'prosemirror-model'
 import { schema } from '@lucentdocs/shared'
 import type { MarkType } from 'prosemirror-model'
 import { createAIWriterPlugin, type AIWriterActionHandlers } from '../ai/writer-plugin'
+import { buildAIZoneUndoCommands } from '../ai/ai-zone-undo-keymap'
+import type { AIWriterController } from '../ai/writer/types'
 import { isInCodeBlock } from '../inline/utils'
 import { buildCodeBlockKeymapCommand } from './code-block-keymap'
 import { installYjsSelectionPatch } from './yjs-selection-patch'
@@ -46,6 +48,7 @@ function buildInputRules() {
 
 interface BuildPluginsOptions {
   aiHandlers?: AIWriterActionHandlers
+  aiWriterController?: AIWriterController
   collaboration?: CollaborationOptions
 }
 
@@ -85,7 +88,7 @@ function buildFormatKeymap() {
 }
 
 export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
-  const { aiHandlers, collaboration } = options
+  const { aiHandlers, aiWriterController, collaboration } = options
 
   const effectiveHandlers: AIWriterActionHandlers = aiHandlers ?? {
     onAccept() {},
@@ -105,11 +108,15 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   if (collaboration) {
     plugins.push(yUndoPlugin())
     plugins.push(
-      keymap({
-        'Mod-z': yUndo,
-        'Mod-Shift-z': yRedo,
-        'Mod-y': yRedo,
-      })
+      keymap(
+        aiWriterController
+          ? buildAIZoneUndoCommands(aiWriterController)
+          : {
+              'Mod-z': yUndo,
+              'Mod-Shift-z': yRedo,
+              'Mod-y': yRedo,
+            }
+      )
     )
   } else {
     plugins.push(history())

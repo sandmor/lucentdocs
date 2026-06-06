@@ -189,7 +189,10 @@ export class InlineSessionMetadataStore {
     const removedSessionIds: string[] = []
 
     for (const [sessionId, session] of Object.entries(currentSessions)) {
-      if (referencedSessionIds.has(sessionId)) {
+      const hasConversationHistory =
+        session.messages.length > 0 || (session.turnCheckpoints?.length ?? 0) > 0
+
+      if (referencedSessionIds.has(sessionId) || hasConversationHistory) {
         nextSessions[sessionId] = session
       } else {
         removedSessionIds.push(sessionId)

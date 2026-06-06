@@ -19,6 +19,7 @@ import {
   refreshActiveBlock,
   type ActiveBlockInfo,
 } from '../prosemirror/block-resolve'
+import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import { handleBlockAction } from '../prosemirror/block-actions'
 import { setDraggedBlock, clearDraggedBlock } from '../prosemirror/block-drag-plugin'
 import { subscribeEditorView } from '../prosemirror/view-store'
@@ -349,6 +350,12 @@ export function BlockHandle({ view, container }: BlockHandleProps) {
 
   const onDragStart = (event: React.DragEvent) => {
     if (!view || !effectiveBlock) return
+    if (
+      blockOverlapsProtectedZone(view, effectiveBlock.pos, effectiveBlock.node.nodeSize)
+    ) {
+      event.preventDefault()
+      return
+    }
     dragStartedRef.current = true
     isDraggingRef.current = true
     setIsDragging(true)
@@ -394,6 +401,10 @@ export function BlockHandle({ view, container }: BlockHandleProps) {
     return null
   }
 
+  if (blockOverlapsProtectedZone(view, effectiveBlock.pos, effectiveBlock.node.nodeSize)) {
+    return null
+  }
+
   return (
     <div
       className={`block-handle pointer-events-auto absolute z-59 flex items-center gap-0.5${isDragging ? ' opacity-50' : ''}`}
@@ -415,6 +426,7 @@ export function BlockHandle({ view, container }: BlockHandleProps) {
         }
         items={insertBlockMenuItems}
         block={effectiveBlock}
+        view={view}
         onAction={runAction}
       />
 
@@ -445,6 +457,7 @@ export function BlockHandle({ view, container }: BlockHandleProps) {
         anchor={gripRef}
         items={[...turnIntoBlockMenuItems, ...moreBlockMenuItems]}
         block={effectiveBlock}
+        view={view}
         onAction={runAction}
         showTurnIntoLabel
       />
@@ -459,6 +472,7 @@ interface BlockHandleMenuProps {
   anchor?: React.RefObject<Element | null>
   items: BlockMenuItem[]
   block: ActiveBlockInfo
+  view: EditorView
   onAction: (action: BlockActionId) => void
   showTurnIntoLabel?: boolean
 }
@@ -470,6 +484,7 @@ function BlockHandleMenu({
   anchor,
   items,
   block,
+  view,
   onAction,
   showTurnIntoLabel = false,
 }: BlockHandleMenuProps) {
@@ -491,6 +506,7 @@ function BlockHandleMenu({
                   key={item.id}
                   item={item}
                   block={block}
+                  view={view}
                   onAction={onAction}
                 />
               ))}
@@ -502,6 +518,7 @@ function BlockHandleMenu({
                   key={item.id}
                   item={item}
                   block={block}
+                  view={view}
                   onAction={onAction}
                 />
               ))}
@@ -509,7 +526,13 @@ function BlockHandleMenu({
           </>
         ) : (
           items.map((item) => (
-            <BlockMenuDropdownItem key={item.id} item={item} block={block} onAction={onAction} />
+            <BlockMenuDropdownItem
+              key={item.id}
+              item={item}
+              block={block}
+              view={view}
+              onAction={onAction}
+            />
           ))
         )}
       </DropdownMenuContent>
@@ -520,14 +543,16 @@ function BlockHandleMenu({
 function BlockMenuDropdownItem({
   item,
   block,
+  view,
   onAction,
 }: {
   item: BlockMenuItem
   block: ActiveBlockInfo
+  view: EditorView
   onAction: (action: BlockActionId) => void
 }) {
   const Icon = item.icon
-  const enabled = isBlockMenuItemEnabled(item, block)
+  const enabled = isBlockMenuItemEnabled(item, block, view)
   const checked = isBlockMenuItemChecked(item, block)
 
   return (

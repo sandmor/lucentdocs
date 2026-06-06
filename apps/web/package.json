@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} bun test src/",
-    "test:e2e": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} NODE_ENV=test playwright test"
+    "test:e2e": "LUCENTDOCS_TEST_MODE=1 LUCENTDOCS_TEST_DATA_DIR=${LUCENTDOCS_TEST_DATA_DIR:-data-test} NODE_ENV=test PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright} playwright test"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -64,7 +64,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@playwright/test": "^1.54.2",
+    "@playwright/test": "^1.60.0",
     "@types/bun": "^1.3.9",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^24.10.1",

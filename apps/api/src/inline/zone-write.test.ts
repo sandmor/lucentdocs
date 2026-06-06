@@ -4,7 +4,9 @@ import { buildPromptContextExcerpt, schema, type InlineZoneWriteAction } from '@
 import {
   applyInlineZoneWriteActionToDoc,
   ensureInlineContinuationZoneAtDocumentEnd,
+  finalizeInlineZoneInDoc,
   getInlineZoneTextFromDoc,
+  restoreAcceptedSessionZoneInDoc,
   setInlineZoneStreamingInDoc,
 } from './zone-write.js'
 
@@ -197,6 +199,37 @@ describe('applyInlineZoneWriteActionToDoc', () => {
   })
 })
 
+describe('finalizeInlineZoneInDoc', () => {
+  test('commits multi-paragraph content with streaming false on every segment', () => {
+    const zoneId = 'zone-finalize'
+    const sessionId = 'session-finalize'
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.paragraph.create(null, [
+        schema.text('Start '),
+        createZoneNode(zoneId, sessionId, ''),
+      ]),
+    ])
+
+    const result = finalizeInlineZoneInDoc(doc, sessionId, 'First paragraph\n\nSecond paragraph')
+
+    expect(result.zoneFound).toBe(true)
+    expect(result.changed).toBe(true)
+    expect(result.nextDoc.childCount).toBe(2)
+    expect(result.nextDoc.textBetween(0, result.nextDoc.content.size, '\n\n', '\n')).toBe(
+      'Start First paragraph\n\nSecond paragraph'
+    )
+
+    const streamingStates: boolean[] = []
+    result.nextDoc.descendants((node) => {
+      if (node.type === schema.nodes.ai_zone) {
+        streamingStates.push(Boolean(node.attrs.streaming))
+      }
+      return true
+    })
+    expect(streamingStates).toEqual([false, false])
+  })
+})
+
 describe('setInlineZoneStreamingInDoc', () => {
   test('updates streaming state for every zone segment in the session', () => {
     const sessionId = 'session-multi-segment'
@@ -217,6 +250,57 @@ describe('setInlineZoneStreamingInDoc', () => {
       return true
     })
     expect(streamingStates).toEqual([false, false])
+  })
+})
+
+describe('multi-block zone sessions', () => {
+  test('reads zone text across a code block between same-id segments', () => {
+    const zoneId = 'zone-code'
+    const sessionId = 'session-code'
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.paragraph.create(null, [
+        schema.text('Before '),
+        createZoneNode(zoneId, sessionId, 'intro'),
+      ]),
+      schema.nodes.code_block.create({ language: 'ts' }, [schema.text('const x = 1')]),
+      schema.nodes.paragraph.create(null, [createZoneNode(zoneId, sessionId, 'outro')]),
+    ])
+
+    const result = getInlineZoneTextFromDoc(doc, sessionId)
+    expect(result.zoneFound).toBe(true)
+    expect(result.text).toBe('intro\n\nconst x = 1\n\noutro')
+  })
+})
+
+describe('restoreAcceptedSessionZoneInDoc', () => {
+  test('re-wraps accepted text when no live zone exists', () => {
+    const sessionId = 'session-restore'
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.paragraph.create(null, [schema.text('Once spark after')]),
+    ])
+
+    const result = restoreAcceptedSessionZoneInDoc(doc, sessionId, 'spark', 'Once ', ' after')
+
+    expect(result.zoneFound).toBe(true)
+    expect(result.changed).toBe(true)
+
+    const zoneText = getInlineZoneTextFromDoc(result.nextDoc, sessionId)
+    expect(zoneText.zoneFound).toBe(true)
+    expect(zoneText.text).toBe('spark')
+  })
+
+  test('no-ops when the session zone already exists', () => {
+    const sessionId = 'session-existing'
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.paragraph.create(null, [
+        schema.text('Once '),
+        createZoneNode('zone_existing', sessionId, 'spark'),
+      ]),
+    ])
+
+    const result = restoreAcceptedSessionZoneInDoc(doc, sessionId, 'spark', 'Once ', null)
+    expect(result.zoneFound).toBe(true)
+    expect(result.changed).toBe(false)
   })
 })
 

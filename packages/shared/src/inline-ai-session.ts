@@ -10,12 +10,44 @@ export interface InlineChatMessage {
   tools: InlineToolChip[]
 }
 
+export interface InlineTurnCheckpoint {
+  assistantMessageId: string
+  zoneTextBefore: string
+  zoneTextAfter: string
+  assistantMessage: InlineChatMessage
+}
+
+function normalizeTurnCheckpoint(value: unknown): InlineTurnCheckpoint | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+
+  const record = value as Record<string, unknown>
+  const assistantMessageId =
+    typeof record.assistantMessageId === 'string' ? record.assistantMessageId.trim() : ''
+  const zoneTextBefore = typeof record.zoneTextBefore === 'string' ? record.zoneTextBefore : ''
+  const zoneTextAfter = typeof record.zoneTextAfter === 'string' ? record.zoneTextAfter : ''
+  const assistantMessage = normalizeMessage(record.assistantMessage)
+
+  if (!assistantMessageId || !assistantMessage || assistantMessage.role !== 'assistant') {
+    return null
+  }
+
+  return {
+    assistantMessageId,
+    zoneTextBefore,
+    zoneTextAfter,
+    assistantMessage,
+  }
+}
+
 export interface InlineZoneSession {
   messages: InlineChatMessage[]
   choices: string[]
   contextBefore: string | null
   contextAfter: string | null
   contextTruncated: boolean
+  lastRequesterClientName?: string
+  turnCheckpoints?: InlineTurnCheckpoint[]
+  redoTurnCheckpoints?: InlineTurnCheckpoint[]
 }
 
 function normalizeToolChip(value: unknown): InlineToolChip | null {
@@ -55,6 +87,10 @@ function normalizeMessage(value: unknown): InlineChatMessage | null {
   }
 }
 
+export function canUndoSessionTurn(session: InlineZoneSession | null | undefined): boolean {
+  return (session?.turnCheckpoints?.length ?? 0) > 1
+}
+
 export function normalizeInlineZoneSession(value: unknown): InlineZoneSession | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
 
@@ -71,8 +107,16 @@ export function normalizeInlineZoneSession(value: unknown): InlineZoneSession | 
       ? record.contextAfter
       : null
   const contextTruncated = record.contextTruncated === true
+  const lastRequesterClientName =
+    typeof record.lastRequesterClientName === 'string' && record.lastRequesterClientName.length > 0
+      ? record.lastRequesterClientName
+      : undefined
+  const rawTurnCheckpoints = Array.isArray(record.turnCheckpoints) ? record.turnCheckpoints : []
+  const rawRedoTurnCheckpoints = Array.isArray(record.redoTurnCheckpoints)
+    ? record.redoTurnCheckpoints
+    : []
 
-  return {
+  const session: InlineZoneSession = {
     messages: rawMessages.flatMap((entry) => {
       const normalized = normalizeMessage(entry)
       return normalized ? [normalized] : []
@@ -81,7 +125,26 @@ export function normalizeInlineZoneSession(value: unknown): InlineZoneSession | 
     contextBefore,
     contextAfter,
     contextTruncated,
+    ...(lastRequesterClientName ? { lastRequesterClientName } : {}),
   }
+
+  const turnCheckpoints = rawTurnCheckpoints.flatMap((entry) => {
+    const normalized = normalizeTurnCheckpoint(entry)
+    return normalized ? [normalized] : []
+  })
+  if (turnCheckpoints.length > 0) {
+    session.turnCheckpoints = turnCheckpoints
+  }
+
+  const redoTurnCheckpoints = rawRedoTurnCheckpoints.flatMap((entry) => {
+    const normalized = normalizeTurnCheckpoint(entry)
+    return normalized ? [normalized] : []
+  })
+  if (redoTurnCheckpoints.length > 0) {
+    session.redoTurnCheckpoints = redoTurnCheckpoints
+  }
+
+  return session
 }
 
 export function normalizeInlineZoneSessionMap(value: unknown): Record<string, InlineZoneSession> {

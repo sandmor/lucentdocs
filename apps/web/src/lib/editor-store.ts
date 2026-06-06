@@ -51,6 +51,10 @@ interface EditorStore {
   inlineSessionStreamMetaById: Record<string, InlineSessionStreamMeta>
   setSessionStreamMetaById: (sessionId: string, meta: InlineSessionStreamMeta | null) => void
 
+  dismissedRestoreSessionIds: Record<string, true>
+  dismissRestoreSuggestion: (sessionId: string) => void
+  clearDismissedRestoreSuggestions: () => void
+
   // Editor session key (for forcing remount on restore)
   editorSessionKey: number
   bumpEditorSessionKey: () => void
@@ -136,6 +140,19 @@ export const useEditorStore = create<EditorStore>((set) => ({
         },
       }
     }),
+
+  dismissedRestoreSessionIds: {},
+  dismissRestoreSuggestion: (sessionId) =>
+    set((state) => {
+      if (state.dismissedRestoreSessionIds[sessionId]) return state
+      return {
+        dismissedRestoreSessionIds: {
+          ...state.dismissedRestoreSessionIds,
+          [sessionId]: true,
+        },
+      }
+    }),
+  clearDismissedRestoreSuggestions: () => set({ dismissedRestoreSessionIds: {} }),
 
   editorSessionKey: 0,
   bumpEditorSessionKey: () => set((state) => ({ editorSessionKey: state.editorSessionKey + 1 })),

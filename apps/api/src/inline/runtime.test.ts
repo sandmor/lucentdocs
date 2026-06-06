@@ -456,4 +456,525 @@ describe('InlineRuntime', () => {
       }
     }
   })
+
+  async function runPromptGeneration(
+    projectId: string,
+    documentId: string,
+    sessionId: string,
+    prompt: string,
+    selectionFrom: number,
+    selectionTo: number
+  ): Promise<void> {
+    await inlineRuntime.startGeneration({
+      mode: 'prompt',
+      projectId,
+      documentId,
+      sessionId,
+      prompt,
+      selectionFrom,
+      selectionTo,
+      requesterClientName: 'test_client',
+    })
+
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (!inlineRuntime.isGenerating({ projectId, documentId, sessionId })) {
+        break
+      }
+      await sleep(10)
+    }
+  }
+
+  async function runContinuationGeneration(
+    projectId: string,
+    documentId: string,
+    sessionId: string
+  ): Promise<void> {
+    await inlineRuntime.startGeneration({
+      mode: 'continue',
+      projectId,
+      documentId,
+      sessionId,
+      selectionFrom: 0,
+      selectionTo: 0,
+      requesterClientName: 'test_client',
+    })
+
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (
+        !inlineRuntime.isGenerating({ projectId, documentId, sessionId })
+      ) {
+        break
+      }
+      await sleep(10)
+    }
+  }
+
+  test('undoSessionTurn restores zone text and pops the assistant message', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(project.id, 'chapter-undo.md')
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    const sessionId = 'inline_session_undo'
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_undo',
+                streaming: true,
+                sessionId,
+                originalSlice: null,
+              },
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    await runContinuationGeneration(project.id, document.id, sessionId)
+
+    const scope = { projectId: project.id, documentId: document.id, sessionId }
+    const sessionsBefore = await inlineRuntime.getSessions(scope, [sessionId])
+    const sessionBefore = sessionsBefore[sessionId]
+    expect(sessionBefore?.turnCheckpoints?.length).toBe(1)
+    expect(sessionBefore?.messages.some((message) => message.role === 'assistant')).toBe(true)
+
+    const liveBeforeUndo = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(liveBeforeUndo)).toBe('Once spark')
+
+    const undone = await inlineRuntime.undoSessionTurn(scope, 'test_client')
+    expect(undone.messages.some((message) => message.role === 'assistant')).toBe(false)
+    expect(undone.turnCheckpoints?.length ?? 0).toBe(0)
+    expect(undone.redoTurnCheckpoints?.length).toBe(1)
+
+    const liveAfterUndo = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(liveAfterUndo)).toBe('Once ')
+  })
+
+  test('redoSessionTurn restores assistant message and zone text after undo', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapter-redo.md'
+    )
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    const sessionId = 'inline_session_redo'
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_redo',
+                streaming: true,
+                sessionId,
+                originalSlice: null,
+              },
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    const scope = { projectId: project.id, documentId: document.id, sessionId }
+    await runContinuationGeneration(project.id, document.id, sessionId)
+    await inlineRuntime.undoSessionTurn(scope, 'test_client')
+
+    const redone = await inlineRuntime.redoSessionTurn(scope, 'test_client')
+    expect(redone.messages.some((message) => message.role === 'assistant')).toBe(true)
+    expect(redone.turnCheckpoints?.length).toBe(1)
+    expect(redone.redoTurnCheckpoints?.length ?? 0).toBe(0)
+
+    const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(live)).toBe('Once spark')
+  })
+
+  test('undoSessionTurn on prompt-mode first turn keeps the zone and restores selected text', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapter-prompt-undo.md'
+    )
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    const sessionId = 'inline_session_prompt_undo'
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Hello ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_prompt_undo',
+                streaming: true,
+                sessionId,
+                originalSlice: null,
+              },
+              content: [{ type: 'text', text: 'world' }],
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    const scope = { projectId: project.id, documentId: document.id, sessionId }
+    await runPromptGeneration(project.id, document.id, sessionId, 'rewrite this', 0, 100)
+
+    const liveBeforeUndo = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(liveBeforeUndo)).toBe('Hello spark')
+
+    const undone = await inlineRuntime.undoSessionTurn(scope, 'test_client')
+    expect(undone.messages.some((message) => message.role === 'user')).toBe(true)
+    expect(undone.messages.some((message) => message.role === 'assistant')).toBe(false)
+
+    const liveAfterUndo = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(liveAfterUndo)).toBe('Hello world')
+
+    const content = schema.nodeFromJSON(liveAfterUndo)
+    let zoneCount = 0
+    content.descendants((node) => {
+      if (node.type === schema.nodes.ai_zone) {
+        zoneCount += 1
+      }
+      return true
+    })
+    expect(zoneCount).toBe(1)
+  })
+
+  test('undoSessionTurn on a single assistant turn removes the zone from the document', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapter-remove-zone.md'
+    )
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    const sessionId = 'inline_session_remove'
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_remove',
+                streaming: true,
+                sessionId,
+                originalSlice: null,
+              },
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    const scope = { projectId: project.id, documentId: document.id, sessionId }
+    await runContinuationGeneration(project.id, document.id, sessionId)
+    await inlineRuntime.undoSessionTurn(scope, 'test_client')
+
+    const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    const content = schema.nodeFromJSON(live)
+    let zoneCount = 0
+    content.descendants((node) => {
+      if (node.type === schema.nodes.ai_zone) {
+        zoneCount += 1
+      }
+      return true
+    })
+    expect(zoneCount).toBe(0)
+    expect(extractDocText(live)).toBe('Once ')
+  })
+
+  test('restoreAcceptedSessionZone re-wraps accepted text without mutating session history', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapter-restore.md'
+    )
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    const sessionId = 'inline_session_restore'
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_restore',
+                streaming: true,
+                sessionId,
+                originalSlice: null,
+              },
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    const scope = { projectId: project.id, documentId: document.id, sessionId }
+    await runContinuationGeneration(project.id, document.id, sessionId)
+
+    const generated = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(generated)).toBe('Once spark')
+
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Once spark' }],
+        },
+      ],
+    } as JsonObject)
+
+    const sessionBeforeRestore = await inlineRuntime.getSessions(scope, [sessionId])
+    const restored = await inlineRuntime.restoreAcceptedSessionZone(scope, 'test_client')
+
+    expect(restored.turnCheckpoints?.length).toBe(sessionBeforeRestore[sessionId]?.turnCheckpoints?.length)
+    expect(restored.messages.length).toBe(sessionBeforeRestore[sessionId]?.messages.length)
+
+    const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(live)).toBe('Once spark')
+    let restoredZoneCount = 0
+    schema.nodeFromJSON(live).descendants((node) => {
+      if (node.type === schema.nodes.ai_zone) restoredZoneCount += 1
+      return true
+    })
+    expect(restoredZoneCount).toBe(1)
+  })
+
+  test('continuation generation persists assistant message and turn checkpoint', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapter-continue-checkpoint.md'
+    )
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    const sessionId = 'inline_session_continue_checkpoint'
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_continue_checkpoint',
+                streaming: true,
+                sessionId,
+                originalSlice: null,
+              },
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    const scope = { projectId: project.id, documentId: document.id, sessionId }
+    await runContinuationGeneration(project.id, document.id, sessionId)
+
+    const sessions = await inlineRuntime.getSessions(scope, [sessionId])
+    const session = sessions[sessionId]
+    expect(session?.messages.some((message) => message.role === 'assistant')).toBe(true)
+    expect(session?.turnCheckpoints?.length).toBe(1)
+  })
+
+  test('pruneOrphans keeps continuation session after zone is removed from the document', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapter-reject-prune.md'
+    )
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    const sessionId = 'inline_session_reject_prune'
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_reject_prune',
+                streaming: true,
+                sessionId,
+                originalSlice: null,
+              },
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    const scope = { projectId: project.id, documentId: document.id, sessionId }
+    await runContinuationGeneration(project.id, document.id, sessionId)
+
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Once ' }],
+        },
+      ],
+    } as JsonObject)
+
+    await inlineRuntime.pruneOrphanSessions({
+      projectId: project.id,
+      documentId: document.id,
+    })
+
+    const sessions = await inlineRuntime.getSessions(scope, [sessionId])
+    expect(sessions[sessionId]).toBeDefined()
+    expect(sessions[sessionId]?.turnCheckpoints?.length).toBe(1)
+  })
+
+  test('undoSessionTurn works after reject-like zone removal and prune when zone is restored', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapter-reject-undo-chain.md'
+    )
+
+    if (!document) {
+      throw new Error('Expected a project document to be created.')
+    }
+
+    const sessionId = 'inline_session_reject_undo_chain'
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_reject_undo_chain',
+                streaming: true,
+                sessionId,
+                originalSlice: null,
+              },
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    const scope = { projectId: project.id, documentId: document.id, sessionId }
+    await runContinuationGeneration(project.id, document.id, sessionId)
+
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Once ' }],
+        },
+      ],
+    } as JsonObject)
+
+    await inlineRuntime.pruneOrphanSessions({
+      projectId: project.id,
+      documentId: document.id,
+    })
+
+    await yjsRuntime.replaceLiveDocumentContent(document.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Once ' },
+            {
+              type: 'ai_zone',
+              attrs: {
+                id: 'zone_reject_undo_chain',
+                streaming: false,
+                sessionId,
+                originalSlice: null,
+              },
+              content: [{ type: 'text', text: 'spark' }],
+            },
+          ],
+        },
+      ],
+    } as JsonObject)
+
+    const undone = await inlineRuntime.undoSessionTurn(scope, 'test_client')
+    expect(undone.messages.some((message) => message.role === 'assistant')).toBe(false)
+
+    const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(live)).toBe('Once ')
+    let zoneCount = 0
+    schema.nodeFromJSON(live).descendants((node) => {
+      if (node.type === schema.nodes.ai_zone) zoneCount += 1
+      return true
+    })
+    expect(zoneCount).toBe(0)
+  })
 })

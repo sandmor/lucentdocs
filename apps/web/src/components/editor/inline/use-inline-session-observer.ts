@@ -192,16 +192,6 @@ export function useInlineSessionObserver({
                   updatedAt: Date.now(),
                 })
               }
-            } else {
-              const bubblePresence = getBubblePresenceRef.current?.() ?? null
-              if (bubblePresence) {
-                // Defer clearing the overlay so Yjs can apply the committed zone first.
-                void Promise.resolve()
-                  .then(() => Promise.resolve())
-                  .then(() => {
-                    bubblePresence.clear(sessionId)
-                  })
-              }
             }
           },
           onError: (error) => {

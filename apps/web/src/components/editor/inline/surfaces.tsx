@@ -8,6 +8,8 @@ import {
   Pen,
   Search,
   StopCircle,
+  Undo2,
+  Redo2,
   X,
   Code,
   Sparkles,
@@ -18,7 +20,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
-import type { InlineZoneSession } from '@lucentdocs/shared'
+import { canUndoSessionTurn, type InlineZoneSession } from '@lucentdocs/shared'
 import type { InlineSessionPreview } from './inline-session-preview'
 import type { AnimationPhase, FormatMarkName, InlineControlState } from './types'
 import { selectChoice } from './utils'
@@ -250,6 +252,10 @@ interface AIZoneSurfaceProps {
   onStop: (zoneId?: string) => void
   onContinuePrompt: (zoneId: string, prompt: string) => boolean
   onDismissChoices: (zoneId: string) => boolean
+  onUndoTurn?: (zoneId: string) => void
+  onRedoTurn?: (zoneId: string) => void
+  onInteractionChange?: (interacting: boolean) => void
+  suggestedByLabel?: string | null
   isMinimized?: boolean
   onToggleMinimize?: () => void
 }
@@ -272,6 +278,10 @@ export function AIZoneSurface({
   onStop,
   onContinuePrompt,
   onDismissChoices,
+  onUndoTurn,
+  onRedoTurn,
+  onInteractionChange,
+  suggestedByLabel = null,
   isMinimized,
   onToggleMinimize,
 }: AIZoneSurfaceProps) {
@@ -279,6 +289,32 @@ export function AIZoneSurface({
   const isReview = state === 'review'
   const choices = session?.choices ?? []
   const [followupPrompt, setFollowupPrompt] = useState('')
+  const canUndoTurn = Boolean(
+    zoneId && canUndoSessionTurn(session) && !isProcessing && !serverGenerating
+  )
+  const canRedoTurn = Boolean(zoneId && (session?.redoTurnCheckpoints?.length ?? 0) > 0)
+
+  useEffect(() => {
+    if (!onInteractionChange) return
+    return () => {
+      onInteractionChange(false)
+    }
+  }, [onInteractionChange])
+
+  useEffect(() => {
+    if (!onInteractionChange || !rootRef?.current) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!event.target || !(event.target instanceof Node)) return
+      if (rootRef.current?.contains(event.target)) return
+      onInteractionChange(false)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+    }
+  }, [onInteractionChange, rootRef])
 
   const canSendFollowup = useMemo(
     () => Boolean(zoneId && followupPrompt.trim() && !isProcessing && !serverGenerating),
@@ -347,12 +383,30 @@ export function AIZoneSurface({
       data-state={state}
       data-zone-id={zoneId}
       data-ai-phase={animationPhase}
+      onPointerDownCapture={() => onInteractionChange?.(true)}
+      onFocusCapture={() => onInteractionChange?.(true)}
+      onBlurCapture={(event) => {
+        if (!onInteractionChange) return
+        const nextTarget = event.relatedTarget
+        if (
+          !nextTarget ||
+          !(nextTarget instanceof Node) ||
+          !event.currentTarget.contains(nextTarget)
+        ) {
+          onInteractionChange(false)
+        }
+      }}
     >
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-          <Pen className="size-3" />
-          Inline AI
-        </span>
+        <div className="min-w-0">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+            <Pen className="size-3" />
+            Inline AI
+          </span>
+          {suggestedByLabel ? (
+            <div className="truncate text-[10px] text-muted-foreground/80">{suggestedByLabel}</div>
+          ) : null}
+        </div>
         <div className="ml-auto flex items-center gap-3">
           {isProcessing &&
             (stuck ? (
@@ -554,41 +608,81 @@ export function AIZoneSurface({
         ) : null}
 
         {isReview && choices.length === 0 ? (
-          <div className="flex items-center gap-1.5 p-1.5">
-            <Button
-              variant="ghost"
-              size="xs"
-              className="gap-1.5 text-muted-foreground hover:border-success/50 hover:bg-success/15 hover:text-success dark:hover:text-emerald-400"
-              title="Accept (Tab)"
-              data-action="accept"
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                onAccept(zoneId)
-              }}
-            >
-              <Check className="size-3" />
-              Accept
-              <Kbd>Tab</Kbd>
-            </Button>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="gap-1.5 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-              title="Reject (Esc)"
-              data-action="reject"
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                onReject(zoneId)
-              }}
-            >
-              <X className="size-3" />
-              Reject
-              <Kbd>Esc</Kbd>
-            </Button>
+          <div className="flex items-center justify-between gap-2 border-t border-border px-2 py-1.5">
+            <div className="flex items-center gap-0.5">
+              {canUndoTurn ? (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="gap-1.5 text-muted-foreground hover:bg-muted/60"
+                  title="Undo turn (Mod-z when zone is focused)"
+                  data-action="undo-turn"
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (zoneId) onUndoTurn?.(zoneId)
+                  }}
+                >
+                  <Undo2 className="size-3" />
+                  Undo turn
+                </Button>
+              ) : null}
+              {canRedoTurn ? (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="gap-1.5 text-muted-foreground hover:bg-muted/60"
+                  title="Redo turn"
+                  data-action="redo-turn"
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (zoneId) onRedoTurn?.(zoneId)
+                  }}
+                >
+                  <Redo2 className="size-3" />
+                  Redo turn
+                </Button>
+              ) : null}
+            </div>
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="xs"
+                className="gap-1.5 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                title="Reject (Esc)"
+                data-action="reject"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onReject(zoneId)
+                }}
+              >
+                <X className="size-3" />
+                Reject
+                <Kbd>Esc</Kbd>
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="gap-1.5"
+                title="Accept (Tab)"
+                data-action="accept"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onAccept(zoneId)
+                }}
+              >
+                <Check className="size-3" />
+                Accept
+                <Kbd>Tab</Kbd>
+              </Button>
+            </div>
           </div>
         ) : null}
       </div>

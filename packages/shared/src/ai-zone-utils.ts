@@ -19,6 +19,45 @@ export function hasMeaningfulGap(doc: ProseMirrorNode, from: number, to: number)
   return doc.textBetween(from, to, '\n\n', '\n').trim().length > 0
 }
 
+const STRUCTURAL_GAP_BLOCK_TYPES = new Set(['code_block', 'horizontal_rule'])
+
+function isStructuralGapBlock(node: ProseMirrorNode): boolean {
+  return STRUCTURAL_GAP_BLOCK_TYPES.has(node.type.name)
+}
+
+/**
+ * Returns true when non-zone text in a normal textblock sits between same-id zone
+ * segments. Structural blocks (e.g. code_block) between segments do not break the chain.
+ */
+export function gapBreaksZoneSegmentChain(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number
+): boolean {
+  if (to <= from) return false
+  if (!hasMeaningfulGap(doc, from, to)) return false
+
+  const zoneType = doc.type.schema.nodes.ai_zone
+  let hasUserTextInGap = false
+
+  doc.nodesBetween(from, to, (node, _pos, parent) => {
+    if (hasUserTextInGap) return false
+
+    if (!node.isText || !node.text?.trim()) return true
+    if (zoneType && parent?.type === zoneType) return true
+    if (parent && isStructuralGapBlock(parent)) return true
+
+    if (parent?.isTextblock) {
+      hasUserTextInGap = true
+      return false
+    }
+
+    return true
+  })
+
+  return hasUserTextInGap
+}
+
 export function parseZoneNodeAttrs(
   nodeAttrs: unknown,
   options?: { requireSessionId?: boolean }

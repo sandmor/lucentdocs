@@ -96,12 +96,21 @@ class AIZoneNodeView implements NodeView {
 
     const activeFrame =
       attrs.streaming === true ? this.#presence.getFrame(attrs.id, attrs.sessionId ?? null) : null
-    const showOverlay = Boolean(
-      this.#isPrimaryZoneSegment(attrs) && activeFrame && activeFrame.text.length > 0
-    )
+    const zoneInDraftMode = Boolean(activeFrame && activeFrame.text.length > 0)
+    const showOverlay = zoneInDraftMode && this.#isPrimaryZoneSegment(attrs)
 
     this.dom.dataset.aiZoneOverlayActive = String(showOverlay)
-    this.contentDOM.hidden = showOverlay
+    if (zoneInDraftMode) {
+      this.contentDOM.style.visibility = 'hidden'
+      this.contentDOM.style.pointerEvents = 'none'
+      this.contentDOM.style.userSelect = 'none'
+      this.contentDOM.setAttribute('aria-hidden', 'true')
+    } else {
+      this.contentDOM.style.visibility = ''
+      this.contentDOM.style.pointerEvents = ''
+      this.contentDOM.style.userSelect = ''
+      this.contentDOM.removeAttribute('aria-hidden')
+    }
     this.#overlayDOM.hidden = !showOverlay
 
     this.#overlayDOM.innerHTML = ''

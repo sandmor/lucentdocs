@@ -11,6 +11,8 @@ export interface AIWriterControllerOptions {
   onStreamingChange?: StreamingHandler
   getToolScope?: () => { projectId?: string; documentId?: string }
   getRequesterClientName?: () => string | null
+  isInlineAIControlsInteracting?: () => boolean
+  getCollaboratorDisplayName?: (clientName: string | null | undefined) => string
   getSessionById?: (sessionId: string) => InlineZoneSession | null
   setSessionById?: (sessionId: string, session: InlineZoneSession | null) => void
   bubblePresence?: AIBubblePresenceStore | null
@@ -38,6 +40,12 @@ export interface AIWriterController {
   rejectAI: (view: EditorView, zoneId?: string) => void
   cancelAI: (view?: EditorView, options?: { preserveDoc?: boolean; zoneId?: string }) => void
   detachAI: () => void
+  getSessionById: (sessionId: string) => InlineZoneSession | null
+  isInlineAIControlsInteracting: () => boolean
+  getCollaboratorDisplayName: (clientName: string | null | undefined) => string
+  undoSessionTurn: (view: EditorView, sessionId: string) => Promise<void>
+  redoSessionTurn: (view: EditorView, sessionId: string) => Promise<void>
+  restoreAcceptedSession: (view: EditorView, sessionId: string) => Promise<void>
 }
 
 export interface PromptStreamPayload {

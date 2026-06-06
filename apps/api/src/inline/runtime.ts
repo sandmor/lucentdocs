@@ -11,6 +11,7 @@ import type {
   ContextParts,
   InlineChatMessage,
   InlineToolChip,
+  InlineTurnCheckpoint,
   InlineZoneSession,
   InlineZoneWriteAction,
 } from '@lucentdocs/shared'
@@ -34,8 +35,11 @@ import type { YjsDocumentVersion, YjsRuntime } from '../yjs/runtime.js'
 import {
   applyInlineZoneWriteActionToDoc,
   ensureInlineContinuationZoneAtDocumentEnd,
+  finalizeInlineZoneInDoc,
   getInlineZoneSnapshotFromDoc,
   getInlineZoneTextFromDoc,
+  removeSessionZoneFromDoc,
+  restoreAcceptedSessionZoneInDoc,
   setInlineZoneStreamingInDoc,
 } from './zone-write.js'
 import { getPromptContextForRange, type InlinePromptContextResult } from './context.js'
@@ -511,6 +515,218 @@ export class InlineRuntime {
     return sessions
   }
 
+  async undoSessionTurn(
+    scope: InlineScope & { sessionId: string },
+    requesterClientName?: string
+  ): Promise<InlineZoneSession> {
+    const session = await this.#store.getSession(scope, scope.sessionId)
+    if (!session) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `Inline session ${scope.sessionId} was not found for ${scope.projectId}/${scope.documentId}`
+      )
+    }
+
+    const checkpoints = session.turnCheckpoints ?? []
+    const lastMessage = session.messages[session.messages.length - 1]
+    if (!lastMessage || lastMessage.role !== 'assistant' || checkpoints.length === 0) {
+      throw new InlineRuntimeError('BAD_REQUEST', 'No assistant turn is available to undo.')
+    }
+
+    const checkpoint = checkpoints[checkpoints.length - 1]
+    if (checkpoint.assistantMessageId !== lastMessage.id) {
+      throw new InlineRuntimeError('BAD_REQUEST', 'Inline session undo checkpoints are out of sync.')
+    }
+
+    const clientName = normalizeRequesterClientName(requesterClientName)
+    let nextSession: InlineZoneSession | null = null
+
+    await this.#enqueueSessionWrite(scope, async () => {
+      const nextMessages = session.messages.slice(0, -1)
+      const nextCheckpoints = checkpoints.slice(0, -1)
+      const shouldRemoveZone = nextMessages.length === 0
+
+      if (shouldRemoveZone) {
+        await this.#applyRemoveZoneFromDocument(scope, clientName)
+      } else {
+        await this.#applyFinalizeToDocument(scope, checkpoint.zoneTextBefore, clientName)
+      }
+
+      nextSession = {
+        ...session,
+        messages: nextMessages,
+        turnCheckpoints: nextCheckpoints.length > 0 ? nextCheckpoints : undefined,
+        redoTurnCheckpoints: [...(session.redoTurnCheckpoints ?? []), checkpoint],
+      }
+
+      const saved = await this.#store.saveSession(scope, scope.sessionId, nextSession)
+      if (!saved) {
+        throw new InlineRuntimeError(
+          'NOT_FOUND',
+          `Inline session ${scope.sessionId} is no longer available for ${scope.projectId}/${scope.documentId}`
+        )
+      }
+    })
+
+    const key = toInlineKey(scope)
+    this.#emitSnapshot(
+      createObserveState(scope, {
+        seq: this.#nextSeq(key),
+        session: nextSession,
+        generating: false,
+        generationId: null,
+        draftText: null,
+        error: null,
+      })
+    )
+
+    return nextSession!
+  }
+
+  async restoreAcceptedSessionZone(
+    scope: InlineScope & { sessionId: string },
+    requesterClientName?: string
+  ): Promise<InlineZoneSession> {
+    const session = await this.#store.getSession(scope, scope.sessionId)
+    if (!session) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `Inline session ${scope.sessionId} was not found for ${scope.projectId}/${scope.documentId}`
+      )
+    }
+
+    const checkpoints = session.turnCheckpoints ?? []
+    if (checkpoints.length === 0) {
+      throw new InlineRuntimeError(
+        'BAD_REQUEST',
+        'No accepted inline AI suggestion is available to restore.'
+      )
+    }
+
+    const checkpoint = checkpoints[checkpoints.length - 1]
+    const clientName = normalizeRequesterClientName(requesterClientName)
+
+    await this.#enqueueSessionWrite(scope, async () => {
+      const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+        origin: toInlineServerOrigin(clientName),
+        transform: (currentDoc) => {
+          const applied = restoreAcceptedSessionZoneInDoc(
+            currentDoc,
+            scope.sessionId,
+            checkpoint.zoneTextAfter,
+            session.contextBefore,
+            session.contextAfter
+          )
+          return {
+            changed: applied.changed,
+            nextDoc: applied.nextDoc,
+            result: applied,
+          }
+        },
+      })
+
+      if (!transformed.result.zoneFound) {
+        throw new InlineRuntimeError(
+          'NOT_FOUND',
+          `Accepted inline AI text for session ${scope.sessionId} was not found in document ${scope.documentId}`
+        )
+      }
+    })
+
+    const key = toInlineKey(scope)
+    this.#emitSnapshot(
+      createObserveState(scope, {
+        seq: this.#nextSeq(key),
+        session,
+        generating: false,
+        generationId: null,
+        draftText: null,
+        error: null,
+      })
+    )
+
+    return session
+  }
+
+  async redoSessionTurn(
+    scope: InlineScope & { sessionId: string },
+    requesterClientName?: string
+  ): Promise<InlineZoneSession> {
+    const session = await this.#store.getSession(scope, scope.sessionId)
+    if (!session) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `Inline session ${scope.sessionId} was not found for ${scope.projectId}/${scope.documentId}`
+      )
+    }
+
+    const redoCheckpoints = session.redoTurnCheckpoints ?? []
+    if (redoCheckpoints.length === 0) {
+      throw new InlineRuntimeError('BAD_REQUEST', 'No assistant turn is available to redo.')
+    }
+
+    const checkpoint = redoCheckpoints[redoCheckpoints.length - 1]
+    const clientName = normalizeRequesterClientName(requesterClientName)
+    let nextSession: InlineZoneSession | null = null
+
+    await this.#enqueueSessionWrite(scope, async () => {
+      try {
+        await this.#applyFinalizeToDocument(scope, checkpoint.zoneTextAfter, clientName)
+      } catch (error) {
+        if (!(error instanceof InlineRuntimeError) || error.code !== 'NOT_FOUND') {
+          throw error
+        }
+
+        const tailAnchor = (session.contextBefore ?? session.contextAfter ?? '').slice(-64)
+        await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+          origin: toInlineServerOrigin(clientName),
+          transform: (currentDoc) => {
+            const ensured = ensureInlineContinuationZoneAtDocumentEnd(
+              currentDoc,
+              scope.sessionId,
+              tailAnchor
+            )
+            return {
+              changed: ensured.changed,
+              nextDoc: ensured.nextDoc,
+              result: ensured,
+            }
+          },
+        })
+        await this.#applyFinalizeToDocument(scope, checkpoint.zoneTextAfter, clientName)
+      }
+
+      nextSession = {
+        ...session,
+        messages: [...session.messages, checkpoint.assistantMessage],
+        turnCheckpoints: [...(session.turnCheckpoints ?? []), checkpoint],
+        redoTurnCheckpoints: redoCheckpoints.slice(0, -1),
+      }
+
+      const saved = await this.#store.saveSession(scope, scope.sessionId, nextSession)
+      if (!saved) {
+        throw new InlineRuntimeError(
+          'NOT_FOUND',
+          `Inline session ${scope.sessionId} is no longer available for ${scope.projectId}/${scope.documentId}`
+        )
+      }
+    })
+
+    const key = toInlineKey(scope)
+    this.#emitSnapshot(
+      createObserveState(scope, {
+        seq: this.#nextSeq(key),
+        session: nextSession,
+        generating: false,
+        generationId: null,
+        draftText: null,
+        error: null,
+      })
+    )
+
+    return nextSession!
+  }
+
   async pruneOrphanSessions(scope: InlineScope): Promise<void> {
     const pruneKey = `${scope.projectId}:${scope.documentId}`
     const inFlight = this.#activePrunes.get(pruneKey)
@@ -802,13 +1018,18 @@ export class InlineRuntime {
       contextAfter: baseSession.contextAfter ?? input.contextAfter ?? null,
       contextTruncated: hasStoredContext ? baseSession.contextTruncated : input.truncated === true,
     }
+    const requesterClientName = normalizeRequesterClientName(input.requesterClientName)
     const sessionForGeneration: InlineZoneSession =
       input.mode === 'prompt' && prompt
         ? {
             ...sessionWithContext,
             messages: [...sessionWithContext.messages, createUserMessage(prompt)],
+            lastRequesterClientName: requesterClientName,
           }
-        : sessionWithContext
+        : {
+            ...sessionWithContext,
+            lastRequesterClientName: requesterClientName,
+          }
 
     const userMessageSaved = await this.#store.saveSession(
       input,
@@ -829,7 +1050,6 @@ export class InlineRuntime {
 
     const generationId = nanoid()
     const controller = new AbortController()
-    const requesterClientName = normalizeRequesterClientName(input.requesterClientName)
     const startedState = createObserveState(input, {
       seq: this.#nextSeq(key),
       session: sessionForGeneration,
@@ -935,6 +1155,72 @@ export class InlineRuntime {
     }
   }
 
+  async #applyRemoveZoneFromDocument(
+    scope: InlineScope & { sessionId: string },
+    requesterClientName: string
+  ): Promise<void> {
+    const documentInScope = await this.#store.isDocumentInScope(scope)
+    if (!documentInScope) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `Document ${scope.documentId} not found in project ${scope.projectId}`
+      )
+    }
+
+    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+      origin: toInlineServerOrigin(requesterClientName),
+      transform: (currentDoc) => {
+        const applied = removeSessionZoneFromDoc(currentDoc, scope.sessionId)
+        return {
+          changed: applied.changed,
+          nextDoc: applied.nextDoc,
+          result: applied,
+        }
+      },
+    })
+
+    if (!transformed.result.zoneFound) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `AI zone for inline session ${scope.sessionId} was not found in document ${scope.documentId}`
+      )
+    }
+  }
+
+  async #applyFinalizeToDocument(
+    scope: InlineScope & { sessionId: string },
+    content: string,
+    requesterClientName: string
+  ): Promise<void> {
+    const documentInScope = await this.#store.isDocumentInScope(scope)
+    if (!documentInScope) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `Document ${scope.documentId} not found in project ${scope.projectId}`
+      )
+    }
+
+    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
+      origin: toInlineServerOrigin(requesterClientName),
+      transform: (currentDoc) => {
+        const applied = finalizeInlineZoneInDoc(currentDoc, scope.sessionId, content)
+        return {
+          changed: applied.changed,
+          nextDoc: applied.nextDoc,
+          result: applied,
+        }
+      },
+    })
+    const applied = transformed.result
+
+    if (!applied.zoneFound) {
+      throw new InlineRuntimeError(
+        'NOT_FOUND',
+        `AI zone for inline session ${scope.sessionId} was not found in document ${scope.documentId}`
+      )
+    }
+  }
+
   async #setZoneStreaming(
     scope: InlineScope & { sessionId: string },
     streaming: boolean,
@@ -965,15 +1251,8 @@ export class InlineRuntime {
     requesterClientName: string,
     documentVersion: YjsDocumentVersion
   ): Promise<void> {
-    const rollbackAction: InlineZoneWriteAction = {
-      type: 'replace_range',
-      fromOffset: 0,
-      toOffset: Number.MAX_SAFE_INTEGER,
-      content: rollbackZoneText,
-    }
-
     try {
-      await this.#applyWriteActionToDocument(input, rollbackAction, requesterClientName)
+      await this.#applyFinalizeToDocument(input, rollbackZoneText, requesterClientName)
     } catch (error) {
       if (
         input.mode !== 'continue' ||
@@ -990,7 +1269,7 @@ export class InlineRuntime {
         throw error
       }
 
-      await this.#applyWriteActionToDocument(input, rollbackAction, requesterClientName)
+      await this.#applyFinalizeToDocument(input, rollbackZoneText, requesterClientName)
     }
   }
 
@@ -1082,7 +1361,10 @@ export class InlineRuntime {
     documentVersion: YjsDocumentVersion
   ): Promise<void> {
     const key = toInlineKey(input)
-    let finalSession = generationSession
+    let finalSession: InlineZoneSession = {
+      ...generationSession,
+      redoTurnCheckpoints: [],
+    }
     let zoneDraftText = input.mode === 'prompt' ? (input.selectedText ?? '') : ''
     let generationError: string | null = null
     let generationAborted = false
@@ -1162,6 +1444,21 @@ export class InlineRuntime {
         }
 
         await appendGeneratedText(cleaner.flush())
+
+        if (zoneDraftText.length > 0) {
+          finalSession = {
+            ...finalSession,
+            messages: [
+              ...finalSession.messages,
+              {
+                id: createInlineMessageId('assistant'),
+                role: 'assistant',
+                text: zoneDraftText,
+                tools: [],
+              },
+            ],
+          }
+        }
       } else {
         const prompt = input.prompt.trim()
         const selectedText = input.selectedText ?? null
@@ -1347,20 +1644,8 @@ export class InlineRuntime {
       if (!generationAborted && generationError === null) {
         try {
           await this.#enqueueSessionWrite(input, async () => {
-            const currentZoneText = (await this.#readZoneText(input)) ?? ''
-            if (currentZoneText === zoneDraftText) {
-              return
-            }
-
-            const action: InlineZoneWriteAction = {
-              type: 'replace_range',
-              fromOffset: 0,
-              toOffset: Number.MAX_SAFE_INTEGER,
-              content: zoneDraftText,
-            }
-
             try {
-              await this.#applyWriteActionToDocument(input, action, requesterClientName)
+              await this.#applyFinalizeToDocument(input, zoneDraftText, requesterClientName)
             } catch (error) {
               if (
                 input.mode !== 'continue' ||
@@ -1377,7 +1662,7 @@ export class InlineRuntime {
                 throw error
               }
 
-              await this.#applyWriteActionToDocument(input, action, requesterClientName)
+              await this.#applyFinalizeToDocument(input, zoneDraftText, requesterClientName)
             }
           })
         } catch (error) {
@@ -1400,13 +1685,27 @@ export class InlineRuntime {
         this.#activeGenerations.delete(key)
       }
 
-      try {
-        await this.#setZoneStreaming(input, false, requesterClientName)
-      } catch (error) {
-        console.error('Failed to finalize inline zone streaming state', error)
+      let sessionForSnapshot: InlineZoneSession | null = finalSession
+      if (!generationAborted && generationError === null) {
+        const lastAssistant = [...finalSession.messages]
+          .reverse()
+          .find((message) => message.role === 'assistant')
+        if (lastAssistant) {
+          const checkpoint: InlineTurnCheckpoint = {
+            assistantMessageId: lastAssistant.id,
+            zoneTextBefore: rollbackZoneText,
+            zoneTextAfter: zoneDraftText,
+            assistantMessage: lastAssistant,
+          }
+          finalSession = {
+            ...finalSession,
+            turnCheckpoints: [...(finalSession.turnCheckpoints ?? []), checkpoint],
+            redoTurnCheckpoints: [],
+          }
+          sessionForSnapshot = finalSession
+        }
       }
 
-      let sessionForSnapshot: InlineZoneSession | null = finalSession
       try {
         const saved = await this.#store.saveSession(input, input.sessionId, finalSession)
         if (!saved) {
@@ -1470,11 +1769,15 @@ export class InlineRuntime {
     }
 
     if (input.mode === 'continue') {
+      const sessionWithAssistant: InlineZoneSession = {
+        ...baseSession,
+        messages: [...baseSession.messages, assistantMessage],
+      }
       const active = this.#activeGenerations.get(toInlineKey(input))
       this.#emitSnapshot(
         createObserveState(input, {
           seq: this.#nextSeq(toInlineKey(input)),
-          session: baseSession,
+          session: sessionWithAssistant,
           generating: true,
           generationId,
           draftText: generated,
@@ -1485,7 +1788,7 @@ export class InlineRuntime {
       )
 
       return {
-        session: baseSession,
+        session: sessionWithAssistant,
         draftText: generated,
       }
     }
@@ -1495,7 +1798,7 @@ export class InlineRuntime {
         ...baseSession,
         messages: [...baseSession.messages, assistantMessage],
       },
-      draftText: input.selectedText ?? '',
+      draftText: generated,
     }
   }
 

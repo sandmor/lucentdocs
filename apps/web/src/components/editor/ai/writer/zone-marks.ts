@@ -4,6 +4,8 @@ import {
   wrapSliceWithZoneNodes as wrapSliceWithZoneNodesShared,
   type AIZoneAttrs,
 } from '@lucentdocs/shared'
+import { AI_ZONE_ALLOWED_META } from '../ai-zone-protection'
+import { resolvePendingReviewZone } from '../ai-zone-undo-target'
 import { aiWriterPluginKey, getAIZones, type AIZone } from '../writer-plugin'
 import type { AIZoneNodeAttrs, ZoneNodePatch } from './types'
 
@@ -63,7 +65,7 @@ export function getTargetZone(view: EditorView, preferredZoneId?: string): AIZon
     if (localZone) return localZone
   }
 
-  return null
+  return resolvePendingReviewZone(view)
 }
 
 export function updateZoneNode(
@@ -104,6 +106,7 @@ export function updateZoneNode(
     tr.setMeta(aiWriterPluginKey, { type: metaType })
   }
   tr.setMeta('addToHistory', false)
+  tr.setMeta(AI_ZONE_ALLOWED_META, true)
   view.dispatch(tr)
   return true
 }
@@ -140,6 +143,7 @@ export function replaceZoneContent(
   }
 
   tr.setMeta('addToHistory', options.addToHistory === true)
+  tr.setMeta(AI_ZONE_ALLOWED_META, true)
   view.dispatch(tr)
   return true
 }
@@ -174,6 +178,7 @@ export function unwrapZoneNodes(
     tr.setMeta(aiWriterPluginKey, { type: options.metaType })
   }
   tr.setMeta('addToHistory', options.addToHistory === true)
+  tr.setMeta(AI_ZONE_ALLOWED_META, true)
   view.dispatch(tr)
   return true
 }

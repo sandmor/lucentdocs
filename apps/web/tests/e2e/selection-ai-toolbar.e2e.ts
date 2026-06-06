@@ -25,15 +25,20 @@ test('selection toolbar sends prompt and keeps editor unchanged without tool wri
   await promptInput.fill('Make this more cosmic')
   await expect(page.locator('.ai-selection-overlay').first()).toBeVisible()
   await expect(selectionToolbar).toHaveAttribute('data-state', 'compose')
+  await expect(editor).toContainText('Hello world')
 
   const submitShortcut = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'
   await promptInput.press(submitShortcut)
 
   await expect(page.locator('.ai-writer-floating-controls')).toBeVisible()
-  await expect(page.locator('.ai-writer-floating-controls[data-state="review"]')).toBeVisible()
+  await expect(page.locator('.ai-writer-floating-controls[data-state="review"]')).toBeVisible({
+    timeout: 20_000,
+  })
+  await expect(editor).toContainText(/Hello\s*spark/)
   await page.locator('.ai-writer-floating-controls [data-action="accept"]').first().click()
 
-  await expect(editor).toContainText('Hello world')
+  await expect(page.locator('.ai-generating-text')).toHaveCount(0)
+  await expect(editor).toContainText(/Hello\s*spark/)
 })
 
 test('undo after selection rewrite request restores original paragraph text', async ({ page }) => {
@@ -59,9 +64,8 @@ test('undo after selection rewrite request restores original paragraph text', as
   await editor.click()
   await page.keyboard.press(undoShortcut)
 
-  await expect(page.locator('.ai-generating-text')).toHaveCount(0)
-  await expect(page.locator('.ai-writer-floating-controls')).toHaveCount(0)
-  await expect(page.locator('.ProseMirror p')).toHaveCount(1)
+  await expect(page.locator('.ai-generating-text')).toHaveCount(1)
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toBeVisible()
   await expect(editor).toContainText('the house is blue')
 })
 

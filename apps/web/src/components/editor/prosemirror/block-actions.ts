@@ -2,9 +2,19 @@ import type { Node as PMNode } from 'prosemirror-model'
 import type { EditorView } from 'prosemirror-view'
 import { TextSelection } from 'prosemirror-state'
 import { schema } from '@lucentdocs/shared'
+import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import type { ActiveBlockInfo, BlockActionId } from './block-resolve'
 import { moveBlockDown, moveBlockUp } from './block-move'
 import { toCodeBlock, toParagraph } from './block-transforms'
+
+const BLOCK_MUTATION_ACTIONS = new Set<BlockActionId>([
+  'turn-into-paragraph',
+  'turn-into-code',
+  'move-up',
+  'move-down',
+  'duplicate',
+  'delete',
+])
 
 export function handleBlockAction(
   view: EditorView,
@@ -16,6 +26,13 @@ export function handleBlockAction(
   if (!freshNode) return
 
   const { pos, node } = { pos: info.pos, node: freshNode }
+
+  if (
+    BLOCK_MUTATION_ACTIONS.has(action) &&
+    blockOverlapsProtectedZone(view, pos, node.nodeSize)
+  ) {
+    return
+  }
 
   const insertAfter = (newNode: PMNode) => {
     const insertPos = pos + node.nodeSize

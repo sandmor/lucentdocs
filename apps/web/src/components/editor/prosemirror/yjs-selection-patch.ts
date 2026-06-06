@@ -13,6 +13,11 @@ interface RelativeSelectionSnapshot {
   head: unknown
 }
 
+interface AbsoluteSelectionSnapshot {
+  anchor: number
+  head: number
+}
+
 interface YSyncBindingPatchTarget {
   prosemirrorView: EditorView | null
   beforeTransactionSelection: RelativeSelectionSnapshot | null
@@ -23,12 +28,15 @@ interface YSyncBindingPatchTarget {
   __lucentdocsSelectionPatchApplied?: boolean
 }
 
-function getRelativeSelectionFromDOM(
-  binding: YSyncBindingPatchTarget
-): RelativeSelectionSnapshot | null {
-  const view = binding.prosemirrorView
-  if (!view) return null
+let pendingAbsoluteSelectionBeforeRemoteTx: AbsoluteSelectionSnapshot | null = null
 
+export function consumeAbsoluteSelectionSnapshotBeforeRemoteTx(): AbsoluteSelectionSnapshot | null {
+  const snapshot = pendingAbsoluteSelectionBeforeRemoteTx
+  pendingAbsoluteSelectionBeforeRemoteTx = null
+  return snapshot
+}
+
+function getAbsoluteSelectionFromDOM(view: EditorView): AbsoluteSelectionSnapshot | null {
   const domSelection = getViewRootSelection(view)
   if (
     !domSelection ||
@@ -46,22 +54,35 @@ function getRelativeSelectionFromDOM(
   try {
     const anchor = view.posAtDOM(domSelection.anchorNode, domSelection.anchorOffset, 1)
     const head = view.posAtDOM(domSelection.focusNode, domSelection.focusOffset, -1)
-
-    return {
-      type: (view.state.selection as typeof view.state.selection & { jsonID: string }).jsonID,
-      anchor: absolutePositionToRelativePosition(
-        anchor,
-        binding.type as never,
-        binding.mapping as never
-      ),
-      head: absolutePositionToRelativePosition(
-        head,
-        binding.type as never,
-        binding.mapping as never
-      ),
-    }
+    return { anchor, head }
   } catch {
     return null
+  }
+}
+
+function getRelativeSelectionFromDOM(
+  binding: YSyncBindingPatchTarget
+): RelativeSelectionSnapshot | null {
+  const view = binding.prosemirrorView
+  if (!view) return null
+
+  const absolute = getAbsoluteSelectionFromDOM(view)
+  if (!absolute) return null
+
+  pendingAbsoluteSelectionBeforeRemoteTx = absolute
+
+  return {
+    type: (view.state.selection as typeof view.state.selection & { jsonID: string }).jsonID,
+    anchor: absolutePositionToRelativePosition(
+      absolute.anchor,
+      binding.type as never,
+      binding.mapping as never
+    ),
+    head: absolutePositionToRelativePosition(
+      absolute.head,
+      binding.type as never,
+      binding.mapping as never
+    ),
   }
 }
 
@@ -92,12 +113,24 @@ export function installYjsSelectionPatch(state: EditorState): void {
       return
     }
 
-    binding.beforeTransactionSelection =
-      getRelativeSelectionFromDOM(binding) ??
-      getRelativeSelection(
-        binding as Parameters<typeof getRelativeSelection>[0],
-        binding.prosemirrorView.state
-      )
+    const relativeFromDom = getRelativeSelectionFromDOM(binding)
+    if (relativeFromDom) {
+      binding.beforeTransactionSelection = relativeFromDom
+      return
+    }
+
+    const view = binding.prosemirrorView
+    if (view) {
+      pendingAbsoluteSelectionBeforeRemoteTx = {
+        anchor: view.state.selection.anchor,
+        head: view.state.selection.head,
+      }
+    }
+
+    binding.beforeTransactionSelection = getRelativeSelection(
+      binding as Parameters<typeof getRelativeSelection>[0],
+      binding.prosemirrorView.state
+    )
   }
 
   binding._isLocalCursorInView = () => false

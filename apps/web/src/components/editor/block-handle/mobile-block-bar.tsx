@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { ActiveBlockInfo, BlockActionId } from '../prosemirror/block-resolve'
 import { canMoveBlockDown, canMoveBlockUp } from '../prosemirror/block-resolve'
+import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import { handleBlockAction } from '../prosemirror/block-actions'
 import {
   insertBlockMenuItems,
@@ -44,8 +45,14 @@ export function MobileBlockBar({
   const [expandPanel, setExpandPanel] = useState<ExpandPanel>(null)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const { doc } = view.state
-  const canMoveUp = canMoveBlockUp(doc, activeBlock.pos)
-  const canMoveDown = canMoveBlockDown(doc, activeBlock.pos, activeBlock.node.nodeSize)
+  const blockProtected = blockOverlapsProtectedZone(
+    view,
+    activeBlock.pos,
+    activeBlock.node.nodeSize
+  )
+  const canMoveUp = !blockProtected && canMoveBlockUp(doc, activeBlock.pos)
+  const canMoveDown =
+    !blockProtected && canMoveBlockDown(doc, activeBlock.pos, activeBlock.node.nodeSize)
 
   const runAction = useCallback(
     (action: BlockActionId) => {
@@ -153,6 +160,7 @@ export function MobileBlockBar({
             className="ai-inline-mobile-block-bar__btn"
             aria-label="Turn block into"
             aria-expanded={expandPanel === 'turn-into'}
+            disabled={blockProtected}
             onPointerDown={preventFocusSteal}
             onClick={() => togglePanel('turn-into')}
           >
@@ -189,6 +197,7 @@ export function MobileBlockBar({
                   key={item.id}
                   item={item}
                   block={activeBlock}
+                  view={view}
                   onAction={runAction}
                 />
               ))}
@@ -202,6 +211,7 @@ export function MobileBlockBar({
           title="Insert below"
           items={insertBlockMenuItems}
           block={activeBlock}
+          view={view}
           onAction={runAction}
         />
       ) : null}
@@ -211,6 +221,7 @@ export function MobileBlockBar({
           title="Turn into"
           items={turnIntoBlockMenuItems}
           block={activeBlock}
+          view={view}
           onAction={runAction}
           showChecked
         />
@@ -223,12 +234,14 @@ function MobileBlockExpandPanel({
   title,
   items,
   block,
+  view,
   onAction,
   showChecked = false,
 }: {
   title: string
   items: BlockMenuItem[]
   block: ActiveBlockInfo
+  view: EditorView
   onAction: (action: BlockActionId) => void
   showChecked?: boolean
 }) {
@@ -238,7 +251,7 @@ function MobileBlockExpandPanel({
       <div className="ai-inline-mobile-block-expand__list">
         {items.map((item) => {
           const Icon = item.icon
-          const enabled = isBlockMenuItemEnabled(item, block)
+          const enabled = isBlockMenuItemEnabled(item, block, view)
           const checked = showChecked && isBlockMenuItemChecked(item, block)
 
           return (
@@ -264,14 +277,16 @@ function MobileBlockExpandPanel({
 function MobileBlockMenuItem({
   item,
   block,
+  view,
   onAction,
 }: {
   item: BlockMenuItem
   block: ActiveBlockInfo
+  view: EditorView
   onAction: (action: BlockActionId) => void
 }) {
   const Icon = item.icon
-  const enabled = isBlockMenuItemEnabled(item, block)
+  const enabled = isBlockMenuItemEnabled(item, block, view)
 
   return (
     <DropdownMenuItem
