@@ -1,7 +1,7 @@
 import * as Y from 'yjs'
 import {
   prosemirrorJSONToYXmlFragment,
-  yXmlFragmentToProsemirrorJSON,
+  yXmlFragmentToProseMirrorRootNode,
 } from 'y-prosemirror'
 import {
   noteRecordToSnapshot,
@@ -49,7 +49,7 @@ export function serializeNotesMap(doc: Y.Doc): SerializedNoteFromYjs[] {
       id: typeof value.get('id') === 'string' ? (value.get('id') as string) : noteId,
       blockId,
       placement: placement as NotePlacement,
-      content: yXmlFragmentToProsemirrorJSON(body) as JsonObject,
+      content: yXmlFragmentToProseMirrorRootNode(body, noteSchema).toJSON() as JsonObject,
       authorUserId,
       createdAt: typeof value.get('createdAt') === 'number' ? (value.get('createdAt') as number) : Date.now(),
       updatedAt: typeof value.get('updatedAt') === 'number' ? (value.get('updatedAt') as number) : Date.now(),

@@ -1,5 +1,5 @@
 import type { Command } from 'prosemirror-state'
-import { undo as yUndo, redo as yRedo } from 'y-prosemirror'
+import { undoCommand as yUndo, redoCommand as yRedo } from 'y-prosemirror'
 import { canUndoSessionTurn } from '@lucentdocs/shared'
 import { toast } from 'sonner'
 import { hasStreamingAIZone } from './ai-zone-protection'

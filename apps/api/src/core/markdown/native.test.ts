@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as Y from 'yjs'
-import { yDocToProsemirrorJSON } from 'y-prosemirror'
+import { yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
+import { schema } from '@lucentdocs/shared'
 import { createSqliteAdapter } from '../../infrastructure/sqlite/factory.js'
 import {
   markdownToProseMirrorDoc,
@@ -28,16 +29,19 @@ function normalizePmJson(value: unknown): unknown {
   const input = value as Record<string, unknown>
   const out: Record<string, unknown> = {}
 
-  for (const [key, child] of Object.entries(input)) {
+  for (const key of Object.keys(input).sort()) {
+    const child = input[key]
     const normalizedChild = normalizePmJson(child)
 
     if (key === 'attrs') {
-      if (
-        normalizedChild &&
-        typeof normalizedChild === 'object' &&
-        !Array.isArray(normalizedChild) &&
-        Object.keys(normalizedChild as Record<string, unknown>).length === 0
-      ) {
+      if (normalizedChild && typeof normalizedChild === 'object' && !Array.isArray(normalizedChild)) {
+        const attrs = { ...(normalizedChild as Record<string, unknown>) }
+        if (attrs.tight === true) delete attrs.tight
+        const filtered = Object.fromEntries(
+          Object.entries(attrs).filter(([, value]) => value != null)
+        )
+        if (Object.keys(filtered).length === 0) continue
+        out[key] = filtered
         continue
       }
     }
@@ -225,7 +229,7 @@ describe('runNativeMassImportSqlite', () => {
       const ydoc = new Y.Doc()
       try {
         Y.applyUpdate(ydoc, new Uint8Array(persisted))
-        const fromYjs = yDocToProsemirrorJSON(ydoc)
+        const fromYjs = yXmlFragmentToProseMirrorRootNode(ydoc.getXmlFragment('prosemirror'), schema).toJSON()
         expect(normalizePmJson(fromYjs)).toEqual(normalizePmJson(parsed.value))
       } finally {
         ydoc.destroy()
@@ -272,7 +276,7 @@ describe('runNativeMassImportSqlite', () => {
       const ydoc = new Y.Doc()
       try {
         Y.applyUpdate(ydoc, new Uint8Array(persisted))
-        const fromYjs = yDocToProsemirrorJSON(ydoc)
+        const fromYjs = yXmlFragmentToProseMirrorRootNode(ydoc.getXmlFragment('prosemirror'), schema).toJSON()
         expect(normalizePmJson(fromYjs)).toEqual(normalizePmJson(parsed.value))
       } finally {
         ydoc.destroy()

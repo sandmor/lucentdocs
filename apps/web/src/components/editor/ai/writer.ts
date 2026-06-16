@@ -557,7 +557,7 @@ export function createAIWriterController(
     toast.message(`Reverted ${getCollaboratorDisplayName(requester)}'s AI suggestion.`)
   }
 
-  async function undoSessionTurn(view: EditorView, sessionId: string): Promise<void> {
+  async function undoSessionTurn(_view: EditorView, sessionId: string): Promise<void> {
     const toolScope = getToolScope()
     if (!toolScope.projectId || !toolScope.documentId) return
 
@@ -580,7 +580,7 @@ export function createAIWriterController(
     }
   }
 
-  async function redoSessionTurn(view: EditorView, sessionId: string): Promise<void> {
+  async function redoSessionTurn(_view: EditorView, sessionId: string): Promise<void> {
     const toolScope = getToolScope()
     if (!toolScope.projectId || !toolScope.documentId) return
 
@@ -598,7 +598,7 @@ export function createAIWriterController(
     }
   }
 
-  async function restoreAcceptedSession(view: EditorView, sessionId: string): Promise<void> {
+  async function restoreAcceptedSession(_view: EditorView, sessionId: string): Promise<void> {
     const toolScope = getToolScope()
     if (!toolScope.projectId || !toolScope.documentId) return
 

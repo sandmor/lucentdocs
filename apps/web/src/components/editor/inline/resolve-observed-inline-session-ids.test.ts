@@ -18,6 +18,8 @@ function aiState(overrides: Partial<AIWriterState> = {}): AIWriterState {
     originalFrom: null,
     originalSelectionFrom: null,
     originalSelectionTo: null,
+    preGenerationAnchor: null,
+    userPlacedCaretInZone: false,
     zones: [],
     ...overrides,
   }

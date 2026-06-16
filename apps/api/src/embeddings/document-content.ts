@@ -1,6 +1,6 @@
 import * as Y from 'yjs'
-import { yDocToProsemirrorJSON } from 'y-prosemirror'
-import { createDefaultContent } from '@lucentdocs/shared'
+import { yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
+import { createDefaultContent, schema } from '@lucentdocs/shared'
 import type { RepositorySet } from '../core/ports/types.js'
 
 /**
@@ -16,7 +16,9 @@ export async function readDocumentContentSnapshot(
   const doc = new Y.Doc()
   try {
     Y.applyUpdate(doc, new Uint8Array(yjsData))
-    return JSON.stringify(yDocToProsemirrorJSON(doc))
+    return JSON.stringify(
+      yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON()
+    )
   } finally {
     doc.destroy()
   }

@@ -16,11 +16,11 @@ import {
   isPathInsideDirectory,
   directoryPathFromSentinel,
   toDirectorySentinelPath,
-  isJsonObject,
   computeDocumentCounters,
+  schema,
 } from '@lucentdocs/shared'
 import { markdownToProseMirrorDoc } from '../markdown/native.js'
-import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
+import { yXmlFragmentToProseMirrorRootNode, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import { docs } from '@y/websocket-server/utils'
 import { notesMapToRecords, snapshotsFromRecords } from '../../yjs/document-notes.js'
 import type { RepositorySet } from '../../core/ports/types.js'
@@ -450,7 +450,11 @@ export function createDocumentsService(
   const getDocumentContent = async (id: string): Promise<string> => {
     const liveDoc = docs.get(id)
     if (liveDoc) {
-      return JSON.stringify(ensureBlockIds(yDocToProsemirrorJSON(liveDoc) as JsonObject))
+      return JSON.stringify(
+        ensureBlockIds(
+          yXmlFragmentToProseMirrorRootNode(liveDoc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+        )
+      )
     }
 
     const canonical = await repos.documentContent.findByDocumentId(id)
@@ -462,7 +466,11 @@ export function createDocumentsService(
     if (persisted) {
       const doc = new Y.Doc()
       Y.applyUpdate(doc, new Uint8Array(persisted))
-      const content = JSON.stringify(ensureBlockIds(yDocToProsemirrorJSON(doc) as JsonObject))
+      const content = JSON.stringify(
+        ensureBlockIds(
+          yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+        )
+      )
       doc.destroy()
       return content
     }
@@ -1249,7 +1257,9 @@ export function createDocumentsService(
       let bundle
       if (liveDoc) {
         bundle = {
-          doc: ensureBlockIds(yDocToProsemirrorJSON(liveDoc) as JsonObject),
+          doc: ensureBlockIds(
+            yXmlFragmentToProseMirrorRootNode(liveDoc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+          ),
           notes: snapshotsFromRecords(notesMapToRecords(id, liveDoc)),
         }
       } else {

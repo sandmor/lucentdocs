@@ -5,7 +5,6 @@ import type { VersionSnapshotsRepositoryPort } from '../core/ports/versionSnapsh
 import type { DocumentContentRepositoryPort } from '../core/ports/documentContent.port.js'
 import type { DocumentNotesRepositoryPort } from '../core/ports/documentNotes.port.js'
 import {
-  yDocToProsemirrorJSON,
   prosemirrorJSONToYDoc,
   updateYFragment,
   yXmlFragmentToProseMirrorRootNode,
@@ -125,7 +124,9 @@ export class YjsRuntime {
     // the most recent edits even before they've been flushed to the canonical store.
     if (this.#initializedDocs.has(documentName) && docs.has(documentName)) {
       const doc = getYDoc(documentName)
-      return ensureBlockIds(yDocToProsemirrorJSON(doc) as JsonObject)
+      return ensureBlockIds(
+        yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+      )
     }
 
     // Doc not in memory — fall back to canonical store if available (avoids loading Yjs
@@ -138,7 +139,9 @@ export class YjsRuntime {
     // Last resort: cold-load from Yjs (handles legacy blobs before migration).
     await this.ensureDocumentLoaded(documentName)
     const doc = getYDoc(documentName)
-    return ensureBlockIds(yDocToProsemirrorJSON(doc) as JsonObject)
+    return ensureBlockIds(
+      yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+    )
   }
 
   async replaceLiveDocumentContent(
@@ -380,7 +383,9 @@ export class YjsRuntime {
     const liveDoc = doc ?? docs.get(documentName)
     if (liveDoc) {
       return {
-        doc: ensureBlockIds(yDocToProsemirrorJSON(liveDoc) as JsonObject),
+        doc: ensureBlockIds(
+          yXmlFragmentToProseMirrorRootNode(liveDoc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+        ),
         notes: snapshotsFromRecords(notesMapToRecords(documentName, liveDoc)),
       }
     }
@@ -437,7 +442,9 @@ export class YjsRuntime {
   async #persistDocumentState(documentName: string, doc: Y.Doc): Promise<void> {
     if (!this.#isCurrentDocumentInstance(documentName, doc)) return
 
-    const prosemirrorJson = ensureBlockIds(yDocToProsemirrorJSON(doc) as JsonObject)
+    const prosemirrorJson = ensureBlockIds(
+      yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+    )
     const noteRecords = notesMapToRecords(documentName, doc)
     const now = Date.now()
 

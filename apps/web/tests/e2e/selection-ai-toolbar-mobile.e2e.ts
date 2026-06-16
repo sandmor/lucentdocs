@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createProject, selectEditorText } from './helpers/inline-ai'
+import { createProject, openSelectionAskAI, selectEditorText } from './helpers/inline-ai'
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -31,14 +31,15 @@ test('mobile uses bottom dock for selection and zone controls without auto repla
     })
     .not.toBe('0px')
 
-  await selectionToolbar.locator('textarea').fill('Rewrite for mobile')
+  await openSelectionAskAI(selectionToolbar)
+  await selectionToolbar.locator('textarea').fill('Make this more cosmic')
   await selectionToolbar.getByRole('button', { name: 'Rewrite' }).click()
 
   const zoneControls = page.locator('.ai-writer-floating-controls[data-state="review"]')
-  await expect(zoneControls).toBeVisible()
+  await expect(zoneControls).toBeVisible({ timeout: 20_000 })
   await zoneControls.locator('[data-action="accept"]').click({ force: true })
 
-  await expect(editor).toContainText('Hello world')
+  await expect(editor).toContainText(/Hello\s*spark/)
 
   await expect
     .poll(async () => {

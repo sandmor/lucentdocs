@@ -27,10 +27,10 @@ describe('block id toDOM', () => {
   test('sets data-block-id only when block has an id', () => {
     const withId = schema.nodes.paragraph.spec.toDOM!(
       schema.nodes.paragraph.create({ id: 'test-block-id' })
-    ) as unknown[]
+    ) as unknown as unknown[]
     const withoutId = schema.nodes.paragraph.spec.toDOM!(
       schema.nodes.paragraph.create({ id: null })
-    ) as unknown[]
+    ) as unknown as unknown[]
 
     expect((withId[1] as Record<string, unknown>)['data-block-id']).toBe('test-block-id')
     expect(withoutId[1] === 0 || withoutId[1] === undefined).toBe(true)

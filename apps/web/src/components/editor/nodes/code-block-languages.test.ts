@@ -34,7 +34,7 @@ describe('getLanguagePickerOptions', () => {
     expect(options.filter((option) => option.value === 'not-a-real-language')).toEqual([
       {
         value: 'not-a-real-language',
-        label: 'Not-a-real-language',
+        label: 'Not A Real Language',
         unsupported: true,
       },
     ])
@@ -66,10 +66,10 @@ describe('toPickerValue', () => {
 })
 
 describe('getBundledLanguages', () => {
-  test('includes alias ids that are filtered out of the picker', () => {
+  test('includes canonical ids that are filtered out of the picker', () => {
     const bundled = getBundledLanguages()
 
-    expect(bundled).toContain('py')
     expect(bundled).toContain('python')
+    expect(bundled).not.toContain('py')
   })
 })

@@ -66,8 +66,9 @@ describe('getProtectionRangesForZones', () => {
       plugins: [createAIWriterPlugin(noopHandlers)],
     })
 
-    const zone = aiWriterPluginKey.getState(state)?.zones[0]!
-    expect(aiWriterPluginKey.getState(state)?.zones).toHaveLength(1)
+    const zones = aiWriterPluginKey.getState(state)?.zones ?? []
+    expect(zones).toHaveLength(1)
+    const zone = zones[0] as AIZone
     expect(zone.segments).toHaveLength(2)
     expect(zone.nodeFrom).toBeLessThan(zone.segments[0]!.nodeTo)
     expect(zone.nodeTo).toBeGreaterThan(zone.segments[0]!.nodeTo)
@@ -90,7 +91,9 @@ describe('getProtectionRangesForZones', () => {
       doc: createMultiSegmentZoneDoc(),
       plugins: [createAIWriterPlugin(noopHandlers)],
     })
-    const zone = aiWriterPluginKey.getState(state)?.zones[0]!
+    const zones = aiWriterPluginKey.getState(state)?.zones ?? []
+    expect(zones).toHaveLength(1)
+    const zone = zones[0] as AIZone
     const ranges = getProtectionRangesForZones(state.doc, [zone])
 
     let codeBlockFrom = -1
@@ -141,7 +144,7 @@ describe('createAIWriterPlugin zone collection', () => {
         getProtectedZoneRangesFromZones(state.doc, pluginZones)
       )
     ).toBe(false)
-    expect(plugin.filterTransaction?.(tr, state)).not.toBe(false)
+    expect(plugin.spec.filterTransaction?.(tr, state)).not.toBe(false)
     expect(zone!.segments).toHaveLength(2)
 
     const next = state.apply(tr)

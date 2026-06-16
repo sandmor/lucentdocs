@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { docs } from '@y/websocket-server/utils'
 import * as Y from 'yjs'
-import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
+import { yXmlFragmentToProseMirrorRootNode, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import { schema } from '@lucentdocs/shared'
 import { createYjsRuntime, type YjsRuntime } from './runtime.js'
 import { createSqliteAdapter, type SqliteAdapter } from '../infrastructure/sqlite/factory.js'
@@ -211,7 +211,7 @@ describe('DocumentsService YJS operations', () => {
     yjsRuntime.evictLiveDocument(doc.id)
     await yjsRuntime.ensureDocumentLoaded(doc.id)
     const liveDoc = docs.get(doc.id)!
-    const json = yDocToProsemirrorJSON(liveDoc) as {
+    const json = yXmlFragmentToProseMirrorRootNode(liveDoc.getXmlFragment('prosemirror'), schema).toJSON() as {
       content?: Array<{ content?: Array<{ text?: string }> }>
     }
     expect(json.content?.[0]?.content?.[0]?.text).toBe('canonical-truth')

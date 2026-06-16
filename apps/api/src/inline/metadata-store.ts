@@ -1,8 +1,9 @@
 import * as Y from 'yjs'
-import { yDocToProsemirrorJSON } from 'y-prosemirror'
+import { yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
 import {
   normalizeInlineZoneSession,
   normalizeInlineZoneSessionMap,
+  schema,
   type InlineZoneSession,
   type JsonObject,
 } from '@lucentdocs/shared'
@@ -240,7 +241,7 @@ export class InlineSessionMetadataStore {
     const ydoc = new Y.Doc()
     try {
       Y.applyUpdate(ydoc, new Uint8Array(yjsData))
-      const json = yDocToProsemirrorJSON(ydoc)
+      const json = yXmlFragmentToProseMirrorRootNode(ydoc.getXmlFragment('prosemirror'), schema).toJSON()
       const sessionIds = new Set<string>()
       collectSessionIdsFromProsemirrorNode(json, sessionIds)
       return sessionIds

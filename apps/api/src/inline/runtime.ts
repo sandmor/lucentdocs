@@ -40,7 +40,6 @@ import {
   getInlineZoneTextFromDoc,
   removeSessionZoneFromDoc,
   restoreAcceptedSessionZoneInDoc,
-  setInlineZoneStreamingInDoc,
 } from './zone-write.js'
 import { getPromptContextForRange, type InlinePromptContextResult } from './context.js'
 
@@ -1217,30 +1216,6 @@ export class InlineRuntime {
       throw new InlineRuntimeError(
         'NOT_FOUND',
         `AI zone for inline session ${scope.sessionId} was not found in document ${scope.documentId}`
-      )
-    }
-  }
-
-  async #setZoneStreaming(
-    scope: InlineScope & { sessionId: string },
-    streaming: boolean,
-    requesterClientName: string
-  ): Promise<void> {
-    const transformed = await this.#yjsRuntime.applyProsemirrorTransform(scope.documentId, {
-      origin: toInlineServerOrigin(requesterClientName),
-      transform: (currentDoc) => {
-        const applied = setInlineZoneStreamingInDoc(currentDoc, scope.sessionId, streaming)
-        return {
-          changed: applied.changed,
-          nextDoc: applied.nextDoc,
-          result: applied,
-        }
-      },
-    })
-
-    if (!transformed.result.zoneFound && streaming) {
-      console.warn(
-        `AI zone for inline session ${scope.sessionId} was not found while setting streaming=${String(streaming)}`
       )
     }
   }
