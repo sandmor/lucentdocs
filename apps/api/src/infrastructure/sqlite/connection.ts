@@ -42,6 +42,27 @@ const SCHEMA = `
     data BLOB NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS document_content (
+    documentId TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS document_notes (
+    id TEXT PRIMARY KEY,
+    documentId TEXT NOT NULL,
+    blockId TEXT NOT NULL,
+    placement TEXT NOT NULL CHECK (placement IN ('before', 'after', 'about')),
+    content TEXT NOT NULL,
+    authorUserId TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_document_notes_document ON document_notes(documentId);
+
   CREATE TABLE IF NOT EXISTS version_snapshots (
     id TEXT PRIMARY KEY,
     documentId TEXT NOT NULL,

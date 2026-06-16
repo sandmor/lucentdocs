@@ -443,6 +443,8 @@ export const documentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
+      // Invalidate in-flight persistence on the old live Y.Doc before writing canonical restore state.
+      ctx.yjsRuntime.bumpDocumentEpoch(input.id)
       const doc = await ctx.services.documents.restoreToSnapshotForProject(
         input.projectId,
         input.id,

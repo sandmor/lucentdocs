@@ -10,6 +10,8 @@ import type { DocumentEmbeddingsRepositoryPort } from './documentEmbeddings.port
 import type { EmbeddingIndexQueueRepositoryPort } from './embeddingIndexQueue.port.js'
 import type { AuthDataRepositoryPort } from './authData.port.js'
 import type { IndexingSettingsRepositoryPort } from './indexingSettings.port.js'
+import type { DocumentContentRepositoryPort } from './documentContent.port.js'
+import type { DocumentNotesRepositoryPort } from './documentNotes.port.js'
 
 export interface RepositorySet {
   projects: ProjectsRepositoryPort
@@ -18,6 +20,8 @@ export interface RepositorySet {
   chats: ChatsRepositoryPort
   versionSnapshots: VersionSnapshotsRepositoryPort
   yjsDocuments: YjsDocumentsRepositoryPort
+  documentContent: DocumentContentRepositoryPort
+  documentNotes: DocumentNotesRepositoryPort
   aiSettings: AiSettingsRepositoryPort
   aiModelSelection: AiModelSelectionRepositoryPort
   indexingSettings: IndexingSettingsRepositoryPort

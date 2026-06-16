@@ -9,6 +9,8 @@ import { ProjectDocumentsRepository } from './projectDocuments.adapter.js'
 import { ChatsRepository } from './chats.adapter.js'
 import { VersionSnapshotsRepository } from './versionSnapshots.adapter.js'
 import { YjsDocumentsRepository } from './yjsDocuments.adapter.js'
+import { DocumentContentRepository } from './documentContent.adapter.js'
+import { DocumentNotesRepository } from './documentNotes.adapter.js'
 import { AiSettingsRepository } from './aiSettings.adapter.js'
 import { AiModelSelectionRepository } from './aiModelSelection.adapter.js'
 import { IndexingSettingsRepository } from './indexingSettings.adapter.js'
@@ -58,6 +60,8 @@ export function createSqliteAdapter(
     chats: new ChatsRepository(connection),
     versionSnapshots: new VersionSnapshotsRepository(connection),
     yjsDocuments: new YjsDocumentsRepository(connection),
+    documentContent: new DocumentContentRepository(connection),
+    documentNotes: new DocumentNotesRepository(connection),
     aiSettings: new AiSettingsRepository(connection),
     aiModelSelection: new AiModelSelectionRepository(connection),
     indexingSettings: new IndexingSettingsRepository(connection),

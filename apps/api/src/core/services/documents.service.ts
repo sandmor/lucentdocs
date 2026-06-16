@@ -6,6 +6,10 @@ import {
   type JsonObject,
   createDefaultContent,
   parseContent,
+  parseVersionSnapshotBundleStrict,
+  serializeVersionSnapshotBundle,
+  ensureBlockIds,
+  noteSnapshotToRecord,
   normalizeDocumentPath,
   isDirectorySentinelPath,
   pathHasSentinelSegment,
@@ -17,6 +21,8 @@ import {
 } from '@lucentdocs/shared'
 import { markdownToProseMirrorDoc } from '../markdown/native.js'
 import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
+import { docs } from '@y/websocket-server/utils'
+import { notesMapToRecords, snapshotsFromRecords } from '../../yjs/document-notes.js'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 import { configManager } from '../../config/runtime.js'
@@ -258,15 +264,6 @@ function resolveUniqueImportPath(requestedPath: string, existingPaths: string[])
   throw new Error('Unable to allocate a unique import path')
 }
 
-function parseJsonObjectContent(value: string): JsonObject | null {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    return isJsonObject(parsed) ? parsed : null
-  } catch {
-    return null
-  }
-}
-
 async function isSoleDocumentForProject(
   repos: RepositorySet,
   projectId: string,
@@ -451,14 +448,26 @@ export function createDocumentsService(
   })
 
   const getDocumentContent = async (id: string): Promise<string> => {
-    const yjsData = await repos.yjsDocuments.getLatest(id)
-    if (!yjsData) return createDefaultContent()
+    const liveDoc = docs.get(id)
+    if (liveDoc) {
+      return JSON.stringify(ensureBlockIds(yDocToProsemirrorJSON(liveDoc) as JsonObject))
+    }
 
-    const doc = new Y.Doc()
-    Y.applyUpdate(doc, new Uint8Array(yjsData))
-    const content = JSON.stringify(yDocToProsemirrorJSON(doc))
-    doc.destroy()
-    return content
+    const canonical = await repos.documentContent.findByDocumentId(id)
+    if (canonical) {
+      return canonical.content
+    }
+
+    const persisted = await repos.yjsDocuments.getPersisted(id)
+    if (persisted) {
+      const doc = new Y.Doc()
+      Y.applyUpdate(doc, new Uint8Array(persisted))
+      const content = JSON.stringify(ensureBlockIds(yDocToProsemirrorJSON(doc) as JsonObject))
+      doc.destroy()
+      return content
+    }
+
+    return JSON.stringify(ensureBlockIds(parseContent(createDefaultContent()).doc))
   }
 
   const getDocumentWithContent = async (id: string): Promise<DocumentWithContent | null> => {
@@ -499,7 +508,8 @@ export function createDocumentsService(
 
     const { schema } = await import('@lucentdocs/shared')
     const parsed = parseContent(docContent)
-    const counters = computeDocumentCounters(parsed.doc)
+    const docJson = ensureBlockIds(parsed.doc)
+    const counters = computeDocumentCounters(docJson)
 
     const doc: Document = {
       id,
@@ -514,7 +524,7 @@ export function createDocumentsService(
       updatedAt: now,
     }
 
-    const ydoc = prosemirrorJSONToYDoc(schema, parsed.doc)
+    const ydoc = prosemirrorJSONToYDoc(schema, docJson)
     const blob = Y.encodeStateAsUpdate(ydoc)
     ydoc.destroy()
     const buffer = Buffer.from(blob)
@@ -522,6 +532,8 @@ export function createDocumentsService(
     await transaction.run(async () => {
       await repos.documents.insert(doc)
       await repos.yjsDocuments.set(id, buffer)
+      await repos.documentContent.upsert(id, docJson, now)
+      await repos.documentNotes.replaceAllForDocument(id, [])
     })
 
     if (options.notifyObserver !== false) {
@@ -1233,17 +1245,32 @@ export function createDocumentsService(
       const doc = await repos.documents.findById(id)
       if (!doc) return null
 
-      const yjsData = await repos.yjsDocuments.getLatest(id)
-      if (!yjsData) return null
-
-      const ydoc = new Y.Doc()
-      Y.applyUpdate(ydoc, new Uint8Array(yjsData))
-      const content = JSON.stringify(yDocToProsemirrorJSON(ydoc))
-      ydoc.destroy()
+      const liveDoc = docs.get(id)
+      let bundle
+      if (liveDoc) {
+        bundle = {
+          doc: ensureBlockIds(yDocToProsemirrorJSON(liveDoc) as JsonObject),
+          notes: snapshotsFromRecords(notesMapToRecords(id, liveDoc)),
+        }
+      } else {
+        const contentRow = await repos.documentContent.findByDocumentId(id)
+        const noteRows = await repos.documentNotes.listByDocumentId(id)
+        bundle = {
+          doc: contentRow
+            ? ensureBlockIds(JSON.parse(contentRow.content) as JsonObject)
+            : ensureBlockIds(parseContent(createDefaultContent()).doc),
+          notes: snapshotsFromRecords(noteRows),
+        }
+      }
 
       const snapshotId = nanoid()
       const createdAt = Date.now()
-      await repos.versionSnapshots.insert({ id: snapshotId, documentId: id, content, createdAt })
+      await repos.versionSnapshots.insert({
+        id: snapshotId,
+        documentId: id,
+        content: serializeVersionSnapshotBundle(bundle),
+        createdAt,
+      })
 
       return { id: snapshotId, documentId: id, createdAt }
     },
@@ -1280,13 +1307,10 @@ export function createDocumentsService(
       const snapshot = await repos.versionSnapshots.findCursorById(documentId, snapshotId)
       if (!snapshot) return null
 
-      const content = parseJsonObjectContent(snapshot.content)
-      if (!content) return null
-
-      const { schema } = await import('@lucentdocs/shared')
-      const replacementDoc = prosemirrorJSONToYDoc(schema, content)
-      const replacementState = Y.encodeStateAsUpdate(replacementDoc)
-      replacementDoc.destroy()
+      const bundle = parseVersionSnapshotBundleStrict(snapshot.content)
+      if (!bundle) return null
+      const docJson = ensureBlockIds(bundle.doc)
+      const noteRecords = bundle.notes.map((note) => noteSnapshotToRecord(documentId, note))
 
       const restoredAt = Date.now()
 
@@ -1296,7 +1320,9 @@ export function createDocumentsService(
           snapshot.createdAt,
           snapshot.rowId
         )
-        await repos.yjsDocuments.set(documentId, Buffer.from(replacementState))
+        await repos.documentContent.upsert(documentId, docJson, restoredAt)
+        await repos.documentNotes.replaceAllForDocument(documentId, noteRecords)
+        await repos.yjsDocuments.delete(documentId)
         await repos.documents.update(documentId, { updatedAt: restoredAt })
       })
 
@@ -1305,7 +1331,7 @@ export function createDocumentsService(
       return {
         ...doc,
         updatedAt: restoredAt,
-        content: JSON.stringify(content),
+        content: JSON.stringify(docJson),
       }
     },
 

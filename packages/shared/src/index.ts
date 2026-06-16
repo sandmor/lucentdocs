@@ -5,7 +5,30 @@ export { computeDocumentCounters, type DocumentCounters } from './document-count
 export { isJsonObject } from './json.js'
 export { isValidId, authPasswordSchema } from './validators.js'
 export { schema } from './schema.js'
-export { parseContent, createDefaultContent } from './content.js'
+export { noteSchema } from './note-schema.js'
+export { parseContent, createDefaultContent, parseVersionSnapshotBundle, parseVersionSnapshotBundleStrict, serializeVersionSnapshotBundle } from './content.js'
+export {
+  ensureBlockIds,
+  BLOCK_ID_ATTR,
+  BLOCK_ID_NODE_TYPES,
+  collectTopLevelBlockIds,
+  mergeBlockIdIntoDomAttrs,
+  readBlockIdFromDom,
+} from './block-id.js'
+export type {
+  DocumentNoteRecord,
+  DocumentNoteSnapshot,
+  VersionSnapshotBundle,
+  NotePlacement,
+} from './document-notes.js'
+export {
+  NOTE_PLACEMENTS,
+  createDefaultNoteBody,
+  parseNoteBodyContent,
+  serializeNoteBody,
+  noteRecordToSnapshot,
+  noteSnapshotToRecord,
+} from './document-notes.js'
 export {
   proseMirrorDocToMarkdown,
   lucentMarkdownSerializer,

@@ -115,6 +115,8 @@ export async function createContainer(
     {
       yjsDocuments: adapter.repositories.yjsDocuments,
       versionSnapshots: adapter.repositories.versionSnapshots,
+      documentContent: adapter.repositories.documentContent,
+      documentNotes: adapter.repositories.documentNotes,
     },
     yjsConfig,
     {

@@ -3,32 +3,46 @@ import {
   EDITOR_SIDE_GUTTER_OFFSET,
   computeLeftGutterContainerX,
   computeLeftGutterViewportX,
+  computeRightGutterContainerX,
+  stackSideElements,
 } from './layout'
 
-function rect(left: number): DOMRect {
-  return { left } as DOMRect
+function rect(left: number, right = left + 200): DOMRect {
+  return { left, right } as DOMRect
 }
 
-describe('computeLeftGutterViewportX', () => {
-  test('places element right edge offset px left of editor content', () => {
+describe('gutter layout', () => {
+  test('left gutter positions are editor-relative', () => {
     expect(computeLeftGutterViewportX(rect(200), 40)).toBe(200 - EDITOR_SIDE_GUTTER_OFFSET - 40)
-  })
-
-  test('respects custom offset', () => {
     expect(computeLeftGutterViewportX(rect(100), 10, 20)).toBe(100 - 20 - 10)
-  })
-})
-
-describe('computeLeftGutterContainerX', () => {
-  test('matches legacy search marker left when element width is zero', () => {
     expect(computeLeftGutterContainerX(rect(300), rect(50), 0)).toBe(
       300 - 50 - EDITOR_SIDE_GUTTER_OFFSET
     )
-  })
-
-  test('offsets by element width for wider gutter controls', () => {
     expect(computeLeftGutterContainerX(rect(300), rect(50), 40)).toBe(
       300 - 50 - EDITOR_SIDE_GUTTER_OFFSET - 40
     )
+  })
+
+  test('right gutter positions are editor-relative', () => {
+    expect(computeRightGutterContainerX(rect(300, 500), rect(50))).toBe(
+      500 - 50 + EDITOR_SIDE_GUTTER_OFFSET
+    )
+  })
+})
+
+describe('stackSideElements', () => {
+  test('pushes overlapping items downward', () => {
+    const positions = stackSideElements(
+      [
+        { id: 'a', desiredTop: 10, height: 40 },
+        { id: 'b', desiredTop: 20, height: 30 },
+        { id: 'c', desiredTop: 100, height: 20 },
+      ],
+      8
+    )
+
+    expect(positions.get('a')).toBe(10)
+    expect(positions.get('b')).toBe(58)
+    expect(positions.get('c')).toBe(100)
   })
 })

@@ -1,9 +1,10 @@
 import { z } from 'zod'
 import { authPasswordSchema } from '@lucentdocs/shared'
-import { adminProcedure, publicProcedure, router } from '../index.js'
+import { adminProcedure, protectedProcedure, publicProcedure, router } from '../index.js'
 import { TRPCError } from '@trpc/server'
 import { readSessionToken, setSessionCookie, clearSessionCookie } from '../../http/auth.js'
 import type { Request } from 'express'
+import { canUserAccessProject } from '../../core/models/project-access.js'
 
 export const authLoginSchema = z.object({
   email: z.email(),
@@ -38,6 +39,11 @@ const invitationIdSchema = z.object({
 
 const userIdSchema = z.object({
   userId: z.string().min(1),
+})
+
+const resolveUsersSchema = z.object({
+  userIds: z.array(z.string().min(1)),
+  projectId: z.string().min(1).optional(),
 })
 
 function requireHttpRequest(req: Request | undefined): Request {
@@ -131,6 +137,40 @@ export const authRouter = router({
   getUser: adminProcedure.input(userIdSchema).query(async ({ ctx, input }) => {
     const users = await ctx.services.auth.listUsers()
     return users.find((user) => user.id === input.userId) ?? null
+  }),
+
+  resolveUsers: protectedProcedure.input(resolveUsersSchema).query(async ({ ctx, input }) => {
+    const uniqueIds = [...new Set(input.userIds)]
+    const resolved: Array<{ id: string; name: string }> = []
+
+    let projectOwnerId: string | null = null
+    if (input.projectId) {
+      const project = await ctx.services.projects.getById(input.projectId)
+      if (project && canUserAccessProject(ctx.user, project)) {
+        projectOwnerId = project.ownerUserId
+      }
+    }
+
+    for (const userId of uniqueIds) {
+      if (userId === ctx.user.id) {
+        resolved.push({ id: ctx.user.id, name: ctx.user.name })
+        continue
+      }
+
+      const user = await ctx.authPort.getUserById(userId)
+      if (!user) continue
+
+      if (ctx.user.role === 'admin') {
+        resolved.push({ id: user.id, name: user.name })
+        continue
+      }
+
+      if (user.role === 'admin' || userId === projectOwnerId) {
+        resolved.push({ id: user.id, name: user.name })
+      }
+    }
+
+    return resolved
   }),
 
   deleteUser: adminProcedure.input(userIdSchema).mutation(async ({ ctx, input }) => {

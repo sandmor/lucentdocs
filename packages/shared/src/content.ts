@@ -1,4 +1,10 @@
 import type { JsonObject } from './json.js'
+import {
+  parseVersionSnapshotBundle,
+  parseVersionSnapshotBundleStrict,
+  serializeVersionSnapshotBundle,
+  type VersionSnapshotBundle,
+} from './document-notes.js'
 
 const DEFAULT_DOC = { type: 'doc', content: [{ type: 'paragraph' }] } as const
 
@@ -55,3 +61,6 @@ export function parseContent(content: string | null | undefined): PersistedEdito
 export function createDefaultContent(): string {
   return JSON.stringify({ doc: DEFAULT_DOC, aiDraft: null })
 }
+
+export { parseVersionSnapshotBundle, parseVersionSnapshotBundleStrict, serializeVersionSnapshotBundle }
+export type { VersionSnapshotBundle }

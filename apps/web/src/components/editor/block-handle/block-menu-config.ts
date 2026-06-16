@@ -2,6 +2,7 @@ import {
   Check,
   Code2,
   Copy,
+  MessageSquareText,
   MoreHorizontal,
   Pilcrow,
   Plus,
@@ -65,6 +66,11 @@ export const turnIntoBlockMenuItems: BlockMenuItem[] = [
 ]
 
 export const moreBlockMenuItems: BlockMenuItem[] = [
+  {
+    id: 'add-note',
+    label: 'Add note',
+    icon: MessageSquareText,
+  },
   {
     id: 'duplicate',
     label: 'Duplicate',

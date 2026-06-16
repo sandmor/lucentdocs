@@ -8,6 +8,7 @@ export interface YjsProviderResult {
   doc: Y.Doc
   provider: WebsocketProvider
   type: Y.XmlFragment
+  notes: Y.Map<unknown>
   awareness: WebsocketProvider['awareness']
   isConnected: () => boolean
   isSynced: () => boolean
@@ -22,6 +23,7 @@ export function createYjsProvider(
 ): YjsProviderResult {
   const doc = new Y.Doc()
   const type = doc.getXmlFragment('prosemirror')
+  const notes = doc.getMap('notes')
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const wsUrl = `${protocol}//${window.location.host}/api/yjs`
@@ -50,6 +52,8 @@ export function createYjsProvider(
 
   provider.on('connection-close', (event: CloseEvent | null) => {
     if (event?.code === YJS_RESTORE_CLOSE_CODE) {
+      provider.shouldConnect = false
+      provider.disconnect()
       onRestoreReset?.()
     }
   })
@@ -64,6 +68,7 @@ export function createYjsProvider(
     doc,
     provider,
     type,
+    notes,
     awareness: provider.awareness,
     isConnected: () => provider.wsconnected,
     isSynced: () => provider.synced,

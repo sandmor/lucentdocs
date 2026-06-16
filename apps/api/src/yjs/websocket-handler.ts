@@ -64,9 +64,15 @@ export function setupYjsWebSocket(
         }
 
         const repos = runtime.getRepos()
-        const yjsData = await repos.yjsDocuments.getPersisted(documentId)
+        // Canonical existence is the persisted ProseMirror content, not the Yjs blob.
+        // The blob is a regenerable cache that is deleted on restore; relying on it here
+        // would reject every reconnection after a restore (regenerated only on load).
+        const [yjsData, contentRow] = await Promise.all([
+          repos.yjsDocuments.getPersisted(documentId),
+          repos.documentContent.findByDocumentId(documentId),
+        ])
 
-        if (!yjsData) {
+        if (!yjsData && !contentRow) {
           socket.destroy()
           return
         }

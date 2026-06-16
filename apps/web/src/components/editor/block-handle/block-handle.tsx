@@ -33,11 +33,15 @@ import {
   turnIntoBlockMenuItems,
   type BlockMenuItem,
 } from './block-menu-config'
+import { addNoteForBlock } from '../notes/note-actions'
 import type { BlockActionId } from '../prosemirror/block-resolve'
+import type * as Y from 'yjs'
 
 interface BlockHandleProps {
   view: EditorView | null
   container: HTMLElement | null
+  notesMap?: Y.Map<unknown> | null
+  noteCreatorUserId: string
 }
 
 interface HandleSnapshot {
@@ -46,7 +50,7 @@ interface HandleSnapshot {
   height: number
 }
 
-export function BlockHandle({ view, container }: BlockHandleProps) {
+export function BlockHandle({ view, container, notesMap, noteCreatorUserId }: BlockHandleProps) {
   const isCoarsePointer = useIsCoarsePointer()
   const [activeBlock, setActiveBlock] = useState<ActiveBlockInfo | null>(null)
   const [lastActiveBlock, setLastActiveBlock] = useState<ActiveBlockInfo | null>(null)
@@ -323,13 +327,19 @@ export function BlockHandle({ view, container }: BlockHandleProps) {
   const runAction = useCallback(
     (action: BlockActionId) => {
       if (!view || !effectiveBlock) return
+      if (action === 'add-note') {
+        if (!notesMap) return
+        addNoteForBlock(view, effectiveBlock, notesMap, noteCreatorUserId)
+        setMenuOpen(null)
+        return
+      }
       handleBlockAction(view, action, effectiveBlock)
       setMenuOpen(null)
       if (action === 'delete') {
         clearHandleState()
       }
     },
-    [view, effectiveBlock, clearHandleState]
+    [view, effectiveBlock, clearHandleState, notesMap, noteCreatorUserId]
   )
 
   const onGripMouseDown = () => {

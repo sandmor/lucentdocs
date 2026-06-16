@@ -21,6 +21,8 @@ describe('InlineRuntime', () => {
       {
         yjsDocuments: adapter.repositories.yjsDocuments,
         versionSnapshots: adapter.repositories.versionSnapshots,
+        documentContent: adapter.repositories.documentContent,
+        documentNotes: adapter.repositories.documentNotes,
       },
       { persistenceFlushIntervalMs: 1000, versionSnapshotIntervalMs: 0 }
     )

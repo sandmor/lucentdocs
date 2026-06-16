@@ -1,11 +1,12 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { docs } from '@y/websocket-server/utils'
 import * as Y from 'yjs'
-import { prosemirrorJSONToYDoc } from 'y-prosemirror'
+import { yDocToProsemirrorJSON, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import { schema } from '@lucentdocs/shared'
 import { createYjsRuntime, type YjsRuntime } from './runtime.js'
 import { createSqliteAdapter, type SqliteAdapter } from '../infrastructure/sqlite/factory.js'
 import type { DocumentsService } from '../core/services/documents.service.js'
+import { nanoid } from 'nanoid'
 
 const makeDoc = (text: string) => ({
   type: 'doc',
@@ -28,6 +29,8 @@ describe('YjsRuntime', () => {
       {
         yjsDocuments: adapter.repositories.yjsDocuments,
         versionSnapshots: adapter.repositories.versionSnapshots,
+        documentContent: adapter.repositories.documentContent,
+        documentNotes: adapter.repositories.documentNotes,
       },
       { persistenceFlushIntervalMs: 1000, versionSnapshotIntervalMs: 0 }
     )
@@ -114,6 +117,8 @@ describe('DocumentsService YJS operations', () => {
       {
         yjsDocuments: adapter.repositories.yjsDocuments,
         versionSnapshots: adapter.repositories.versionSnapshots,
+        documentContent: adapter.repositories.documentContent,
+        documentNotes: adapter.repositories.documentNotes,
       },
       { persistenceFlushIntervalMs: 1000, versionSnapshotIntervalMs: 0 }
     )
@@ -189,5 +194,65 @@ describe('DocumentsService YJS operations', () => {
     const restored = await documentsService.restoreToSnapshot(doc.id, snapshot1!.id)
     expect(restored).toBeTruthy()
     expect(restored!.id).toBe(doc.id)
+  })
+
+  test('canonical document_content wins over stale yjs blob on read and cold load', async () => {
+    const doc = await documentsService.create('canonical-priority.md')
+    await yjsRuntime.replaceDocumentBundle(doc.id, { doc: makeDoc('canonical-truth'), notes: [] })
+
+    const staleDoc = prosemirrorJSONToYDoc(schema, makeDoc('stale-blob'))
+    await adapter.repositories.yjsDocuments.set(doc.id, Buffer.from(Y.encodeStateAsUpdate(staleDoc)))
+    staleDoc.destroy()
+
+    const content = await documentsService.getContent(doc.id)
+    expect(content).toContain('canonical-truth')
+    expect(content).not.toContain('stale-blob')
+
+    yjsRuntime.evictLiveDocument(doc.id)
+    await yjsRuntime.ensureDocumentLoaded(doc.id)
+    const liveDoc = docs.get(doc.id)!
+    const json = yDocToProsemirrorJSON(liveDoc) as {
+      content?: Array<{ content?: Array<{ text?: string }> }>
+    }
+    expect(json.content?.[0]?.content?.[0]?.text).toBe('canonical-truth')
+  })
+
+  test('epoch bump prevents stale live flush from overwriting canonical restore', async () => {
+    const doc = await documentsService.create('restore-race.md')
+    await yjsRuntime.ensureDocumentLoaded(doc.id)
+    const liveDoc = docs.get(doc.id)!
+    const stale = prosemirrorJSONToYDoc(schema, makeDoc('stale-live'))
+    Y.applyUpdate(liveDoc, Y.encodeStateAsUpdate(stale))
+    stale.destroy()
+
+    await adapter.repositories.documentContent.upsert(doc.id, makeDoc('restored-canonical'))
+
+    yjsRuntime.bumpDocumentEpoch(doc.id)
+    await yjsRuntime.flushAllDocumentStates()
+
+    yjsRuntime.evictLiveDocument(doc.id)
+
+    const content = await documentsService.getContent(doc.id)
+    expect(content).toContain('restored-canonical')
+    expect(content).not.toContain('stale-live')
+  })
+
+  test('restoreToSnapshot rejects corrupt snapshot content', async () => {
+    const doc = await documentsService.create('corrupt-restore.md')
+    await yjsRuntime.replaceDocumentBundle(doc.id, { doc: makeDoc('keep-me'), notes: [] })
+
+    const snapshotId = nanoid()
+    await adapter.repositories.versionSnapshots.insert({
+      id: snapshotId,
+      documentId: doc.id,
+      content: 'not valid snapshot json',
+      createdAt: Date.now(),
+    })
+
+    const restored = await documentsService.restoreToSnapshot(doc.id, snapshotId)
+    expect(restored).toBeNull()
+
+    const content = await documentsService.getContent(doc.id)
+    expect(content).toContain('keep-me')
   })
 })

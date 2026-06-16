@@ -3,6 +3,7 @@ import type { Node as PMNode } from 'prosemirror-model'
 import { COLLISION_PADDING } from '../inline/utils'
 
 export const EDITOR_SIDE_GUTTER_OFFSET = 14
+export const EDITOR_NOTE_CARD_WIDTH = 220
 export const BLOCK_HANDLE_WIDTH = 28
 export const BLOCK_HANDLE_BUTTON_HEIGHT = 20
 
@@ -96,6 +97,37 @@ export function computeLeftGutterContainerX(
   offset: number = EDITOR_SIDE_GUTTER_OFFSET
 ): number {
   return editorRect.left - containerRect.left - offset - elementWidth
+}
+
+export function computeRightGutterContainerX(
+  editorRect: DOMRect,
+  containerRect: DOMRect,
+  offset: number = EDITOR_SIDE_GUTTER_OFFSET
+): number {
+  return editorRect.right - containerRect.left + offset
+}
+
+export interface StackableSideElement {
+  id: string
+  desiredTop: number
+  height: number
+}
+
+export function stackSideElements(
+  items: StackableSideElement[],
+  gap: number = 8
+): Map<string, number> {
+  const sorted = [...items].sort((left, right) => left.desiredTop - right.desiredTop)
+  const positions = new Map<string, number>()
+  let cursor = Number.NEGATIVE_INFINITY
+
+  for (const item of sorted) {
+    const top = Math.max(item.desiredTop, cursor === Number.NEGATIVE_INFINITY ? item.desiredTop : cursor + gap)
+    positions.set(item.id, top)
+    cursor = top + item.height
+  }
+
+  return positions
 }
 
 export function clampSideElementToViewport(

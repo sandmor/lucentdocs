@@ -16,6 +16,8 @@ import { isInCodeBlock } from '../inline/utils'
 import { buildCodeBlockKeymapCommand } from './code-block-keymap'
 import { installYjsSelectionPatch } from './yjs-selection-patch'
 import { blockDragPlugin } from './block-drag-plugin'
+import { createBlockIdPlugin } from '../notes/block-id-plugin'
+import { createNotesViewPlugin } from '../notes/notes-plugin'
 
 export type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>
 
@@ -102,6 +104,8 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
     plugins.push(...buildCollaborationPlugins(collaboration))
   }
 
+  plugins.push(createBlockIdPlugin())
+  plugins.push(createNotesViewPlugin())
   plugins.push(createAIWriterPlugin(effectiveHandlers))
   plugins.push(buildInputRules())
 

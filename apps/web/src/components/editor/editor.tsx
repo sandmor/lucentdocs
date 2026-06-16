@@ -1,12 +1,5 @@
-import {
-  useRef,
-  useEffect,
-  forwardRef,
-  useImperativeHandle,
-  useState,
-  useCallback,
-  useMemo,
-} from 'react'
+import { useRef, useEffect, forwardRef, useImperativeHandle, useState, useCallback, useMemo } from 'react'
+import type * as Y from 'yjs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
@@ -29,6 +22,7 @@ import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
 import { SearchResultMarkers, type SearchResultMarker } from './search-result-markers'
 import { BlockHandle } from './block-handle/block-handle'
+import { NotesGutter } from './notes/notes-gutter'
 import { emitAIStateChange } from './ai/writer-store'
 import { getSelectionRangeInView, hasActiveDomSelection } from './selection/dom-selection'
 import { selectionTouchesCodeBlock, shouldShowSelectionCompose } from './inline/utils'
@@ -48,6 +42,7 @@ import {
 } from './prosemirror/presence'
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
 import { useEditorStore } from '@/lib/editor-store'
+import { trpc } from '@/lib/trpc'
 
 export interface EditorHandle {
   startAIContinuation: (at_doc_end: boolean) => void
@@ -197,11 +192,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [presenceAwareness, setPresenceAwareness] = useState<
     ReturnType<typeof createYjsProvider>['awareness'] | null
   >(null)
+  const [notesMap, setNotesMap] = useState<Y.Map<unknown> | null>(null)
 
   // Selection range also needed as local state for overlay components
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
   const [isEditorFocused, setIsEditorFocused] = useState(false)
   const [mobileBlockBarInteracting, setMobileBlockBarInteracting] = useState(false)
+
+  const meQuery = trpc.auth.me.useQuery()
+  const noteCreatorUserId = meQuery.data?.id ?? 'local'
 
   const aiState = useAIWriterState(editorView)
   useInlineSessions({
@@ -447,6 +446,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     queueMicrotask(() => {
       if (!destroyed) {
         setPresenceAwareness(provider.awareness)
+        setNotesMap(provider.notes)
       }
     })
     setEditorView(view)
@@ -533,6 +533,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       view.destroy()
       viewRef.current = null
       setPresenceAwareness(null)
+      setNotesMap(null)
       setEditorView(null)
       setStoreEditorView(null)
       setStoreEditorSelection(null)
@@ -729,7 +730,19 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         container={editorShell}
         markers={searchResultMarkers}
       />
-      <BlockHandle view={editorView} container={editorShell} />
+      <BlockHandle
+        view={editorView}
+        container={editorShell}
+        notesMap={notesMap}
+        noteCreatorUserId={noteCreatorUserId}
+      />
+      <NotesGutter
+        view={editorView}
+        container={editorShell}
+        notesMap={notesMap}
+        projectId={projectId}
+        currentUserId={noteCreatorUserId}
+      />
       <SelectionFakeOverlay
         view={editorView}
         selection={selectionRange}

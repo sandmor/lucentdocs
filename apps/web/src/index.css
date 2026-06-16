@@ -941,6 +941,19 @@
   }
 }
 
+.note-anchor-highlight {
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  border-radius: 0.25rem;
+}
+
+.note-card {
+  border-color: color-mix(in oklch, var(--border) 80%, var(--primary) 20%);
+}
+
+.note-editor-content p {
+  margin: 0.25rem 0;
+}
+
 /* Mobile block context bar */
 .ai-inline-mobile-block-bar {
   width: min(100%, 560px);

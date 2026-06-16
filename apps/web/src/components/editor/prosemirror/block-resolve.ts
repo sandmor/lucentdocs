@@ -10,6 +10,7 @@ export interface ActiveBlockInfo {
 export type BlockActionId =
   | 'insert-paragraph'
   | 'insert-code'
+  | 'add-note'
   | 'turn-into-paragraph'
   | 'turn-into-code'
   | 'move-up'
