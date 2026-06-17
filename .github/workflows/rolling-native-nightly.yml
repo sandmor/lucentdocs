@@ -27,48 +27,56 @@ jobs:
             platform: windows
             arch: x64
             build_flags: ''
+            sqlite: system
 
           - target: x86_64-apple-darwin
             os: macos-latest
             platform: darwin
             arch: x64
             build_flags: ''
+            sqlite: system
 
           - target: aarch64-apple-darwin
             os: macos-latest
             platform: darwin
             arch: arm64
             build_flags: ''
+            sqlite: system
 
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             platform: linux
             arch: x64
             build_flags: ''
+            sqlite: system
 
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             platform: linux
             arch: x64-musl
             build_flags: '--cross-compile'
+            sqlite: bundled
 
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             platform: linux
             arch: arm64
             build_flags: '--cross-compile'
+            sqlite: bundled
 
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             platform: linux
             arch: arm64-musl
             build_flags: '--cross-compile'
+            sqlite: bundled
 
           - target: aarch64-linux-android
             os: ubuntu-latest
             platform: android
             arch: arm64
             build_flags: ''
+            sqlite: bundled
 
     steps:
       - name: Checkout
@@ -135,10 +143,19 @@ jobs:
             export CXX_aarch64_linux_android=aarch64-linux-android24-clang++
           fi
 
+          if [[ "${{ matrix.settings.target }}" == *"-musl" ]]; then
+            target_underscore=$(echo "${{ matrix.settings.target }}" | tr '-' '_')
+            export "CFLAGS_${target_underscore}=-include ${GITHUB_WORKSPACE}/packages/core/musl_compat.h"
+          fi
+
           build_cmd=(bunx napi build --platform --release --target "${{ matrix.settings.target }}")
 
           if [[ -n "${{ matrix.settings.build_flags }}" ]]; then
             build_cmd+=(${{ matrix.settings.build_flags }})
+          fi
+
+          if [[ "${{ matrix.settings.sqlite }}" == "bundled" ]]; then
+            build_cmd+=(-- --no-default-features --features sqlite-bundled)
           fi
 
           cd packages/core

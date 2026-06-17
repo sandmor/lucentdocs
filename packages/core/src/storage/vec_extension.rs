@@ -1,3 +1,4 @@
+use std::ffi::c_char;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use libsqlite3_sys as ffi;
@@ -25,7 +26,7 @@ pub fn register_extension() -> StorageResult<()> {
   unsafe {
     type SqliteAutoExtension = unsafe extern "C" fn(
       *mut ffi::sqlite3,
-      *mut *mut i8,
+      *mut *mut c_char,
       *const ffi::sqlite3_api_routines,
     ) -> i32;
     let init: SqliteAutoExtension = std::mem::transmute(sqlite3_vec_init as *const ());
