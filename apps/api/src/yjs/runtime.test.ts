@@ -4,7 +4,7 @@ import * as Y from 'yjs'
 import { yXmlFragmentToProseMirrorRootNode, prosemirrorJSONToYDoc } from 'y-prosemirror'
 import { schema } from '@lucentdocs/shared'
 import { createYjsRuntime, type YjsRuntime } from './runtime.js'
-import { createSqliteAdapter, type SqliteAdapter } from '../infrastructure/sqlite/factory.js'
+import { createTestAdapter, type TestAdapter } from '../testing/factory.js'
 import type { DocumentsService } from '../core/services/documents.service.js'
 import { nanoid } from 'nanoid'
 
@@ -19,12 +19,12 @@ const makeDoc = (text: string) => ({
 })
 
 describe('YjsRuntime', () => {
-  let adapter: SqliteAdapter
+  let adapter: TestAdapter
   let yjsRuntime: YjsRuntime
   let documentsService: DocumentsService
 
   beforeEach(() => {
-    adapter = createSqliteAdapter(':memory:')
+    adapter = createTestAdapter()
     yjsRuntime = createYjsRuntime(
       {
         yjsDocuments: adapter.repositories.yjsDocuments,
@@ -40,7 +40,7 @@ describe('YjsRuntime', () => {
 
   afterEach(() => {
     yjsRuntime.shutdown()
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('flushes pending in-memory updates so content survives restart', async () => {
@@ -107,12 +107,12 @@ describe('YjsRuntime', () => {
 })
 
 describe('DocumentsService YJS operations', () => {
-  let adapter: SqliteAdapter
+  let adapter: TestAdapter
   let yjsRuntime: YjsRuntime
   let documentsService: DocumentsService
 
   beforeEach(() => {
-    adapter = createSqliteAdapter(':memory:')
+    adapter = createTestAdapter()
     yjsRuntime = createYjsRuntime(
       {
         yjsDocuments: adapter.repositories.yjsDocuments,
@@ -128,7 +128,7 @@ describe('DocumentsService YJS operations', () => {
 
   afterEach(() => {
     yjsRuntime.shutdown()
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('getContent returns default content for new document', async () => {

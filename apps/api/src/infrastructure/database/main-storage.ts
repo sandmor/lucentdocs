@@ -1,5 +1,5 @@
 import type { DocumentEmbeddingMetadataStorePort } from '../../core/ports/documentEmbeddingMetadata.port.js'
-import { createSqliteAdapter, type SqliteAdapter } from '../sqlite/factory.js'
+import { createRustAdapter, type RustAdapter } from '../rust/factory.js'
 import { readTrimmedEnvValue } from '../../config/env.js'
 
 export type PrimaryDatabaseKind = 'sqlite' | 'postgres'
@@ -8,7 +8,7 @@ export interface PrimaryDatabaseConfig {
   kind: PrimaryDatabaseKind
 }
 
-export interface MainDatabaseAdapter extends SqliteAdapter {
+export interface MainDatabaseAdapter extends RustAdapter {
   metadataStores: {
     documentEmbeddings: DocumentEmbeddingMetadataStorePort
   }
@@ -25,12 +25,12 @@ export function resolvePrimaryDatabaseConfig(env: NodeJS.ProcessEnv): PrimaryDat
   throw new Error(`Unsupported MAIN_DB value: ${raw}`)
 }
 
-export function createMainDatabaseAdapter(
+export async function createMainDatabaseAdapter(
   dbPath: string,
   config: PrimaryDatabaseConfig
-): MainDatabaseAdapter {
+): Promise<MainDatabaseAdapter> {
   if (config.kind === 'sqlite') {
-    return createSqliteAdapter(dbPath)
+    return createRustAdapter(dbPath)
   }
 
   throw new Error('MAIN_DB=postgres is not implemented yet.')

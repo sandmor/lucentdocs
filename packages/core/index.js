@@ -576,7 +576,8 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
-module.exports.importMarkdownDocumentsSqlite = nativeBinding.importMarkdownDocumentsSqlite
+module.exports.NativeStorageEngine = nativeBinding.NativeStorageEngine
+module.exports.NativeTransactionHandle = nativeBinding.NativeTransactionHandle
 module.exports.MarkdownRawHtmlMode = nativeBinding.MarkdownRawHtmlMode
 module.exports.parseMarkdown = nativeBinding.parseMarkdown
 module.exports.planMarkdownImport = nativeBinding.planMarkdownImport

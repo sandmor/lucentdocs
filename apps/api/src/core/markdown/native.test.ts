@@ -5,11 +5,11 @@ import { join } from 'node:path'
 import * as Y from 'yjs'
 import { yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
 import { schema } from '@lucentdocs/shared'
-import { createSqliteAdapter } from '../../infrastructure/sqlite/factory.js'
+import { createTestAdapter } from '../../testing/factory.js'
 import {
   markdownToProseMirrorDoc,
   planMarkdownImport,
-  runNativeMassImportSqlite,
+  runNativeMassImport,
 } from './native.js'
 
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: unknown }): T {
@@ -181,11 +181,11 @@ describe('planMarkdownImport', () => {
   })
 })
 
-describe('runNativeMassImportSqlite', () => {
+describe('runNativeMassImport', () => {
   test('persists Yjs content that y-prosemirror can decode to parser-equivalent JSON', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-native-import-yjs-'))
     const dbPath = join(dir, 'sqlite.db')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     try {
       const project = await adapter.services.projects.create('Import', { ownerUserId: 'owner_1' })
@@ -207,7 +207,7 @@ describe('runNativeMassImportSqlite', () => {
       expect(parsed.ok).toBe(true)
       if (!parsed.ok) return
 
-      const result = await runNativeMassImportSqlite(dbPath, {
+      const result = await runNativeMassImport(adapter.adapter.engine, {
         projectId: project.id,
         documents: [{ title: 'rich.md', markdown }],
         parseFailureMode: 'fail',
@@ -235,7 +235,7 @@ describe('runNativeMassImportSqlite', () => {
         ydoc.destroy()
       }
     } finally {
-      adapter.connection.close()
+      void adapter.adapter.engine.close()
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -243,7 +243,7 @@ describe('runNativeMassImportSqlite', () => {
   test('respects rawHtmlMode=drop in persisted Yjs output', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-native-import-drop-html-'))
     const dbPath = join(dir, 'sqlite.db')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     try {
       const project = await adapter.services.projects.create('Import', { ownerUserId: 'owner_1' })
@@ -255,7 +255,7 @@ describe('runNativeMassImportSqlite', () => {
       expect(parsed.ok).toBe(true)
       if (!parsed.ok) return
 
-      const result = await runNativeMassImportSqlite(dbPath, {
+      const result = await runNativeMassImport(adapter.adapter.engine, {
         projectId: project.id,
         documents: [{ title: 'drop.md', markdown }],
         parseFailureMode: 'fail',
@@ -282,7 +282,7 @@ describe('runNativeMassImportSqlite', () => {
         ydoc.destroy()
       }
     } finally {
-      adapter.connection.close()
+      void adapter.adapter.engine.close()
       rmSync(dir, { recursive: true, force: true })
     }
   })

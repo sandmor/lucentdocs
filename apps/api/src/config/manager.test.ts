@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, rmSync } from 'node:fs'
 import { DEFAULT_PERSISTED_CONFIG } from '@lucentdocs/shared'
-import { createConnection } from '../infrastructure/sqlite/connection.js'
-import { SqliteAppConfigRepository } from '../infrastructure/sqlite/appConfig.adapter.js'
+import { openRustStorageSync } from '../infrastructure/rust/engine.js'
+import { RustAppConfigRepository } from '../infrastructure/rust/appConfig.adapter.js'
 import { SQLITE_FILE_NAME, resolveDataDir, resolveDataFile } from '../paths.js'
 import { createDefaultConfigStore } from './default-store.js'
 import { ConfigManager } from './manager.js'
@@ -16,10 +16,10 @@ function seedPersistedConfig(
   values: Partial<typeof DEFAULT_PERSISTED_CONFIG>
 ): void {
   const dbFilePath = resolveDataFile(dataDir, SQLITE_FILE_NAME)
-  const connection = createConnection(dbFilePath)
-  const repository = new SqliteAppConfigRepository(connection)
+  const engine = openRustStorageSync(dbFilePath)
+  const repository = new RustAppConfigRepository(engine)
   repository.upsertMany(values, Date.now())
-  connection.close()
+  void engine.close()
 }
 
 describe('ConfigManager', () => {
@@ -104,13 +104,10 @@ describe('ConfigManager', () => {
     )
 
     const dbFilePath = resolveDataFile(dataDir, SQLITE_FILE_NAME)
-    const connection = createConnection(dbFilePath)
-    const countRow = connection.get<{ total: number }>(
-      'SELECT COUNT(*) as total FROM app_config_values',
-      []
-    )
-    expect(countRow?.total).toBeGreaterThanOrEqual(1)
-    connection.close()
+    const engine = openRustStorageSync(dbFilePath)
+    const entries = engine.appConfigReadAllSync()
+    expect(entries.length).toBeGreaterThanOrEqual(1)
+    void engine.close()
 
     manager.resetForTests()
     rmSync(absoluteDataDir, { recursive: true, force: true })
@@ -158,18 +155,15 @@ describe('ConfigManager', () => {
     expect(result.state.config.limits.aiToolSteps).toBe(11)
 
     const dbFilePath = resolveDataFile(dataDir, SQLITE_FILE_NAME)
-    const connection = createConnection(dbFilePath)
-    const rows = connection.all<{ key: string; value: string }>(
-      'SELECT key, value FROM app_config_values WHERE key IN (?, ?, ?)',
-      ['aiDefaultTemperature', 'yjsPersistenceFlushMs', 'maxAiToolSteps']
-    )
-    const rowMap = Object.fromEntries(rows.map((row) => [row.key, row.value]))
+    const engine = openRustStorageSync(dbFilePath)
+    const entries = engine.appConfigReadAllSync()
+    const rowMap = Object.fromEntries(entries.map((row) => [row.key, row.value]))
 
     expect(rowMap.aiDefaultTemperature).toBe('0.2')
     expect(rowMap.yjsPersistenceFlushMs).toBe('7777')
     expect(rowMap.maxAiToolSteps).toBe('7')
 
-    connection.close()
+    void engine.close()
     manager.resetForTests()
     rmSync(absoluteDataDir, { recursive: true, force: true })
   })
@@ -182,14 +176,18 @@ describe('ConfigManager', () => {
     rmSync(absoluteDataDir, { recursive: true, force: true })
     mkdirSync(absoluteDataDir, { recursive: true })
 
-    const connection = createConnection(dbFilePath)
-    connection.run(
-      `INSERT INTO app_config_values (key, value, updatedAt)
-       VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
-      ['host', '', Date.now(), 'port', '-1', Date.now(), 'yjsPersistenceFlushMs', '0', Date.now()]
+    const engine = openRustStorageSync(dbFilePath)
+    const now = Date.now()
+    engine.appConfigUpsertManySync(
+      null,
+      [
+        { key: 'host', value: '' },
+        { key: 'port', value: '-1' },
+        { key: 'yjsPersistenceFlushMs', value: '0' },
+      ],
+      now
     )
-    connection.close()
+    void engine.close()
 
     const manager = new ConfigManager(
       {

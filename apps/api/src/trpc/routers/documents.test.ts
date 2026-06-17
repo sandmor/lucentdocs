@@ -33,13 +33,9 @@ function createCallerContext(options?: { user?: User; adapter?: TestAdapter }): 
     queue: adapter.jobQueue,
     handlers: {
       'documents.import': createDocumentImportJobHandler({
-        dbPath: adapter.dbPath,
+        engine: adapter.adapter.engine,
         services: adapter.services,
         repositories: adapter.repositories,
-        transaction: adapter.transaction,
-        hooks: {
-          afterExternalWriteCommit: adapter.afterExternalWriteCommit,
-        },
       }),
     },
   })

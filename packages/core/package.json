@@ -25,6 +25,7 @@
   },
   "scripts": {
     "build": "napi build --platform --release",
+    "build:bundled": "napi build --platform --release -- --no-default-features --features sqlite-bundled",
     "build:debug": "napi build --platform"
   },
   "devDependencies": {

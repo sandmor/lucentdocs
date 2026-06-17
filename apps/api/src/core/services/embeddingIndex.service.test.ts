@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { createSqliteAdapter } from '../../infrastructure/sqlite/factory.js'
+import { createTestAdapter } from '../../testing/factory.js'
 import { configureEmbeddingProvider, resetEmbeddingClient } from '../../embeddings/provider.js'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -68,7 +68,7 @@ describe('EmbeddingIndexService', () => {
   test('flushes queued documents into sqlite-vec storage', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-store')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -109,13 +109,13 @@ describe('EmbeddingIndexService', () => {
     expect(stored[0]?.strategy.type).toBe('sliding_window')
     expect(stored[0]?.documentTimestamp).toBe(1000)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('flushes a waiting batch once the oldest queued document exceeds max wait', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-max-wait')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -155,7 +155,7 @@ describe('EmbeddingIndexService', () => {
     )
     expect(late.processed).toBe(1)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('does not overwrite with stale embeddings after a document is re-queued mid-flush', async () => {
@@ -180,7 +180,7 @@ describe('EmbeddingIndexService', () => {
 
     const dbPath = uniqueDbPath('embedding-index-service-stale-flush')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -262,7 +262,7 @@ describe('EmbeddingIndexService', () => {
     const statsAfterSecond = await adapter.repositories.embeddingIndexQueue.getQueueStats()
     expect(statsAfterSecond.totalJobs).toBe(0)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('stores multiple embedding chunks when a document uses sliding window indexing', async () => {
@@ -283,7 +283,7 @@ describe('EmbeddingIndexService', () => {
 
     const dbPath = uniqueDbPath('embedding-index-service-sliding-window')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -339,13 +339,13 @@ describe('EmbeddingIndexService', () => {
     expect(stored.map((entry) => entry.chunkOrdinal)).toEqual([0, 1, 2, 3])
     expect(stored.every((entry) => entry.strategy.type === 'sliding_window')).toBe(true)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('handles empty documents by deleting existing embeddings and clearing queue', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-empty-doc')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -419,13 +419,13 @@ describe('EmbeddingIndexService', () => {
     const queueStats = await adapter.repositories.embeddingIndexQueue.getQueueStats()
     expect(queueStats.totalJobs).toBe(0)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('ignores stale repository replacements when a newer document timestamp already exists', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-stale-repository-write')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     const doc = await adapter.services.documents.create('race.md')
 
@@ -481,13 +481,13 @@ describe('EmbeddingIndexService', () => {
     expect(stale.embeddings[0]?.contentHash).toBe('newer-hash')
     expect(stale.embeddings[0]?.documentTimestamp).toBe(200)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('keeps embeddings for the same model isolated by base URL', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-baseurl-scope')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     const doc = await adapter.services.documents.create('scope.md')
 
@@ -555,13 +555,13 @@ describe('EmbeddingIndexService', () => {
     expect(providerBEmbeddings).toHaveLength(1)
     expect(providerBEmbeddings[0]?.contentHash).toBe('provider-b')
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('surfaces errors when the embedding provider returns non-JSON and keeps jobs queued', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-non-json')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -608,13 +608,13 @@ describe('EmbeddingIndexService', () => {
     expect(job).toBeTruthy()
     expect(job!.debounceUntil).toBe(1000)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('deleteDocument clears queued embedding jobs safely', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-delete-queued-job')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -636,13 +636,13 @@ describe('EmbeddingIndexService', () => {
     const queuedAfter = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(doc.id)
     expect(queuedAfter).toBeUndefined()
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('flush handles document deletion races at embedding write time', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-delete-during-flush')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -692,13 +692,13 @@ describe('EmbeddingIndexService', () => {
     const queued = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(doc.id)
     expect(queued).toBeUndefined()
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('processQueuedDocuments only processes targeted queued documents', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-targeted-batch')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -751,13 +751,13 @@ describe('EmbeddingIndexService', () => {
     expect(afterA).toBeUndefined()
     expect(afterB).toBeTruthy()
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('flush uses document-owned embedding policy for shared documents', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-shared-policy')
     cleanupDir = resolve(dbPath, '..')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
 
     await adapter.services.aiSettings.initializeDefaults({
       env: {
@@ -857,6 +857,6 @@ describe('EmbeddingIndexService', () => {
     expect(globalModelEmbeddings).toHaveLength(1)
     expect(projectModelEmbeddings).toHaveLength(0)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 })

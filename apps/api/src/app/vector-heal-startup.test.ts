@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { createSqliteAdapter } from '../infrastructure/sqlite/factory.js'
+import { createTestAdapter } from '../testing/factory.js'
 import { scheduleVectorHealOnBackendChange } from './vector-heal-startup.js'
 
 describe('scheduleVectorHealOnBackendChange', () => {
   test('schedules reindex once for first qdrant fingerprint and skips unchanged restart', async () => {
-    const adapter = createSqliteAdapter(':memory:')
+    const adapter = createTestAdapter()
 
     const project = await adapter.services.projects.create('Project', { ownerUserId: 'user_1' })
     const docA = await adapter.services.documents.createForProject(project.id, 'a.md')
@@ -19,7 +19,7 @@ describe('scheduleVectorHealOnBackendChange', () => {
     }
 
     const first = await scheduleVectorHealOnBackendChange({
-      connection: adapter.connection,
+      engine: adapter.adapter.engine,
       vectorStorage: { kind: 'qdrant' },
       qdrantConfig: {
         endpoint: 'http://127.0.0.1:6333',
@@ -36,14 +36,12 @@ describe('scheduleVectorHealOnBackendChange', () => {
     expect(enqueueCalls[0]?.ids.sort()).toEqual([docA.id, docB.id].sort())
     expect(enqueueCalls[0]?.debounceMs).toBe(0)
 
-    const stored = adapter.connection.get<{ value: string }>(
-      'SELECT value FROM app_config_values WHERE key = ?',
-      ['vector_storage_fingerprint']
-    )
+    const storedEntries = await adapter.adapter.engine.appConfigReadAll(null)
+    const stored = storedEntries.find((entry) => entry.key === 'vector_storage_fingerprint')
     expect(stored?.value).toBe('qdrant:http://127.0.0.1:6333:lucentdocs')
 
     const second = await scheduleVectorHealOnBackendChange({
-      connection: adapter.connection,
+      engine: adapter.adapter.engine,
       vectorStorage: { kind: 'qdrant' },
       qdrantConfig: {
         endpoint: 'http://127.0.0.1:6333',
@@ -58,11 +56,11 @@ describe('scheduleVectorHealOnBackendChange', () => {
     expect(second.enqueuedDocumentCount).toBe(0)
     expect(enqueueCalls).toHaveLength(1)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('switching backend fingerprint re-schedules qdrant reindex campaign', async () => {
-    const adapter = createSqliteAdapter(':memory:')
+    const adapter = createTestAdapter()
 
     const project = await adapter.services.projects.create('Project', { ownerUserId: 'user_1' })
     const doc = await adapter.services.documents.createForProject(project.id, 'a.md')
@@ -76,7 +74,7 @@ describe('scheduleVectorHealOnBackendChange', () => {
     }
 
     await scheduleVectorHealOnBackendChange({
-      connection: adapter.connection,
+      engine: adapter.adapter.engine,
       vectorStorage: { kind: 'qdrant' },
       qdrantConfig: {
         endpoint: 'http://127.0.0.1:6333',
@@ -87,14 +85,14 @@ describe('scheduleVectorHealOnBackendChange', () => {
     })
 
     await scheduleVectorHealOnBackendChange({
-      connection: adapter.connection,
+      engine: adapter.adapter.engine,
       vectorStorage: { kind: 'none' },
       documents: adapter.services.documents,
       embeddingIndex: adapter.services.embeddingIndex,
     })
 
     await scheduleVectorHealOnBackendChange({
-      connection: adapter.connection,
+      engine: adapter.adapter.engine,
       vectorStorage: { kind: 'qdrant' },
       qdrantConfig: {
         endpoint: 'http://127.0.0.1:6333',
@@ -106,6 +104,6 @@ describe('scheduleVectorHealOnBackendChange', () => {
 
     expect(enqueueCallCount).toBe(2)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 })

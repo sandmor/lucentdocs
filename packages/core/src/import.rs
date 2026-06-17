@@ -1,15 +1,14 @@
 use std::collections::HashSet;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde::Serialize;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::Row;
-use std::path::Path;
-use std::str::FromStr;
 
 use crate::markdown;
+use crate::storage::adapters::{documents, project_documents, projects, yjs_documents};
+use crate::storage::dto::DocumentDto;
+use crate::storage::engine::StorageEngine;
+use crate::storage::error::StorageError;
 use crate::MarkdownRawHtmlMode;
 
 #[napi(object)]
@@ -52,6 +51,7 @@ struct MassImportResult {
 }
 
 fn now_millis() -> i64 {
+  use std::time::{SystemTime, UNIX_EPOCH};
   let duration = SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .unwrap_or_default();
@@ -72,7 +72,6 @@ fn path_segments(path: &str) -> Vec<String> {
   if normalized.is_empty() {
     return Vec::new();
   }
-
   normalized
     .split('/')
     .map(|part| part.to_string())
@@ -150,47 +149,14 @@ fn resolve_unique_import_path(requested_path: &str, existing_paths: &[String]) -
   "imported.md".to_string()
 }
 
-#[napi]
-pub async fn import_markdown_documents_sqlite(
-  db_path: String,
+fn storage_err_to_napi(err: StorageError) -> Error {
+  Error::new(Status::GenericFailure, err.to_string())
+}
+
+pub async fn import_markdown_documents(
+  engine: &StorageEngine,
   request: MassImportRequest,
-) -> std::result::Result<String, napi::Error> {
-  // This helper writes through a native sqlx SQLite connection that can run
-  // alongside the Bun SQLite handle used by the API process. Callers should
-  // provide an adapter-specific synchronization step after commit (for SQLite,
-  // refresh/reopen the Bun handle). Non-SQLite adapters (e.g. Postgres) do not
-  // use this function.
-  let sqlite_target = if db_path == ":memory:" {
-    "sqlite::memory:".to_string()
-  } else if db_path.starts_with("sqlite:") {
-    db_path.clone()
-  } else if Path::new(&db_path).is_absolute() {
-    // Absolute filesystem path => sqlite:///abs/path
-    format!("sqlite://{}", db_path)
-  } else {
-    // Relative filesystem path => sqlite://relative/path
-    format!("sqlite://{}", db_path)
-  };
-
-  let connect_options = SqliteConnectOptions::from_str(&sqlite_target)
-    .map_err(|e| Error::new(Status::InvalidArg, format!("Invalid sqlite target: {}", e)))?
-    .create_if_missing(true)
-    .foreign_keys(true)
-    .journal_mode(SqliteJournalMode::Wal)
-    .synchronous(SqliteSynchronous::Full)
-    .busy_timeout(std::time::Duration::from_secs(5));
-
-  let pool = SqlitePoolOptions::new()
-    .max_connections(1)
-    .connect_with(connect_options)
-    .await
-    .map_err(|e| {
-      Error::new(
-        Status::GenericFailure,
-        format!("Failed to connect sqlite: {}", e),
-      )
-    })?;
-
+) -> std::result::Result<String, Error> {
   let parse_failure_mode = request
     .parse_failure_mode
     .unwrap_or_else(|| "fail".to_string())
@@ -199,16 +165,9 @@ pub async fn import_markdown_documents_sqlite(
   let mut failed = Vec::<ImportFailure>::new();
   let mut imported = Vec::<ImportedDocumentResult>::new();
 
-  let project_exists = sqlx::query("SELECT 1 FROM projects WHERE id = ? LIMIT 1")
-    .bind(&request.project_id)
-    .fetch_optional(&pool)
+  let project_exists = projects::find_by_id(engine, None, &request.project_id)
     .await
-    .map_err(|e| {
-      Error::new(
-        Status::GenericFailure,
-        format!("Failed to validate project: {}", e),
-      )
-    })?
+    .map_err(storage_err_to_napi)?
     .is_some();
 
   if !project_exists {
@@ -222,8 +181,6 @@ pub async fn import_markdown_documents_sqlite(
       });
     }
 
-    pool.close().await;
-
     let result = MassImportResult {
       imported: Vec::new(),
       failed,
@@ -231,47 +188,31 @@ pub async fn import_markdown_documents_sqlite(
     return serde_json::to_string(&result).map_err(|e| {
       Error::new(
         Status::GenericFailure,
-        format!("Failed to serialize result: {}", e),
+        format!("Failed to serialize result: {e}"),
       )
     });
   }
 
-  let existing_rows = sqlx::query(
-    "SELECT d.title
-       FROM documents d
-       JOIN project_documents pd ON pd.documentId = d.id
-      WHERE pd.projectId = ?
-        AND NOT EXISTS (
-          SELECT 1
-            FROM project_documents other
-           WHERE other.documentId = d.id
-             AND other.projectId <> ?
-        )",
-  )
-  .bind(&request.project_id)
-  .bind(&request.project_id)
-  .fetch_all(&pool)
-  .await
-  .map_err(|e| {
-    Error::new(
-      Status::GenericFailure,
-      format!("Failed to load existing paths: {}", e),
-    )
-  })?;
+  let existing_titles =
+    project_documents::find_sole_document_ids_by_project_id(engine, None, &request.project_id)
+      .await
+      .map_err(storage_err_to_napi)?;
 
-  let mut allocated_paths = existing_rows
-    .into_iter()
-    .filter_map(|row| row.try_get::<String, _>("title").ok())
-    .map(|title| normalize_document_path(&title))
-    .filter(|title| !title.is_empty())
-    .collect::<Vec<_>>();
+  let mut allocated_paths = Vec::new();
+  for document_id in &existing_titles {
+    if let Some(doc) = documents::find_by_id(engine, None, document_id)
+      .await
+      .map_err(storage_err_to_napi)?
+    {
+      let normalized = normalize_document_path(&doc.title);
+      if !normalized.is_empty() {
+        allocated_paths.push(normalized);
+      }
+    }
+  }
 
-  let mut tx = pool.begin().await.map_err(|e| {
-    Error::new(
-      Status::GenericFailure,
-      format!("Failed to begin import transaction: {}", e),
-    )
-  })?;
+  let tx_id = engine.begin_transaction().await.map_err(storage_err_to_napi)?;
+  let tx = Some(tx_id.as_str());
 
   for document in request.documents {
     let normalized_title = normalize_document_path(&document.title);
@@ -313,61 +254,49 @@ pub async fn import_markdown_documents_sqlite(
     };
 
     let yjs_blob = parsed_document.to_yjs_update();
-
     let unique_path = resolve_unique_import_path(&normalized_title, &allocated_paths);
     allocated_paths.push(unique_path.clone());
 
     let now = now_millis();
     let id = nanoid::nanoid!();
 
-    sqlx::query(
-      "INSERT INTO documents (id, title, type, metadata, createdAt, updatedAt)
-       VALUES (?, ?, 'manuscript', NULL, ?, ?)",
+    if let Err(err) = documents::insert(
+      engine,
+      tx,
+      &DocumentDto {
+        id: id.clone(),
+        title: unique_path.clone(),
+        r#type: "manuscript".to_string(),
+        metadata_json: None,
+        created_at: now,
+        updated_at: now,
+      },
     )
-    .bind(&id)
-    .bind(&unique_path)
-    .bind(now)
-    .bind(now)
-    .execute(&mut *tx)
     .await
-    .map_err(|e| {
-      Error::new(
-        Status::GenericFailure,
-        format!("Failed to insert document: {}", e),
-      )
-    })?;
+    {
+      engine.rollback_transaction(&tx_id).await.ok();
+      return Err(storage_err_to_napi(err));
+    }
 
-    sqlx::query(
-      "INSERT INTO project_documents (projectId, documentId, addedAt)
-       VALUES (?, ?, ?)",
+    if let Err(err) = project_documents::insert(
+      engine,
+      tx,
+      &crate::storage::dto::ProjectDocumentDto {
+        project_id: request.project_id.clone(),
+        document_id: id.clone(),
+        added_at: now,
+      },
     )
-    .bind(&request.project_id)
-    .bind(&id)
-    .bind(now)
-    .execute(&mut *tx)
     .await
-    .map_err(|e| {
-      Error::new(
-        Status::GenericFailure,
-        format!("Failed to link imported document to project: {}", e),
-      )
-    })?;
+    {
+      engine.rollback_transaction(&tx_id).await.ok();
+      return Err(storage_err_to_napi(err));
+    }
 
-    sqlx::query(
-      "INSERT INTO yjs_documents (name, data)
-       VALUES (?, ?)
-       ON CONFLICT(name) DO UPDATE SET data = excluded.data",
-    )
-    .bind(&id)
-    .bind(&yjs_blob)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-      Error::new(
-        Status::GenericFailure,
-        format!("Failed to persist imported Yjs document: {}", e),
-      )
-    })?;
+    if let Err(err) = yjs_documents::set(engine, tx, &id, &yjs_blob).await {
+      engine.rollback_transaction(&tx_id).await.ok();
+      return Err(storage_err_to_napi(err));
+    }
 
     imported.push(ImportedDocumentResult {
       id,
@@ -375,20 +304,16 @@ pub async fn import_markdown_documents_sqlite(
     });
   }
 
-  tx.commit().await.map_err(|e| {
-    Error::new(
-      Status::GenericFailure,
-      format!("Failed to commit import transaction: {}", e),
-    )
-  })?;
-
-  pool.close().await;
+  engine
+    .commit_transaction(&tx_id)
+    .await
+    .map_err(storage_err_to_napi)?;
 
   let result = MassImportResult { imported, failed };
   serde_json::to_string(&result).map_err(|e| {
     Error::new(
       Status::GenericFailure,
-      format!("Failed to serialize result: {}", e),
+      format!("Failed to serialize result: {e}"),
     )
   })
 }

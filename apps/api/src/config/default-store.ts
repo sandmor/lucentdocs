@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
-import { createConnection } from '../infrastructure/sqlite/connection.js'
-import { SqliteAppConfigRepository } from '../infrastructure/sqlite/appConfig.adapter.js'
+import { RustAppConfigRepository } from '../infrastructure/rust/appConfig.adapter.js'
+import { openRustStorageSync } from '../infrastructure/rust/engine.js'
 import { DEFAULT_DATA_DIR, SQLITE_FILE_NAME, resolveDataDir, resolveDataFile } from '../paths.js'
 import type { ConfigStoreHandle } from './manager.js'
 
@@ -43,21 +43,24 @@ function resolveConfiguredDataDir(env: NodeJS.ProcessEnv): string {
 }
 
 export function createDefaultConfigStore(env: NodeJS.ProcessEnv): ConfigStoreHandle {
+  // Opens its own engine because ConfigManager must read persisted settings (including
+  // db paths) before the main application container is created. SQLite WAL supports
+  // concurrent readers/writers against the same db file safely.
   const configuredDataDir = resolveConfiguredDataDir(env)
   const dataDirPath = resolveDataDir(configuredDataDir)
   const dbFilePath = resolveDataFile(configuredDataDir, SQLITE_FILE_NAME)
 
   mkdirSync(dataDirPath, { recursive: true })
 
-  const connection = createConnection(dbFilePath)
-  const repository = new SqliteAppConfigRepository(connection)
+  const engine = openRustStorageSync(dbFilePath)
+  const repository = new RustAppConfigRepository(engine)
 
   return {
     dataDirPath,
     dbFilePath,
     repository,
     dispose: () => {
-      connection.close()
+      void engine.close()
     },
   }
 }

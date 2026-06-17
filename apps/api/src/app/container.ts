@@ -73,7 +73,7 @@ export async function createContainer(
   yjsConfig: YjsRuntimeConfig
 ): Promise<AppContainer> {
   const primaryDatabase = resolvePrimaryDatabaseConfig(process.env)
-  const adapter = createMainDatabaseAdapter(dbPath, primaryDatabase)
+  const adapter = await createMainDatabaseAdapter(dbPath, primaryDatabase)
 
   const vectorStorage = resolveVectorStorageConfig(process.env)
   const qdrantConfig =
@@ -88,7 +88,7 @@ export async function createContainer(
   }
 
   await scheduleVectorHealOnBackendChange({
-    connection: adapter.connection,
+    engine: adapter.engine,
     vectorStorage,
     qdrantConfig,
     documents: adapter.services.documents,
@@ -168,16 +168,9 @@ export async function createContainer(
     queue: adapter.jobQueue,
   })
   const documentImportJobHandler = createDocumentImportJobHandler({
-    dbPath,
+    engine: adapter.engine,
     services: adapter.services,
     repositories: adapter.repositories,
-    transaction: adapter.transaction,
-    hooks: {
-      // SQLite/Bun-specific bridge: native import writes through a different
-      // SQLite stack than Bun's in-process handle, so we refresh Bun's handle
-      // after native commits. Postgres adapters should use a no-op hook.
-      afterExternalWriteCommit: () => adapter.connection.refreshPrimaryConnection(),
-    },
   })
   const jobWorkerRuntime = createJobWorkerRuntime({
     queue: adapter.jobQueue,

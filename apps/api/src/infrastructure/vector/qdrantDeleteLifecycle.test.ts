@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createSqliteAdapter } from '../sqlite/factory.js'
+import { createTestAdapter, type TestAdapter } from '../../testing/factory.js'
 import { QdrantDocumentEmbeddingsRepository } from './qdrantDocumentEmbeddings.adapter.js'
 import { QdrantClient } from './qdrant.client.js'
 import { createJobWorkerRuntime } from '../../app/job-worker-runtime.js'
@@ -14,10 +14,7 @@ function asUrl(input: string | URL | Request): string {
   return input.url
 }
 
-async function waitForCleanupJobs(
-  adapter: ReturnType<typeof createSqliteAdapter>,
-  timeoutMs = 2000
-): Promise<number> {
+async function waitForCleanupJobs(adapter: TestAdapter, timeoutMs = 2000): Promise<number> {
   const startedAt = Date.now()
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -72,7 +69,7 @@ describe('Qdrant delete lifecycle', () => {
       throw new Error(`Unexpected qdrant request ${method} ${url}`)
     }) as typeof fetch
 
-    const adapter = createSqliteAdapter(':memory:', {
+    const adapter = createTestAdapter({
       createDocumentEmbeddings: ({ metadataStore }) => {
         const client = new QdrantClient({
           endpoint: 'http://127.0.0.1:6333',
@@ -149,6 +146,6 @@ describe('Qdrant delete lifecycle', () => {
     )
     expect(deleteCallsAfterWorker.length).toBeGreaterThan(0)
 
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 })

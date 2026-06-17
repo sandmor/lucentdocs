@@ -6,7 +6,15 @@ mod embedding;
 pub mod import;
 pub mod import_plan;
 pub mod markdown;
+pub mod storage;
 mod yjs;
+// Loaded from src/napi/ as `napi_bridge` to avoid shadowing the external `napi` crate.
+#[path = "napi/mod.rs"]
+mod napi_bridge;
+
+pub use napi_bridge::storage::{
+  NativeStorageEngine, NativeTransactionHandle, WaitForAvailableResult,
+};
 
 #[napi(string_enum)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

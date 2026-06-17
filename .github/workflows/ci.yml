@@ -47,6 +47,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install SQLite build deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config
+
       - name: Typecheck
         run: bun run typecheck
 
@@ -81,6 +85,9 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install SQLite build deps
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config
 
       - name: Build native core addon
         run: bun run --filter './packages/core' build

@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { prosemirrorJSONToYDoc } from 'y-prosemirror'
 import { schema, type DocumentNoteRecord } from '@lucentdocs/shared'
-import { createSqliteAdapter, type SqliteAdapter } from '../infrastructure/sqlite/factory.js'
+import { createTestAdapter, type TestAdapter } from '../testing/factory.js'
 import { createYjsRuntime, type YjsRuntime } from './runtime.js'
 import type { DocumentsService } from '../core/services/documents.service.js'
 import { hydrateNotesMap, notesMapToRecords } from './document-notes.js'
@@ -37,12 +37,12 @@ const makeNoteRecord = (
 })
 
 describe('document notes integration', () => {
-  let adapter: SqliteAdapter
+  let adapter: TestAdapter
   let yjsRuntime: YjsRuntime
   let documentsService: DocumentsService
 
   beforeEach(() => {
-    adapter = createSqliteAdapter(':memory:')
+    adapter = createTestAdapter()
     yjsRuntime = createYjsRuntime(
       {
         yjsDocuments: adapter.repositories.yjsDocuments,
@@ -58,7 +58,7 @@ describe('document notes integration', () => {
 
   afterEach(() => {
     yjsRuntime.shutdown()
-    adapter.connection.close()
+    void adapter.adapter.engine.close()
   })
 
   test('snapshot restore rolls back bundled notes with document content', async () => {

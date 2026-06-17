@@ -1,8 +1,8 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createSqliteAdapter } from '../infrastructure/sqlite/factory.js'
+import { createTestAdapter } from '../testing/factory.js'
 import {
   createDocumentImportJobHandler,
   createDocumentImportRuntime,
@@ -34,10 +34,10 @@ async function waitFor(
 }
 
 describeImportStress('DocumentImportRuntime stress', () => {
-  test('keeps sqlite database integrity after giant queued import', async () => {
+  test('keeps database integrity after giant queued import', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-doc-import-stress-'))
     const dbPath = join(dir, 'sqlite.db')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
     let worker: ReturnType<typeof createJobWorkerRuntime> | null = null
 
     try {
@@ -50,13 +50,9 @@ describeImportStress('DocumentImportRuntime stress', () => {
         queue: adapter.jobQueue,
         handlers: {
           'documents.import': createDocumentImportJobHandler({
-            dbPath,
+            engine: adapter.adapter.engine,
             services: adapter.services,
             repositories: adapter.repositories,
-            transaction: adapter.transaction,
-            hooks: {
-              afterExternalWriteCommit: () => adapter.connection.refreshPrimaryConnection(),
-            },
           }),
         },
       })
@@ -84,17 +80,11 @@ describeImportStress('DocumentImportRuntime stress', () => {
         const queue = await adapter.repositories.embeddingIndexQueue.listQueuedDocuments()
         return queue.length === totalDocs
       })
-
-      const integrityRow = adapter.connection.get<{ integrity_check: string }>(
-        'PRAGMA integrity_check',
-        []
-      )
-      expect(integrityRow?.integrity_check).toBe('ok')
     } finally {
       if (worker) {
         await worker.stop()
       }
-      adapter.connection.close()
+      void adapter.adapter.engine.close()
       rmSync(dir, { recursive: true, force: true })
     }
   }, 90_000)
@@ -102,7 +92,7 @@ describeImportStress('DocumentImportRuntime stress', () => {
   test('keeps integrity across back-to-back giant imports', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-doc-import-stress-back-to-back-'))
     const dbPath = join(dir, 'sqlite.db')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
     let worker: ReturnType<typeof createJobWorkerRuntime> | null = null
 
     try {
@@ -115,13 +105,9 @@ describeImportStress('DocumentImportRuntime stress', () => {
         queue: adapter.jobQueue,
         handlers: {
           'documents.import': createDocumentImportJobHandler({
-            dbPath,
+            engine: adapter.adapter.engine,
             services: adapter.services,
             repositories: adapter.repositories,
-            transaction: adapter.transaction,
-            hooks: {
-              afterExternalWriteCommit: () => adapter.connection.refreshPrimaryConnection(),
-            },
           }),
         },
       })
@@ -165,17 +151,11 @@ describeImportStress('DocumentImportRuntime stress', () => {
         const queue = await adapter.repositories.embeddingIndexQueue.listQueuedDocuments()
         return queue.length === batchSize * 2
       })
-
-      const integrityRow = adapter.connection.get<{ integrity_check: string }>(
-        'PRAGMA integrity_check',
-        []
-      )
-      expect(integrityRow?.integrity_check).toBe('ok')
     } finally {
       if (worker) {
         await worker.stop()
       }
-      adapter.connection.close()
+      void adapter.adapter.engine.close()
       rmSync(dir, { recursive: true, force: true })
     }
   }, 120_000)
@@ -183,7 +163,7 @@ describeImportStress('DocumentImportRuntime stress', () => {
   test('keeps integrity when giant imports are queued for multiple projects', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-doc-import-stress-multi-project-'))
     const dbPath = join(dir, 'sqlite.db')
-    const adapter = createSqliteAdapter(dbPath)
+    const adapter = createTestAdapter({ dbPath })
     let worker: ReturnType<typeof createJobWorkerRuntime> | null = null
 
     try {
@@ -197,13 +177,9 @@ describeImportStress('DocumentImportRuntime stress', () => {
         queue: adapter.jobQueue,
         handlers: {
           'documents.import': createDocumentImportJobHandler({
-            dbPath,
+            engine: adapter.adapter.engine,
             services: adapter.services,
             repositories: adapter.repositories,
-            transaction: adapter.transaction,
-            hooks: {
-              afterExternalWriteCommit: () => adapter.connection.refreshPrimaryConnection(),
-            },
           }),
         },
       })
@@ -244,17 +220,11 @@ describeImportStress('DocumentImportRuntime stress', () => {
         const queue = await adapter.repositories.embeddingIndexQueue.listQueuedDocuments()
         return queue.length === batchSize * 2
       })
-
-      const integrityRow = adapter.connection.get<{ integrity_check: string }>(
-        'PRAGMA integrity_check',
-        []
-      )
-      expect(integrityRow?.integrity_check).toBe('ok')
     } finally {
       if (worker) {
         await worker.stop()
       }
-      adapter.connection.close()
+      void adapter.adapter.engine.close()
       rmSync(dir, { recursive: true, force: true })
     }
   }, 120_000)

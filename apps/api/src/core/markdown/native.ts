@@ -1,6 +1,5 @@
 import type { JsonObject } from '@lucentdocs/shared'
 import {
-  importMarkdownDocumentsSqlite,
   parseMarkdown,
   planMarkdownImport as planMarkdownImportNative,
   type MarkdownRawHtmlMode as CoreRawHtmlMode,
@@ -132,12 +131,12 @@ export function planMarkdownImport(
   }
 }
 
-export async function runNativeMassImportSqlite(
-  dbPath: string,
+export async function runNativeMassImport(
+  engine: import('@lucentdocs/core').NativeStorageEngine,
   request: NativeMassImportRequest
 ): Promise<NativeMassImportResult> {
   const rawHtmlMode = toNativeRawHtmlMode(request.rawHtmlMode)
-  const response = await importMarkdownDocumentsSqlite(dbPath, {
+  const response = await engine.importMarkdownDocuments({
     projectId: request.projectId,
     documents: request.documents,
     parseFailureMode: request.parseFailureMode,

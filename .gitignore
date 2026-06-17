@@ -28,6 +28,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .eslintcache
 .cache
 *.tsbuildinfo
+apps/api/tmp/
+tmp/
+*.db-wal
+*.db-shm
 
 # IntelliJ based IDEs
 .idea

@@ -1,4 +1,4 @@
-import type { SqliteConnection } from '../infrastructure/sqlite/connection.js'
+import type { NativeStorageEngine } from '@lucentdocs/core'
 import type {
   QdrantRuntimeConfig,
   VectorStorageConfig,
@@ -10,7 +10,7 @@ import { normalizeQdrantCollectionPrefix } from '../core/embeddings/documentEmbe
 const VECTOR_STORAGE_FINGERPRINT_KEY = 'vector_storage_fingerprint'
 
 interface VectorHealStartupInput {
-  connection: SqliteConnection
+  engine: NativeStorageEngine
   vectorStorage: VectorStorageConfig
   qdrantConfig?: QdrantRuntimeConfig
   documents: DocumentsService
@@ -39,22 +39,19 @@ function vectorStorageFingerprint(
   return `qdrant:${normalizeEndpoint(qdrantConfig.endpoint)}:${normalizedPrefix}`
 }
 
-function readStoredFingerprint(connection: SqliteConnection): string | undefined {
-  const row = connection.get<{ value: string }>(
-    'SELECT value FROM app_config_values WHERE key = ?',
-    [VECTOR_STORAGE_FINGERPRINT_KEY]
-  )
+async function readStoredFingerprint(engine: NativeStorageEngine): Promise<string | undefined> {
+  const entries = await engine.appConfigReadAll(null)
+  const row = entries.find((entry) => entry.key === VECTOR_STORAGE_FINGERPRINT_KEY)
   const value = row?.value?.trim()
   return value && value.length > 0 ? value : undefined
 }
 
-function writeStoredFingerprint(connection: SqliteConnection, fingerprint: string): void {
+async function writeStoredFingerprint(engine: NativeStorageEngine, fingerprint: string): Promise<void> {
   const now = Date.now()
-  connection.run(
-    `INSERT INTO app_config_values (key, value, updatedAt)
-     VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
-    [VECTOR_STORAGE_FINGERPRINT_KEY, fingerprint, now]
+  await engine.appConfigUpsertMany(
+    null,
+    [{ key: VECTOR_STORAGE_FINGERPRINT_KEY, value: fingerprint }],
+    now
   )
 }
 
@@ -64,7 +61,7 @@ export async function scheduleVectorHealOnBackendChange(input: VectorHealStartup
   enqueuedDocumentCount: number
 }> {
   const nextFingerprint = vectorStorageFingerprint(input.vectorStorage, input.qdrantConfig)
-  const previousFingerprint = readStoredFingerprint(input.connection)
+  const previousFingerprint = await readStoredFingerprint(input.engine)
 
   if (previousFingerprint === nextFingerprint) {
     return {
@@ -83,7 +80,7 @@ export async function scheduleVectorHealOnBackendChange(input: VectorHealStartup
     }
   }
 
-  writeStoredFingerprint(input.connection, nextFingerprint)
+  await writeStoredFingerprint(input.engine, nextFingerprint)
 
   return {
     scheduled: true,

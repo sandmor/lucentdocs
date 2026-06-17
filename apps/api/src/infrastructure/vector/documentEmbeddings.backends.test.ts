@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import type { SqliteConnection } from '../sqlite/connection.js'
+import type { NativeStorageEngine } from '@lucentdocs/core'
 import type { DocumentEmbeddingsRepositoryPort } from '../../core/ports/documentEmbeddings.port.js'
-import { createConnection } from '../sqlite/connection.js'
-import { DocumentEmbeddingsRepository } from '../sqlite/documentEmbeddings.adapter.js'
-import { SqliteDocumentEmbeddingMetadataStore } from '../sqlite/documentEmbeddingMetadataStore.adapter.js'
+import { openRustStorage } from '../rust/engine.js'
+import { DocumentEmbeddingsRepository } from '../rust/documentEmbeddings.adapter.js'
+import { RustDocumentEmbeddingMetadataStore } from '../rust/documentEmbeddingMetadataStore.adapter.js'
 import { QdrantDocumentEmbeddingsRepository } from './qdrantDocumentEmbeddings.adapter.js'
 import { QdrantClient } from './qdrant.client.js'
 
@@ -161,41 +161,48 @@ function createQdrantFetchMock(): typeof fetch {
   }) as typeof fetch
 }
 
-function insertDocument(connection: SqliteConnection, id: string, title: string): void {
-  connection.run(
-    'INSERT INTO documents (id, title, type, metadata, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, title, 'manuscript', null, 1, 1]
-  )
+async function insertDocument(engine: NativeStorageEngine, id: string, title: string): Promise<void> {
+  await engine.documentsInsert(null, {
+    id,
+    title,
+    type: 'manuscript',
+    createdAt: 1,
+    updatedAt: 1,
+  })
 }
 
-function linkDocumentToProject(
-  connection: SqliteConnection,
+async function linkDocumentToProject(
+  engine: NativeStorageEngine,
   projectId: string,
   documentId: string
-): void {
-  connection.run(
-    'INSERT INTO project_documents (projectId, documentId, addedAt) VALUES (?, ?, ?)',
-    [projectId, documentId, 1]
-  )
+): Promise<void> {
+  await engine.projectDocumentsInsert(null, {
+    projectId,
+    documentId,
+    addedAt: 1,
+  })
 }
 
-function insertProject(connection: SqliteConnection, projectId: string): void {
-  connection.run(
-    'INSERT INTO projects (id, title, ownerUserId, metadata, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
-    [projectId, `Project ${projectId}`, 'user_1', null, 1, 1]
-  )
+async function insertProject(engine: NativeStorageEngine, projectId: string): Promise<void> {
+  await engine.projectsInsert(null, {
+    id: projectId,
+    title: `Project ${projectId}`,
+    ownerUserId: 'user_1',
+    createdAt: 1,
+    updatedAt: 1,
+  })
 }
 
 function createRepository(
   backend: BackendKind,
-  connection: SqliteConnection
+  engine: NativeStorageEngine
 ): DocumentEmbeddingsRepositoryPort {
   if (backend === 'sqlite') {
-    return new DocumentEmbeddingsRepository(connection)
+    return new DocumentEmbeddingsRepository(engine)
   }
 
   return new QdrantDocumentEmbeddingsRepository(
-    new SqliteDocumentEmbeddingMetadataStore(connection),
+    new RustDocumentEmbeddingMetadataStore(engine),
     new QdrantClient({
       endpoint: 'http://127.0.0.1:6333',
       collectionPrefix: 'lucentdocs',
@@ -207,252 +214,208 @@ function createRepository(
 for (const backend of ['sqlite', 'qdrant'] as const) {
   describe(`document embeddings repository (${backend})`, () => {
     test('replace, stale guard, and find work consistently', async () => {
-      const connection = createConnection(':memory:')
-      const repo = createRepository(backend, connection)
+      const engine = await openRustStorage(':memory:')
+      const repo = createRepository(backend, engine)
 
-      insertDocument(connection, 'doc_a', 'a.md')
+      try {
+        await insertDocument(engine, 'doc_a', 'a.md')
 
-      const first = await repo.replaceEmbeddings({
-        documentId: 'doc_a',
-        providerConfigId: null,
-        providerId: 'provider',
-        type: 'openai',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        strategy: { type: 'whole_document', properties: {} },
-        documentTimestamp: 100,
-        contentHash: 'hash-v1',
-        chunks: [
-          {
-            ordinal: 0,
-            start: 0,
-            end: 5,
-            text: 'hello',
-            embedding: [1, 0, 0],
-          },
-        ],
-        createdAt: 100,
-        updatedAt: 100,
-      })
+        const first = await repo.replaceEmbeddings({
+          documentId: 'doc_a',
+          providerConfigId: null,
+          providerId: 'provider',
+          type: 'openai',
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: 'test-model',
+          strategy: { type: 'whole_document', properties: {} },
+          documentTimestamp: 100,
+          contentHash: 'hash-v1',
+          chunks: [
+            {
+              ordinal: 0,
+              start: 0,
+              end: 5,
+              text: 'hello',
+              embedding: [1, 0, 0],
+            },
+          ],
+          createdAt: 100,
+          updatedAt: 100,
+        })
 
-      expect(first.status).toBe('applied')
-      expect(first.embeddings).toHaveLength(1)
+        expect(first.status).toBe('applied')
+        expect(first.embeddings).toHaveLength(1)
 
-      const stale = await repo.replaceEmbeddings({
-        documentId: 'doc_a',
-        providerConfigId: null,
-        providerId: 'provider',
-        type: 'openai',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        strategy: { type: 'whole_document', properties: {} },
-        documentTimestamp: 99,
-        contentHash: 'hash-v2',
-        chunks: [
-          {
-            ordinal: 0,
-            start: 0,
-            end: 7,
-            text: 'changed',
-            embedding: [0, 1, 0],
-          },
-        ],
-        createdAt: 101,
-        updatedAt: 101,
-      })
+        const stale = await repo.replaceEmbeddings({
+          documentId: 'doc_a',
+          providerConfigId: null,
+          providerId: 'provider',
+          type: 'openai',
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: 'test-model',
+          strategy: { type: 'whole_document', properties: {} },
+          documentTimestamp: 99,
+          contentHash: 'hash-v2',
+          chunks: [
+            {
+              ordinal: 0,
+              start: 0,
+              end: 7,
+              text: 'changed',
+              embedding: [0, 1, 0],
+            },
+          ],
+          createdAt: 101,
+          updatedAt: 101,
+        })
 
-      expect(stale.status).toBe('stale')
-      expect(stale.embeddings[0]?.contentHash).toBe('hash-v1')
+        expect(stale.status).toBe('stale')
+        expect(stale.embeddings[0]?.contentHash).toBe('hash-v1')
 
-      const stored = await repo.findEmbeddings(
-        'doc_a',
-        'https://openrouter.ai/api/v1',
-        'test-model'
-      )
-      expect(stored).toHaveLength(1)
-      expect(stored[0]?.contentHash).toBe('hash-v1')
-
-      connection.close()
+        const stored = await repo.findEmbeddings(
+          'doc_a',
+          'https://openrouter.ai/api/v1',
+          'test-model'
+        )
+        expect(stored).toHaveLength(1)
+        expect(stored[0]?.contentHash).toBe('hash-v1')
+      } finally {
+        await engine.close()
+      }
     })
 
     test('searchDocument returns top matching chunk', async () => {
-      const connection = createConnection(':memory:')
-      const repo = createRepository(backend, connection)
+      const engine = await openRustStorage(':memory:')
+      const repo = createRepository(backend, engine)
 
-      insertDocument(connection, 'doc_a', 'a.md')
+      try {
+        await insertDocument(engine, 'doc_a', 'a.md')
 
-      await repo.replaceEmbeddings({
-        documentId: 'doc_a',
-        providerConfigId: null,
-        providerId: 'provider',
-        type: 'openai',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        strategy: { type: 'whole_document', properties: {} },
-        documentTimestamp: 100,
-        contentHash: 'hash-v1',
-        chunks: [
-          {
-            ordinal: 0,
-            start: 0,
-            end: 5,
-            text: 'alpha',
-            embedding: [1, 0, 0],
-          },
-          {
-            ordinal: 1,
-            start: 6,
-            end: 10,
-            text: 'beta',
-            embedding: [0, 1, 0],
-          },
-        ],
-        createdAt: 100,
-        updatedAt: 100,
-      })
+        await repo.replaceEmbeddings({
+          documentId: 'doc_a',
+          providerConfigId: null,
+          providerId: 'provider',
+          type: 'openai',
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: 'test-model',
+          strategy: { type: 'whole_document', properties: {} },
+          documentTimestamp: 100,
+          contentHash: 'hash-v1',
+          chunks: [
+            {
+              ordinal: 0,
+              start: 0,
+              end: 5,
+              text: 'alpha',
+              embedding: [1, 0, 0],
+            },
+            {
+              ordinal: 1,
+              start: 6,
+              end: 10,
+              text: 'beta',
+              embedding: [0, 1, 0],
+            },
+          ],
+          createdAt: 100,
+          updatedAt: 100,
+        })
 
-      const matches = await repo.searchDocument({
-        documentId: 'doc_a',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        queryEmbedding: [0.95, 0.05, 0],
-        limit: 1,
-      })
+        const matches = await repo.searchDocument({
+          documentId: 'doc_a',
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: 'test-model',
+          queryEmbedding: [0.95, 0.05, 0],
+          limit: 1,
+        })
 
-      expect(matches).toHaveLength(1)
-      expect(matches[0]?.chunkOrdinal).toBe(0)
-      expect(matches[0]?.chunkText).toBe('alpha')
-
-      connection.close()
+        expect(matches).toHaveLength(1)
+        expect(matches[0]?.chunkOrdinal).toBe(0)
+        expect(matches[0]?.chunkText).toBe('alpha')
+      } finally {
+        await engine.close()
+      }
     })
 
     test('searchProjectDocuments honors scoped project filters', async () => {
-      const connection = createConnection(':memory:')
-      const repo = createRepository(backend, connection)
+      const engine = await openRustStorage(':memory:')
+      const repo = createRepository(backend, engine)
 
-      insertProject(connection, 'proj_1')
-      insertDocument(connection, 'doc_root', 'root.md')
-      insertDocument(connection, 'doc_nested', 'docs/a.md')
-      linkDocumentToProject(connection, 'proj_1', 'doc_root')
-      linkDocumentToProject(connection, 'proj_1', 'doc_nested')
+      try {
+        await insertProject(engine, 'proj_1')
+        await insertDocument(engine, 'doc_root', 'root.md')
+        await insertDocument(engine, 'doc_nested', 'docs/a.md')
+        await linkDocumentToProject(engine, 'proj_1', 'doc_root')
+        await linkDocumentToProject(engine, 'proj_1', 'doc_nested')
 
-      await repo.replaceEmbeddings({
-        documentId: 'doc_root',
-        providerConfigId: null,
-        providerId: 'provider',
-        type: 'openai',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        strategy: { type: 'whole_document', properties: {} },
-        documentTimestamp: 100,
-        contentHash: 'hash-root',
-        chunks: [
-          {
-            ordinal: 0,
-            start: 0,
-            end: 4,
-            text: 'root',
-            embedding: [1, 0, 0],
-          },
-        ],
-        createdAt: 100,
-        updatedAt: 100,
-      })
+        await repo.replaceEmbeddings({
+          documentId: 'doc_root',
+          providerConfigId: null,
+          providerId: 'provider',
+          type: 'openai',
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: 'test-model',
+          strategy: { type: 'whole_document', properties: {} },
+          documentTimestamp: 100,
+          contentHash: 'hash-root',
+          chunks: [
+            {
+              ordinal: 0,
+              start: 0,
+              end: 4,
+              text: 'root',
+              embedding: [1, 0, 0],
+            },
+          ],
+          createdAt: 100,
+          updatedAt: 100,
+        })
 
-      await repo.replaceEmbeddings({
-        documentId: 'doc_nested',
-        providerConfigId: null,
-        providerId: 'provider',
-        type: 'openai',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        strategy: { type: 'whole_document', properties: {} },
-        documentTimestamp: 100,
-        contentHash: 'hash-nested',
-        chunks: [
-          {
-            ordinal: 0,
-            start: 0,
-            end: 6,
-            text: 'nested',
-            embedding: [0, 1, 0],
-          },
-        ],
-        createdAt: 100,
-        updatedAt: 100,
-      })
+        await repo.replaceEmbeddings({
+          documentId: 'doc_nested',
+          providerConfigId: null,
+          providerId: 'provider',
+          type: 'openai',
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: 'test-model',
+          strategy: { type: 'whole_document', properties: {} },
+          documentTimestamp: 100,
+          contentHash: 'hash-nested',
+          chunks: [
+            {
+              ordinal: 0,
+              start: 0,
+              end: 6,
+              text: 'nested',
+              embedding: [0, 1, 0],
+            },
+          ],
+          createdAt: 100,
+          updatedAt: 100,
+        })
 
-      const matches = await repo.searchProjectDocuments({
-        projectId: 'proj_1',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        queryEmbedding: [0.01, 0.99, 0],
-        limit: 5,
-        scope: { type: 'directory_subtree', directoryPath: 'docs' },
-      })
+        const matches = await repo.searchProjectDocuments({
+          projectId: 'proj_1',
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: 'test-model',
+          queryEmbedding: [0.01, 0.99, 0],
+          limit: 5,
+          scope: { type: 'directory_subtree', directoryPath: 'docs' },
+        })
 
-      expect(matches.length).toBeGreaterThan(0)
-      expect(matches.every((match) => match.documentId === 'doc_nested')).toBe(true)
-
-      connection.close()
+        expect(matches.length).toBeGreaterThan(0)
+        expect(matches.every((match) => match.documentId === 'doc_nested')).toBe(true)
+      } finally {
+        await engine.close()
+      }
     })
 
     test('deleteEmbeddingsByDocumentId removes searchable vectors and metadata', async () => {
-      const connection = createConnection(':memory:')
-      const repo = createRepository(backend, connection)
+      const engine = await openRustStorage(':memory:')
+      const repo = createRepository(backend, engine)
 
-      insertDocument(connection, 'doc_a', 'a.md')
-
-      await repo.replaceEmbeddings({
-        documentId: 'doc_a',
-        providerConfigId: null,
-        providerId: 'provider',
-        type: 'openai',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        strategy: { type: 'whole_document', properties: {} },
-        documentTimestamp: 100,
-        contentHash: 'hash-v1',
-        chunks: [
-          {
-            ordinal: 0,
-            start: 0,
-            end: 5,
-            text: 'alpha',
-            embedding: [1, 0, 0],
-          },
-        ],
-        createdAt: 100,
-        updatedAt: 100,
-      })
-
-      await repo.deleteEmbeddingsByDocumentId('doc_a')
-
-      const stored = await repo.findEmbeddings(
-        'doc_a',
-        'https://openrouter.ai/api/v1',
-        'test-model'
-      )
-      expect(stored).toHaveLength(0)
-
-      const matches = await repo.searchDocument({
-        documentId: 'doc_a',
-        baseURL: 'https://openrouter.ai/api/v1',
-        model: 'test-model',
-        queryEmbedding: [1, 0, 0],
-        limit: 5,
-      })
-      expect(matches).toHaveLength(0)
-
-      connection.close()
-    })
-
-    if (backend === 'sqlite') {
-      test('deleteVectorsByReferences can clean vec tables after metadata cascades', async () => {
-        const connection = createConnection(':memory:')
-        const repo = createRepository(backend, connection)
-
-        insertDocument(connection, 'doc_a', 'a.md')
+      try {
+        await insertDocument(engine, 'doc_a', 'a.md')
 
         await repo.replaceEmbeddings({
           documentId: 'doc_a',
@@ -477,33 +440,93 @@ for (const backend of ['sqlite', 'qdrant'] as const) {
           updatedAt: 100,
         })
 
-        const references = await repo.listVectorReferencesByDocumentIds(['doc_a'])
-        expect(references.length).toBeGreaterThan(0)
+        await repo.deleteEmbeddingsByDocumentId('doc_a')
 
-        const beforeVecCount = connection.get<{ count: number }>(
-          'SELECT COUNT(*) AS count FROM document_embedding_vec_3',
-          []
+        const stored = await repo.findEmbeddings(
+          'doc_a',
+          'https://openrouter.ai/api/v1',
+          'test-model'
         )
-        expect(beforeVecCount?.count ?? 0).toBe(1)
+        expect(stored).toHaveLength(0)
 
-        // Simulate a document delete: cascades metadata + vector-row mapping, leaving vec0 rows behind.
-        connection.run('DELETE FROM documents WHERE id = ?', ['doc_a'])
+        const matches = await repo.searchDocument({
+          documentId: 'doc_a',
+          baseURL: 'https://openrouter.ai/api/v1',
+          model: 'test-model',
+          queryEmbedding: [1, 0, 0],
+          limit: 5,
+        })
+        expect(matches).toHaveLength(0)
+      } finally {
+        await engine.close()
+      }
+    })
 
-        const afterMetadata = connection.get<{ count: number }>(
-          'SELECT COUNT(*) AS count FROM document_embeddings WHERE documentId = ?',
-          ['doc_a']
-        )
-        expect(afterMetadata?.count ?? 0).toBe(0)
+    if (backend === 'sqlite') {
+      test('deleteVectorsByReferences can clean vec tables after metadata cascades', async () => {
+        const engine = await openRustStorage(':memory:')
+        const repo = createRepository(backend, engine)
 
-        await repo.deleteVectorsByReferences(references)
+        try {
+          await insertDocument(engine, 'doc_a', 'a.md')
 
-        const vecTable = connection.get<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-          ['document_embedding_vec_3']
-        )
-        expect(vecTable).toBeNull()
+          await repo.replaceEmbeddings({
+            documentId: 'doc_a',
+            providerConfigId: null,
+            providerId: 'provider',
+            type: 'openai',
+            baseURL: 'https://openrouter.ai/api/v1',
+            model: 'test-model',
+            strategy: { type: 'whole_document', properties: {} },
+            documentTimestamp: 100,
+            contentHash: 'hash-v1',
+            chunks: [
+              {
+                ordinal: 0,
+                start: 0,
+                end: 5,
+                text: 'alpha',
+                embedding: [1, 0, 0],
+              },
+            ],
+            createdAt: 100,
+            updatedAt: 100,
+          })
 
-        connection.close()
+          const references = await repo.listVectorReferencesByDocumentIds(['doc_a'])
+          expect(references.length).toBeGreaterThan(0)
+
+          const beforeSearch = await repo.searchDocument({
+            documentId: 'doc_a',
+            baseURL: 'https://openrouter.ai/api/v1',
+            model: 'test-model',
+            queryEmbedding: [1, 0, 0],
+            limit: 5,
+          })
+          expect(beforeSearch).toHaveLength(1)
+
+          await engine.documentsDeleteById(null, 'doc_a')
+
+          const afterMetadata = await repo.findEmbeddings(
+            'doc_a',
+            'https://openrouter.ai/api/v1',
+            'test-model'
+          )
+          expect(afterMetadata).toHaveLength(0)
+
+          await repo.deleteVectorsByReferences(references)
+
+          const afterCleanup = await repo.searchDocument({
+            documentId: 'doc_a',
+            baseURL: 'https://openrouter.ai/api/v1',
+            model: 'test-model',
+            queryEmbedding: [1, 0, 0],
+            limit: 5,
+          })
+          expect(afterCleanup).toHaveLength(0)
+        } finally {
+          await engine.close()
+        }
       })
     }
   })
