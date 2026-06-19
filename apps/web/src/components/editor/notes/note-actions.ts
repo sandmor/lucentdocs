@@ -9,7 +9,7 @@ export function addNoteForBlock(
   info: ActiveBlockInfo,
   notesMap: Y.Map<unknown>,
   authorUserId: string
-): string | null {
+): { id: string; blockId: string } | null {
   const blockId = typeof info.node.attrs.id === 'string' ? info.node.attrs.id : getBlockIdAtPos(view.state.doc, info.pos + 1)
   if (!blockId) return null
 
@@ -19,5 +19,5 @@ export function addNoteForBlock(
     authorUserId,
   })
 
-  return note.id
+  return { id: note.id, blockId }
 }

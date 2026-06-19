@@ -1,15 +1,18 @@
+import { useCallback, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import type * as Y from 'yjs'
 import type { DocumentNoteViewModel } from './notes-store'
-import { deleteNoteFromMap } from './notes-store'
-import { NoteEditor } from './note-editor'
+import { createNoteInMap, deleteNoteFromMap } from './notes-store'
+import { NoteEditor, type NoteEditorHandle } from './note-editor'
 import { useNoteAuthorLabels } from './use-note-author-labels'
+import { cn } from '@/lib/utils'
 
 interface NoteSheetProps {
   blockId: string
@@ -20,7 +23,83 @@ interface NoteSheetProps {
   onClose: () => void
 }
 
+/** Per-note reading / editing state within the sheet */
+function NoteSheetItem({
+  note,
+  authorLabel,
+  authorColor,
+  onDelete,
+}: {
+  note: DocumentNoteViewModel
+  authorLabel: string
+  authorColor: string
+  onDelete: () => void
+}) {
+  const [isEditing, setIsEditing] = useState(false)
+  const editorRef = useRef<NoteEditorHandle>(null)
+
+  const handleBodyClick = useCallback(() => {
+    if (!isEditing) {
+      setIsEditing(true)
+      requestAnimationFrame(() => editorRef.current?.focus())
+    }
+  }, [isEditing])
+
+  const handleBlur = useCallback(() => {
+    requestAnimationFrame(() => {
+      setIsEditing(false)
+    })
+  }, [])
+
+  return (
+    <div className="rounded-lg border border-border/70 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="size-2 rounded-full"
+            style={{ backgroundColor: authorColor }}
+          />
+          <span className="text-sm font-medium">{authorLabel}</span>
+        </div>
+        <button
+          type="button"
+          className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          aria-label="Delete note"
+          onClick={onDelete}
+        >
+          <Trash2 className="size-4" />
+        </button>
+      </div>
+
+      {/* Body — tap to edit */}
+      <div
+        className={cn(
+          isEditing ? 'min-h-16' : 'min-h-0',
+          !isEditing && 'cursor-text'
+        )}
+        onClick={handleBodyClick}
+      >
+        <NoteEditor
+          ref={editorRef}
+          body={note.body}
+          yMap={note.yMap}
+          editable={isEditing}
+          onFocus={() => setIsEditing(true)}
+          onBlur={handleBlur}
+        />
+      </div>
+
+      {!isEditing && (
+        <div className="pointer-events-none mt-1 select-none text-right text-[10px] text-muted-foreground/40">
+          tap to edit
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function NoteSheet({
+  blockId,
   notes,
   notesMap,
   projectId,
@@ -33,41 +112,46 @@ export function NoteSheet({
     projectId
   )
 
+  const handleAddNote = useCallback(() => {
+    createNoteInMap(notesMap, {
+      blockId,
+      placement: 'about',
+      authorUserId: currentUserId,
+    })
+  }, [notesMap, blockId, currentUserId])
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="top-auto bottom-0 max-h-[70vh] translate-y-0 rounded-b-none sm:max-w-lg">
+      <DialogContent className="top-auto bottom-0 max-h-[75vh] translate-y-0 rounded-b-none sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Notes</DialogTitle>
         </DialogHeader>
-        <div className="max-h-[55vh] space-y-4 overflow-y-auto">
+        <div className="flex max-h-[58vh] flex-col gap-3 overflow-y-auto pb-1">
           {notes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No notes for this block.</p>
+            <p className="text-sm text-muted-foreground">No notes for this block yet.</p>
           ) : (
             notes.map((note) => (
-              <div key={note.id} className="rounded-lg border border-border/70 p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="size-2 rounded-full"
-                      style={{ backgroundColor: authorLabels.getColor(note.authorUserId) }}
-                    />
-                    <span className="text-sm font-medium">
-                      {authorLabels.getLabel(note.authorUserId)}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded p-1 text-muted-foreground hover:bg-muted"
-                    aria-label="Delete note"
-                    onClick={() => deleteNoteFromMap(notesMap, note.id)}
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </div>
-                <NoteEditor body={note.body} autoFocus={notes[0]?.id === note.id} />
-              </div>
+              <NoteSheetItem
+                key={note.id}
+                note={note}
+                authorLabel={authorLabels.getLabel(note.authorUserId)}
+                authorColor={authorLabels.getColor(note.authorUserId)}
+                onDelete={() => deleteNoteFromMap(notesMap, note.id)}
+              />
             ))
           )}
+        </div>
+        <div className="pt-1 border-t border-border/50">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-muted-foreground"
+            onClick={handleAddNote}
+          >
+            <Plus className="size-4" />
+            Add note
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

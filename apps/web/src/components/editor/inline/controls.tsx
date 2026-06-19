@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { EditorView } from 'prosemirror-view'
+import type * as Y from 'yjs'
 import type { InlineZoneSession } from '@lucentdocs/shared'
 import { AIZoneFloatingControl, SelectionComposeFloatingControl } from './desktop-controls'
 import { useAIWriterState, useIsCoarsePointer } from './hooks'
@@ -47,6 +48,9 @@ interface InlineAIControlsProps {
   getLocalClientName: () => string | null
   mobileBlockBarInteracting: boolean
   onBlockBarInteractionChange: (interacting: boolean) => void
+  notesMap?: Y.Map<unknown> | null
+  currentUserId?: string
+  onNoteCreated?: (noteId: string, blockId: string) => void
 }
 
 export function InlineAIControls({
@@ -67,6 +71,9 @@ export function InlineAIControls({
   getLocalClientName,
   mobileBlockBarInteracting,
   onBlockBarInteractionChange,
+  notesMap,
+  currentUserId,
+  onNoteCreated,
 }: InlineAIControlsProps) {
   const state = useAIWriterState(view)
   const sessionsById = useEditorStore((s) => s.inlineSessionsById)
@@ -139,6 +146,9 @@ export function InlineAIControls({
         getLocalClientName={getLocalClientName}
         mobileBlockBarInteracting={mobileBlockBarInteracting}
         onBlockBarInteractionChange={onBlockBarInteractionChange}
+        notesMap={notesMap}
+        currentUserId={currentUserId}
+        onNoteCreated={onNoteCreated}
       />
     )
   }

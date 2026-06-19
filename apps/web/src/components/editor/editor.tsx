@@ -23,6 +23,7 @@ import type { SelectionRange } from './selection/types'
 import { SearchResultMarkers, type SearchResultMarker } from './search-result-markers'
 import { BlockHandle } from './block-handle/block-handle'
 import { NotesGutter } from './notes/notes-gutter'
+import { SideElementsProvider } from './side-elements/side-elements-context'
 import { emitAIStateChange } from './ai/writer-store'
 import { getSelectionRangeInView, hasActiveDomSelection } from './selection/dom-selection'
 import { selectionTouchesCodeBlock, shouldShowSelectionCompose } from './inline/utils'
@@ -193,6 +194,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     ReturnType<typeof createYjsProvider>['awareness'] | null
   >(null)
   const [notesMap, setNotesMap] = useState<Y.Map<unknown> | null>(null)
+  const [justCreatedNote, setJustCreatedNote] = useState<{ id: string; blockId: string } | null>(null)
 
   // Selection range also needed as local state for overlay components
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
@@ -723,6 +725,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         }}
         mobileBlockBarInteracting={mobileBlockBarInteracting}
         onBlockBarInteractionChange={handleMobileBlockBarInteractionChange}
+        notesMap={notesMap}
+        currentUserId={noteCreatorUserId}
+        onNoteCreated={(noteId, blockId) => setJustCreatedNote({ id: noteId, blockId })}
       />
       <RemotePresenceOverlay view={editorView} awareness={presenceAwareness} />
       <SearchResultMarkers
@@ -730,19 +735,24 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         container={editorShell}
         markers={searchResultMarkers}
       />
-      <BlockHandle
-        view={editorView}
-        container={editorShell}
-        notesMap={notesMap}
-        noteCreatorUserId={noteCreatorUserId}
-      />
-      <NotesGutter
-        view={editorView}
-        container={editorShell}
-        notesMap={notesMap}
-        projectId={projectId}
-        currentUserId={noteCreatorUserId}
-      />
+      <SideElementsProvider view={editorView} container={editorShell}>
+        <BlockHandle
+          view={editorView}
+          container={editorShell}
+          notesMap={notesMap}
+          noteCreatorUserId={noteCreatorUserId}
+          onNoteCreated={(noteId, blockId) => setJustCreatedNote({ id: noteId, blockId })}
+        />
+        <NotesGutter
+          view={editorView}
+          container={editorShell}
+          notesMap={notesMap}
+          projectId={projectId}
+          currentUserId={noteCreatorUserId}
+          justCreatedNote={justCreatedNote}
+          onJustCreatedNoteHandled={() => setJustCreatedNote(null)}
+        />
+      </SideElementsProvider>
       <SelectionFakeOverlay
         view={editorView}
         selection={selectionRange}

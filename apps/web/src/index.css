@@ -379,7 +379,7 @@
   }
 }
 
-/* ProseMirror editor styles — editorial serif */
+/* ProseMirror styles — editorial serif */
 .ProseMirror {
   flex: 1 1 0%;
   line-height: 1.85;
@@ -661,7 +661,7 @@
 }
 
 /* When cursor is inside a code mark, show it clearly */
-.ProseMirror .ProseMirror-focused code {
+.ProseMirror.ProseMirror-focused code {
   caret-color: var(--foreground);
 }
 
@@ -948,6 +948,18 @@
 
 .note-card {
   border-color: color-mix(in oklch, var(--border) 80%, var(--primary) 20%);
+}
+
+/* Compact note mini-editors — isolated from main ProseMirror styles */
+.note-editor-content.ProseMirror {
+  flex: none;
+  padding-bottom: 0;
+  scroll-padding-bottom: 0;
+  font-size: 0.875rem;
+  line-height: 1.625;
+  font-family: inherit;
+  letter-spacing: normal;
+  outline: none;
 }
 
 .note-editor-content p {

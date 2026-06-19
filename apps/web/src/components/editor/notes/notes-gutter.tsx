@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { EditorView } from 'prosemirror-view'
 import type * as Y from 'yjs'
-import { Trash2, X } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { useIsCoarsePointer } from '../inline/hooks'
-import { subscribeEditorView } from '../prosemirror/view-store'
 import {
   computeRightGutterContainerX,
   EDITOR_NOTE_CARD_WIDTH,
   getEditorContentRect,
-  stackSideElements,
 } from '../side-elements/layout'
+import { SideElement, SideElementLayer } from '../side-elements/side-element'
+import { useSideElementsStore } from '../side-elements/use-side-elements-store'
 import { useDocumentNotes } from './use-document-notes'
 import type { DocumentNoteViewModel } from './notes-store'
 import { deleteNoteFromMap } from './notes-store'
@@ -19,10 +19,13 @@ import {
   resolveNoteAnchorLayout,
 } from './note-anchor'
 import { NoteEditor } from './note-editor'
+import { NoteCard } from './note-card'
 import { buildNoteDecorations, updateNoteDecorations } from './notes-plugin'
 import { NoteSheet } from './note-sheet'
 import { NoteSideOrb } from './note-side-orb'
 import { useNoteAuthorLabels } from './use-note-author-labels'
+
+const ORB_SIZE = 40
 
 interface NotesGutterProps {
   view: EditorView | null
@@ -30,14 +33,8 @@ interface NotesGutterProps {
   notesMap: Y.Map<unknown> | null
   projectId?: string
   currentUserId: string
-}
-
-interface NoteCardLayout {
-  note: DocumentNoteViewModel
-  left: number
-  top: number
-  anchorTop: number
-  height: number
+  justCreatedNote?: { id: string; blockId: string } | null
+  onJustCreatedNoteHandled?: () => void
 }
 
 interface MobileBlockMarkerLayout {
@@ -47,8 +44,19 @@ interface MobileBlockMarkerLayout {
   count: number
 }
 
-const ORB_SIZE = 40
-const EXPANDED_CARD_HEIGHT = 200
+function addExpandedId(prev: Set<string>, id: string): Set<string> {
+  if (prev.has(id)) return prev
+  const next = new Set(prev)
+  next.add(id)
+  return next
+}
+
+function removeExpandedId(prev: Set<string>, id: string): Set<string> {
+  if (!prev.has(id)) return prev
+  const next = new Set(prev)
+  next.delete(id)
+  return next
+}
 
 export function NotesGutter({
   view,
@@ -56,13 +64,15 @@ export function NotesGutter({
   notesMap,
   projectId,
   currentUserId,
+  justCreatedNote,
+  onJustCreatedNoteHandled,
 }: NotesGutterProps) {
   const notes = useDocumentNotes(notesMap)
   const isCoarsePointer = useIsCoarsePointer()
-  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(() => new Set())
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null)
   const [sheetBlockId, setSheetBlockId] = useState<string | null>(null)
-  const [layoutEpoch, setLayoutEpoch] = useState(0)
+  const { layoutEpoch } = useSideElementsStore()
 
   const authorLabels = useNoteAuthorLabels(
     notes.map((note) => note.authorUserId),
@@ -74,12 +84,15 @@ export function NotesGutter({
     if (!view) return notes
     const index = buildTopLevelBlockIdIndex(view)
     return notes.filter((note) => !index.has(note.blockId))
+    // layoutEpoch triggers recompute when editor scrolls/resizes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes, view, layoutEpoch])
 
   const anchoredNotes = useMemo(() => {
     if (!view) return []
     const index = buildTopLevelBlockIdIndex(view)
     return notes.filter((note) => index.has(note.blockId))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes, view, layoutEpoch])
 
   const activeHighlightedBlockId = useMemo(() => {
@@ -87,38 +100,10 @@ export function NotesGutter({
     return notes.some((note) => note.blockId === highlightedBlockId) ? highlightedBlockId : null
   }, [notes, highlightedBlockId])
 
-  const activeExpandedNoteId = useMemo(() => {
-    if (!expandedNoteId) return null
-    return notes.some((note) => note.id === expandedNoteId) ? expandedNoteId : null
-  }, [notes, expandedNoteId])
-
-  const layoutFrameRef = useRef(0)
-
-  useEffect(() => {
-    if (!view) return
-
-    const scheduleRefresh = () => {
-      cancelAnimationFrame(layoutFrameRef.current)
-      layoutFrameRef.current = requestAnimationFrame(() => {
-        setLayoutEpoch((value) => value + 1)
-      })
-    }
-
-    const unsubscribe = subscribeEditorView(view, scheduleRefresh)
-    const resizeObserver = new ResizeObserver(scheduleRefresh)
-    resizeObserver.observe(view.dom)
-    if (container) resizeObserver.observe(container)
-    window.addEventListener('resize', scheduleRefresh)
-    window.addEventListener('scroll', scheduleRefresh, true)
-
-    return () => {
-      cancelAnimationFrame(layoutFrameRef.current)
-      unsubscribe()
-      resizeObserver.disconnect()
-      window.removeEventListener('resize', scheduleRefresh)
-      window.removeEventListener('scroll', scheduleRefresh, true)
-    }
-  }, [view, container])
+  const activeExpandedNoteIds = useMemo(() => {
+    const noteIds = new Set(notes.map((note) => note.id))
+    return new Set([...expandedNoteIds].filter((id) => noteIds.has(id)))
+  }, [notes, expandedNoteIds])
 
   const decorationCacheKey = useMemo(
     () =>
@@ -141,6 +126,26 @@ export function NotesGutter({
     })
     updateNoteDecorations(view, decorations, decorationCacheKey)
   }, [view, notes, activeHighlightedBlockId, decorationCacheKey])
+
+  const [prevJustCreatedNote, setPrevJustCreatedNote] = useState(justCreatedNote)
+  if (justCreatedNote !== prevJustCreatedNote) {
+    setPrevJustCreatedNote(justCreatedNote)
+    if (justCreatedNote) {
+      if (isCoarsePointer) {
+        setSheetBlockId(justCreatedNote.blockId)
+      } else {
+        setExpandedNoteIds((prev) => addExpandedId(prev, justCreatedNote.id))
+      }
+    }
+  }
+
+  const onJustCreatedNoteHandledRef = useRef(onJustCreatedNoteHandled)
+  useEffect(() => {
+    onJustCreatedNoteHandledRef.current = onJustCreatedNoteHandled
+  })
+  useEffect(() => {
+    if (justCreatedNote) onJustCreatedNoteHandledRef.current?.()
+  }, [justCreatedNote])
 
   const mobileMarkers = useMemo((): MobileBlockMarkerLayout[] => {
     if (!view || !container || !isCoarsePointer) return []
@@ -166,9 +171,10 @@ export function NotesGutter({
     }
 
     return markers
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, container, isCoarsePointer, notes, layoutEpoch])
 
-  const cards = useMemo((): NoteCardLayout[] => {
+  const desktopNoteLayouts = useMemo(() => {
     if (!view || !container || isCoarsePointer) return []
 
     const containerRect = container.getBoundingClientRect()
@@ -176,40 +182,30 @@ export function NotesGutter({
     const left = computeRightGutterContainerX(editorRect, containerRect)
     const blockIndex = buildTopLevelBlockIdIndex(view)
 
-    const desired = anchoredNotes.map((note) => {
+    return anchoredNotes.map((note) => {
       const anchor = resolveNoteAnchorLayout(view, note.blockId, note.placement, blockIndex)
-      const isExpanded = activeExpandedNoteId === note.id
-      const height = isExpanded ? EXPANDED_CARD_HEIGHT : ORB_SIZE
       return {
         note,
         left,
         desiredTop: (anchor?.top ?? 0) - containerRect.top,
-        height,
-        anchorTop: anchor?.top ?? 0,
       }
     })
-
-    const stacked = stackSideElements(
-      desired.map((item) => ({
-        id: item.note.id,
-        desiredTop: item.desiredTop,
-        height: item.height,
-      }))
-    )
-
-    return desired.map((item) => ({
-      note: item.note,
-      left: item.left,
-      top: stacked.get(item.note.id) ?? item.desiredTop,
-      anchorTop: item.anchorTop,
-      height: item.height,
-    }))
-  }, [view, container, isCoarsePointer, anchoredNotes, activeExpandedNoteId, layoutEpoch])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, container, isCoarsePointer, anchoredNotes, layoutEpoch])
 
   const handleDeleteNote = (note: DocumentNoteViewModel) => {
     if (!notesMap) return
     deleteNoteFromMap(notesMap, note.id)
+    setExpandedNoteIds((prev) => removeExpandedId(prev, note.id))
   }
+
+  const expandNote = useCallback((noteId: string) => {
+    setExpandedNoteIds((prev) => addExpandedId(prev, noteId))
+  }, [])
+
+  const collapseNote = useCallback((noteId: string) => {
+    setExpandedNoteIds((prev) => removeExpandedId(prev, noteId))
+  }, [])
 
   if (!view || !notesMap) return null
 
@@ -233,78 +229,33 @@ export function NotesGutter({
           </div>
         ))}
 
-      {!isCoarsePointer &&
-        cards.map(({ note, left, top, height }) => {
-          const isExpanded = activeExpandedNoteId === note.id
-
-          if (!isExpanded) {
-            return (
-              <div
-                key={note.id}
-                className="pointer-events-auto absolute z-58"
-                style={{
-                  left: `${Math.round(left)}px`,
-                  top: `${Math.round(top)}px`,
-                  height: `${ORB_SIZE}px`,
-                }}
+      <SideElementLayer>
+        {!isCoarsePointer &&
+          desktopNoteLayouts.map(({ note, left, desiredTop }) => (
+            <SideElement
+              key={note.id}
+              id={`note-${note.id}`}
+              gutter="right"
+              desiredTop={desiredTop}
+              left={left}
+              order={note.createdAt}
+              measureTarget="child"
+            >
+              <NoteCard
+                note={note}
+                authorLabel={authorLabels.getLabel(note.authorUserId)}
+                authorColor={authorLabels.getColor(note.authorUserId)}
+                isExpanded={activeExpandedNoteIds.has(note.id)}
+                isNew={justCreatedNote?.id === note.id}
+                onExpand={() => expandNote(note.id)}
+                onCollapse={() => collapseNote(note.id)}
+                onDelete={() => handleDeleteNote(note)}
                 onMouseEnter={() => setHighlightedBlockId(note.blockId)}
                 onMouseLeave={() => setHighlightedBlockId(null)}
-              >
-                <NoteSideOrb
-                  title="Expand note"
-                  onClick={() => setExpandedNoteId(note.id)}
-                />
-              </div>
-            )
-          }
-
-          return (
-            <div
-              key={note.id}
-              className="note-card pointer-events-auto absolute z-58 rounded-lg border border-border/70 bg-card/95 p-3 shadow-sm backdrop-blur-sm"
-              style={{
-                left: `${Math.round(left)}px`,
-                top: `${Math.round(top)}px`,
-                width: `${EDITOR_NOTE_CARD_WIDTH}px`,
-                minHeight: `${height}px`,
-              }}
-              onMouseEnter={() => setHighlightedBlockId(note.blockId)}
-              onMouseLeave={() => setHighlightedBlockId(null)}
-            >
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: authorLabels.getColor(note.authorUserId) }}
-                  />
-                  <span className="truncate text-xs font-medium text-foreground/80">
-                    {authorLabels.getLabel(note.authorUserId)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    className="rounded p-1 text-muted-foreground hover:bg-muted"
-                    aria-label="Collapse note"
-                    onClick={() => setExpandedNoteId(null)}
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded p-1 text-muted-foreground hover:bg-muted"
-                    aria-label="Delete note"
-                    onClick={() => handleDeleteNote(note)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <NoteEditor body={note.body} autoFocus />
-            </div>
-          )
-        })}
+              />
+            </SideElement>
+          ))}
+      </SideElementLayer>
 
       {!isCoarsePointer && orphanedNotes.length > 0 && container && (
         <div
@@ -343,7 +294,7 @@ export function NotesGutter({
                     <Trash2 className="size-3.5" />
                   </button>
                 </div>
-                <NoteEditor body={note.body} />
+                <NoteEditor body={note.body} yMap={note.yMap} />
               </div>
             ))}
           </div>

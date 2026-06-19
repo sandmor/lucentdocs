@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { EditorView } from 'prosemirror-view'
+import type * as Y from 'yjs'
 import { Button } from '@/components/ui/button'
 import {
   useAnimatedPresence,
@@ -36,6 +37,9 @@ interface MobileInlineAIDockProps {
   getCollaboratorDisplayName: (clientName: string | null | undefined) => string
   getLocalClientName: () => string | null
   onBlockBarInteractionChange: (interacting: boolean) => void
+  notesMap?: Y.Map<unknown> | null
+  currentUserId?: string
+  onNoteCreated?: (noteId: string, blockId: string) => void
 }
 
 function resolveSuggestedByLabel(
@@ -78,6 +82,9 @@ export function MobileInlineAIDock({
   getLocalClientName,
   mobileBlockBarInteracting,
   onBlockBarInteractionChange,
+  notesMap,
+  currentUserId,
+  onNoteCreated,
 }: MobileInlineAIDockProps) {
   const sessionPreviewsById = useEditorStore((s) => s.inlineSessionPreviewById)
   const sessionStreamMetaById = useEditorStore((s) => s.inlineSessionStreamMetaById)
@@ -338,6 +345,9 @@ export function MobileInlineAIDock({
             activeBlock={displayBlock}
             stacked={showAI}
             onInteractionChange={handleBlockBarInteraction}
+            notesMap={notesMap}
+            currentUserId={currentUserId}
+            onNoteCreated={onNoteCreated}
           />
         ) : null}
       </div>

@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Check } from 'lucide-react'
 import { computeBlockHandleLayout, isPointerInBlockHoverZone } from '../side-elements/layout'
+import { useSideElement } from '../side-elements/use-side-element'
 import {
   resolveActiveBlockFromClientY,
   isActiveBlockInDoc,
@@ -42,6 +43,7 @@ interface BlockHandleProps {
   container: HTMLElement | null
   notesMap?: Y.Map<unknown> | null
   noteCreatorUserId: string
+  onNoteCreated?: (noteId: string, blockId: string) => void
 }
 
 interface HandleSnapshot {
@@ -50,7 +52,7 @@ interface HandleSnapshot {
   height: number
 }
 
-export function BlockHandle({ view, container, notesMap, noteCreatorUserId }: BlockHandleProps) {
+export function BlockHandle({ view, container, notesMap, noteCreatorUserId, onNoteCreated }: BlockHandleProps) {
   const isCoarsePointer = useIsCoarsePointer()
   const [activeBlock, setActiveBlock] = useState<ActiveBlockInfo | null>(null)
   const [lastActiveBlock, setLastActiveBlock] = useState<ActiveBlockInfo | null>(null)
@@ -329,7 +331,8 @@ export function BlockHandle({ view, container, notesMap, noteCreatorUserId }: Bl
       if (!view || !effectiveBlock) return
       if (action === 'add-note') {
         if (!notesMap) return
-        addNoteForBlock(view, effectiveBlock, notesMap, noteCreatorUserId)
+        const created = addNoteForBlock(view, effectiveBlock, notesMap, noteCreatorUserId)
+        if (created) onNoteCreated?.(created.id, created.blockId)
         setMenuOpen(null)
         return
       }
@@ -339,7 +342,7 @@ export function BlockHandle({ view, container, notesMap, noteCreatorUserId }: Bl
         clearHandleState()
       }
     },
-    [view, effectiveBlock, clearHandleState, notesMap, noteCreatorUserId]
+    [view, effectiveBlock, clearHandleState, notesMap, noteCreatorUserId, onNoteCreated]
   )
 
   const onGripMouseDown = () => {
@@ -407,16 +410,32 @@ export function BlockHandle({ view, container, notesMap, noteCreatorUserId }: Bl
     emitAIZoneControlLayoutChange()
   }
 
+  const blockProtected =
+    view && effectiveBlock
+      ? blockOverlapsProtectedZone(view, effectiveBlock.pos, effectiveBlock.node.nodeSize)
+      : false
+
+  const { measureRef } = useSideElement({
+    id: 'block-handle-active',
+    gutter: 'left',
+    desiredTop: snapshot?.top ?? 0,
+    order: 0,
+    enabled: Boolean(
+      !isCoarsePointer && view && container && snapshot && effectiveBlock && !blockProtected
+    ),
+  })
+
   if (isCoarsePointer || !view || !container || !effectiveBlock || !snapshot) {
     return null
   }
 
-  if (blockOverlapsProtectedZone(view, effectiveBlock.pos, effectiveBlock.node.nodeSize)) {
+  if (blockProtected) {
     return null
   }
 
   return (
     <div
+      ref={measureRef}
       className={`block-handle pointer-events-auto absolute z-59 flex items-center gap-0.5${isDragging ? ' opacity-50' : ''}`}
       style={{
         left: `${Math.round(snapshot.left)}px`,

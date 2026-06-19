@@ -21,6 +21,8 @@ import {
   turnIntoBlockMenuItems,
   type BlockMenuItem,
 } from './block-menu-config'
+import { addNoteForBlock } from '../notes/note-actions'
+import type * as Y from 'yjs'
 
 type ExpandPanel = 'insert' | 'turn-into' | null
 
@@ -29,6 +31,9 @@ interface MobileBlockBarProps {
   activeBlock: ActiveBlockInfo
   stacked?: boolean
   onInteractionChange: (interacting: boolean) => void
+  notesMap?: Y.Map<unknown> | null
+  currentUserId?: string
+  onNoteCreated?: (noteId: string, blockId: string) => void
 }
 
 function preventFocusSteal(event: React.PointerEvent) {
@@ -40,6 +45,9 @@ export function MobileBlockBar({
   activeBlock,
   stacked = false,
   onInteractionChange,
+  notesMap,
+  currentUserId,
+  onNoteCreated,
 }: MobileBlockBarProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [expandPanel, setExpandPanel] = useState<ExpandPanel>(null)
@@ -56,11 +64,20 @@ export function MobileBlockBar({
 
   const runAction = useCallback(
     (action: BlockActionId) => {
+      if (action === 'add-note') {
+        if (notesMap && currentUserId) {
+          const created = addNoteForBlock(view, activeBlock, notesMap, currentUserId)
+          if (created) onNoteCreated?.(created.id, created.blockId)
+        }
+        setExpandPanel(null)
+        setMoreMenuOpen(false)
+        return
+      }
       handleBlockAction(view, action, activeBlock)
       setExpandPanel(null)
       setMoreMenuOpen(false)
     },
-    [view, activeBlock]
+    [view, activeBlock, notesMap, currentUserId, onNoteCreated]
   )
 
   const togglePanel = (panel: ExpandPanel) => {

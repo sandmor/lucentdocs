@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { EditorState } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { initProseMirrorDoc, ySyncPlugin } from 'y-prosemirror'
@@ -8,59 +8,97 @@ import { baseKeymap } from 'prosemirror-commands'
 import { keymap } from 'prosemirror-keymap'
 import { history } from 'prosemirror-history'
 
+export interface NoteEditorHandle {
+  focus(): void
+}
+
 interface NoteEditorProps {
   body: Y.XmlFragment
+  yMap?: Y.Map<unknown>
   className?: string
-  autoFocus?: boolean
+  editable?: boolean
   onFocus?: () => void
   onBlur?: () => void
 }
 
-export function NoteEditor({ body, className, autoFocus, onFocus, onBlur }: NoteEditorProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const viewRef = useRef<EditorView | null>(null)
+export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
+  function NoteEditor({ body, yMap, className, editable = true, onFocus, onBlur }, ref) {
+    const containerRef = useRef<HTMLDivElement | null>(null)
+    const viewRef = useRef<EditorView | null>(null)
 
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
+    const editableRef = useRef(editable)
+    const onFocusRef = useRef(onFocus)
+    const onBlurRef = useRef(onBlur)
+    const yMapRef = useRef(yMap)
 
-    const { doc, mapping } = initProseMirrorDoc(body, noteSchema)
-    const state = EditorState.create({
-      doc,
-      plugins: [ySyncPlugin(body, { mapping }), history(), keymap(baseKeymap)],
-    })
+    useEffect(() => {
+      editableRef.current = editable
+    }, [editable])
+    useEffect(() => {
+      onFocusRef.current = onFocus
+    }, [onFocus])
+    useEffect(() => {
+      onBlurRef.current = onBlur
+    }, [onBlur])
+    useEffect(() => {
+      yMapRef.current = yMap
+    }, [yMap])
 
-    const view = new EditorView(container, {
-      state,
-      dispatchTransaction(tr) {
-        const next = view.state.apply(tr)
-        view.updateState(next)
+    useImperativeHandle(ref, () => ({
+      focus() {
+        viewRef.current?.focus()
       },
-      attributes: {
-        class: 'note-editor-content outline-none min-h-[4rem] text-sm leading-relaxed',
-      },
-      handleDOMEvents: {
-        focus: () => {
-          onFocus?.()
-          return false
+    }))
+
+    useEffect(() => {
+      const container = containerRef.current
+      if (!container) return
+
+      const { doc, mapping } = initProseMirrorDoc(body, noteSchema)
+      const state = EditorState.create({
+        doc,
+        plugins: [ySyncPlugin(body, { mapping }), history(), keymap(baseKeymap)],
+      })
+
+      const view = new EditorView(container, {
+        state,
+        editable: () => editableRef.current,
+        dispatchTransaction(tr) {
+          const next = view.state.apply(tr)
+          view.updateState(next)
+          if (tr.docChanged && yMapRef.current) {
+            yMapRef.current.set('updatedAt', Date.now())
+          }
         },
-        blur: () => {
-          onBlur?.()
-          return false
+        attributes: {
+          class: 'note-editor-content outline-none text-sm leading-relaxed',
         },
-      },
-    })
+        handleDOMEvents: {
+          focus: () => {
+            onFocusRef.current?.()
+            return false
+          },
+          blur: () => {
+            onBlurRef.current?.()
+            return false
+          },
+        },
+      })
 
-    viewRef.current = view
-    if (autoFocus) {
-      view.focus()
-    }
+      viewRef.current = view
 
-    return () => {
-      view.destroy()
-      viewRef.current = null
-    }
-  }, [body, autoFocus, onBlur, onFocus])
+      return () => {
+        view.destroy()
+        viewRef.current = null
+      }
+    }, [body])
 
-  return <div ref={containerRef} className={className} />
-}
+    useEffect(() => {
+      const view = viewRef.current
+      if (!view) return
+      view.setProps({ editable: () => editable })
+    }, [editable])
+
+    return <div ref={containerRef} className={className} />
+  }
+)
