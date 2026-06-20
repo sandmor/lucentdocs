@@ -14,7 +14,7 @@ import type { ServiceSet } from '../core/services/types.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
 import { buildReadTools } from './tools.js'
 import {
-  buildCurrentFileContext,
+  buildCurrentFileContextWithAnnotations,
   isAbortError,
   readResponseError,
   serializeConversationForPrompt,
@@ -175,16 +175,19 @@ export class GenerationEngine {
       }
 
       const currentFilePath = normalizeDocumentPath(currentDocument.title) || '(untitled)'
-      const fileContextParts = buildCurrentFileContext(
+      const noteRows = await this.#services.documentNotes.listByDocumentId(scope.documentId)
+      const fileContext = buildCurrentFileContextWithAnnotations(
         currentDocument.content,
         selectionFrom,
-        selectionTo
+        selectionTo,
+        noteRows
       )
 
       const rendered = resolveChatPrompt(
         currentFilePath,
-        fileContextParts,
-        serializeConversationForPrompt(baseMessages)
+        fileContext.parts,
+        serializeConversationForPrompt(baseMessages),
+        fileContext.annotationContent
       )
       assertPromptProtocolMode(rendered.definition, 'chat')
 

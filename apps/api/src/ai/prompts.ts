@@ -24,9 +24,15 @@ const TEMPLATE_IDENTIFIER_PATTERN = /^[a-zA-Z][a-zA-Z0-9_]*$/
 const TEMPLATE_REFERENCE_PATTERN = /{{\s*([^{}]+?)\s*}}/g
 
 const MODE_TEMPLATE_VARIABLES: Record<PromptMode, readonly string[]> = {
-  continue: ['contextBefore', 'gapMarker', 'contextAfter', 'instruction'],
-  prompt: ['wrappedContext', 'modeGuidance', 'prompt', 'conversation'],
-  chat: ['currentFilePath', 'currentFileContent', 'chatInstruction', 'conversation'],
+  continue: ['contextBefore', 'gapMarker', 'contextAfter', 'annotations', 'instruction'],
+  prompt: ['wrappedContext', 'annotations', 'modeGuidance', 'prompt', 'conversation'],
+  chat: [
+    'currentFilePath',
+    'currentFileContent',
+    'currentFileAnnotations',
+    'chatInstruction',
+    'conversation',
+  ],
 }
 
 const SYSTEM_PROMPT_CONTINUE = `You are a skilled writing assistant. Your role is to:
@@ -44,8 +50,10 @@ OUTPUT RULES:
 
 CONTEXT MARKERS:
 - <truncation_notice>...</truncation_notice> and <omitted content="..."/> are excerpt-control artifacts, not story text.
+- <annotation id="...">...</annotation> and <annotation id="..." /> locate author annotations; they are not story text.
 - Never continue those marker strings or treat them as narrative events.
 - If these markers appear, infer that surrounding context may be incomplete and continue from the visible prose around the gap.
+- Use matching <annotation_content id="...">...</annotation_content> entries as external author context. Do not reproduce annotation tags or annotation content unless explicitly asked.
 
 Example:
 Context: "John walked into the room. <lucentdocs_writing_gap_v1 /> The door slammed behind him."
@@ -72,6 +80,7 @@ ZONE BOUNDARY MODEL:
 STRICT SAFETY:
 - You may only edit the active AI zone via write tools.
 - Never request or imply edits outside the active AI zone.
+- Annotation tags and annotation content are LucentDocs context markers, not writable manuscript text.
 - Prefer one decisive write action over long back - and - forth.
 - If user request is ambiguous, interpret it as an editing request first, a review request second, and a question third.Ask for clarification if unsure.
 
@@ -98,9 +107,12 @@ CONTEXT MARKERS:
 The active document content may contain special markers indicating the user's cursor context:
 - <selection>text</selection> — the text currently selected by the user
 - <caret /> — the cursor position when no text is selected
+- <annotation id="...">...</annotation> or <annotation id="..." /> — a location linked to external author annotation content
 - <omitted content="earlier"/> — text before the visible excerpt was truncated
 - <omitted content="later"/> — text after the visible excerpt was truncated
-- <truncation_notice> — indicates the excerpt is incomplete and search tools should be used for more context.`
+- <truncation_notice> — indicates the excerpt is incomplete and search tools should be used for more context.
+
+Annotation content is external author context, not document text. Do not reproduce annotation tags or annotation content unless explicitly asked.`
 
 const CONTINUE_USER_TEMPLATE = `Story context:
 
@@ -114,9 +126,13 @@ const CONTINUE_USER_TEMPLATE = `Story context:
 {{contextAfter}}
 </context_after>
 
+Annotation content outside the manuscript:
+{{annotations}}
+
 Marker guide:
 - <truncation_notice>...</truncation_notice> and <omitted content="..."/> are non-story excerpt markers.
 - <lucentdocs_writing_gap_v1 /> is the insertion location.
+- <annotation> markers locate author annotations and are not story text.
 
 Task:
 {{instruction}}`
@@ -126,6 +142,9 @@ const PROMPT_USER_TEMPLATE = `Story context:
 <story_context>
 {{wrappedContext}}
 </story_context>
+
+Annotation content outside the manuscript:
+{{annotations}}
 
 {{modeGuidance}}
 
@@ -142,6 +161,9 @@ const CHAT_USER_TEMPLATE = `Active file path:
 
 Active file excerpt:
 {{currentFileContent}}
+
+Annotation content outside the manuscript:
+{{currentFileAnnotations}}
 
 Conversation so far:
 {{conversation}}
@@ -299,7 +321,8 @@ export function validatePromptTemplatesForMode(
 
 export function buildContinueVariables(
   contextBefore: string,
-  contextAfter: string | null
+  contextAfter: string | null,
+  annotations = '(none)'
 ): Record<string, string> {
   const safeContextBefore = sanitizeContext(contextBefore)
   const safeContextAfter = sanitizeContext(contextAfter ?? '')
@@ -311,6 +334,7 @@ export function buildContinueVariables(
     contextBefore: safeContextBefore,
     gapMarker: WRITING_GAP_MARKER,
     contextAfter: safeContextAfter,
+    annotations: annotations.trim() || '(none)',
     instruction,
   }
 }
@@ -318,7 +342,8 @@ export function buildContinueVariables(
 export function buildPromptVariables(
   contextParts: ContextParts,
   prompt: string,
-  conversation = ''
+  conversation = '',
+  annotations = '(none)'
 ): Record<string, string> {
   const safeParts: ContextParts = {
     ...contextParts,
@@ -350,6 +375,9 @@ export function buildPromptVariables(
     modeGuidanceLines.push(
       '- If asked to change surrounding context outside the selection, ask the user to expand the selection first.'
     )
+    modeGuidanceLines.push(
+      '- Annotation tags and annotation content are external author context, not selected editable text.'
+    )
   } else {
     modeGuidanceLines.push('MODE GUIDANCE:')
     if (contextParts.truncated) {
@@ -361,10 +389,14 @@ export function buildPromptVariables(
     modeGuidanceLines.push('- Use write_zone for direct insertion or replacement.')
     modeGuidanceLines.push('- Use write_zone_choices when the user asks for alternatives.')
     modeGuidanceLines.push('- You cannot edit text outside the AI zone.')
+    modeGuidanceLines.push(
+      '- Annotation tags and annotation content are external author context, not writable manuscript text.'
+    )
   }
 
   return {
     wrappedContext,
+    annotations: annotations.trim() || '(none)',
     modeGuidance: modeGuidanceLines.join('\n'),
     prompt,
     conversation: conversation.trim() || '(no prior inline conversation)',
@@ -374,7 +406,8 @@ export function buildPromptVariables(
 export function buildChatVariables(
   currentFilePath: string,
   contextParts: ContextParts,
-  conversation: string
+  conversation: string,
+  annotations = '(none)'
 ): Record<string, string> {
   const chatInstruction = contextParts.truncated
     ? 'The active file excerpt is incomplete. Use search_project to locate relevant documents, then use search_file and read_file for exact passages.'
@@ -383,6 +416,7 @@ export function buildChatVariables(
   return {
     currentFilePath: currentFilePath.trim() || '(untitled)',
     currentFileContent: sanitizeContext(renderContextParts(contextParts)),
+    currentFileAnnotations: annotations.trim() || '(none)',
     chatInstruction,
     conversation: conversation.trim() || '(no prior messages)',
   }

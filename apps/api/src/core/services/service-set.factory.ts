@@ -10,6 +10,7 @@ import {
   createEmbeddingModelSelectionService,
 } from './aiModelSelection.service.js'
 import { createIndexingSettingsService } from './indexingSettings.service.js'
+import { createDocumentNotesService } from './documentNotes.service.js'
 import {
   createEmbeddingIndexService,
   type EmbeddingIndexRuntimeConfig,
@@ -64,6 +65,7 @@ export function createCoreServiceSet(dependencies: {
         },
       }
     ),
+    documentNotes: createDocumentNotesService(dependencies.repositories),
     chats: createChatsService(dependencies.repositories),
     aiSettings,
     aiModelSelection,

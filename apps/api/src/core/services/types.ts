@@ -7,10 +7,12 @@ import type { AiProviderSelectionService } from './aiModelSelection.service.js'
 import type { EmbeddingIndexService } from './embeddingIndex.service.js'
 import type { AuthService } from './auth.service.js'
 import type { IndexingSettingsService } from './indexingSettings.service.js'
+import type { DocumentNotesService } from './documentNotes.service.js'
 
 export interface ServiceSet {
   projects: ProjectsService
   documents: DocumentsService
+  documentNotes: DocumentNotesService
   chats: ChatsService
   aiSettings: AiSettingsService
   aiModelSelection: AiModelSelectionService

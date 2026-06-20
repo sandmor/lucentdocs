@@ -12,6 +12,10 @@ import { safeValidateUIMessages, type UIMessage } from 'ai'
 import { configManager } from '../config/runtime.js'
 import type { ChatThread } from '../core/services/chats.service.js'
 import { parseDocumentNode } from '../core/services/documentContent.js'
+import {
+  buildAnnotatedPromptContextExcerpt,
+  type AiAnnotationNote,
+} from '../ai/annotation-context.js'
 
 export interface ProjectFileIndex {
   files: Map<string, string>
@@ -183,6 +187,44 @@ export function buildCurrentFileContext(
   }
 
   return buildPromptContextExcerpt(before, 'caret', '', to < docEnd ? after : undefined, budget)
+}
+
+export function buildCurrentFileContextWithAnnotations(
+  content: string,
+  selectionFrom: number | undefined,
+  selectionTo: number | undefined,
+  notes: readonly AiAnnotationNote[]
+): { parts: ContextParts; annotationContent: string } {
+  if (notes.length === 0) {
+    return {
+      parts: buildCurrentFileContext(content, selectionFrom, selectionTo),
+      annotationContent: '(none)',
+    }
+  }
+
+  const documentNode = parseDocumentNode(content)
+  if (!documentNode) {
+    return {
+      parts: buildCurrentFileContext(content, selectionFrom, selectionTo),
+      annotationContent: '(none)',
+    }
+  }
+
+  const docEnd = documentNode.content.size
+  const rawFrom = selectionFrom ?? docEnd
+  const rawTo = selectionTo ?? rawFrom
+  const clampedFrom = Math.max(0, Math.min(rawFrom, docEnd))
+  const clampedTo = Math.max(0, Math.min(rawTo, docEnd))
+  const from = Math.min(clampedFrom, clampedTo)
+  const to = Math.max(clampedFrom, clampedTo)
+
+  return buildAnnotatedPromptContextExcerpt(
+    documentNode,
+    from,
+    to,
+    getPromptExcerptBudget(),
+    notes
+  )
 }
 
 export function serializeConversationForPrompt(messages: UIMessage[]): string {

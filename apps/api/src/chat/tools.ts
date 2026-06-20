@@ -18,6 +18,12 @@ import { configManager } from '../config/runtime.js'
 import type { ServiceSet } from '../core/services/types.js'
 import type { ProjectDocumentSearchResult } from '../core/services/documents.service.js'
 import { renderDocumentContentToMarkdown } from '../core/services/documentContent.js'
+import { parseDocumentNode } from '../core/services/documentContent.js'
+import {
+  extractAnnotationIdsFromMarkers,
+  renderAnnotatedDocumentMarkdown,
+  renderAnnotationContentForPromptMarkerIds,
+} from '../ai/annotation-context.js'
 import {
   SEARCH_QUERY_EMPTY_ERROR,
   formatSemanticChunkSearchMatches,
@@ -233,7 +239,20 @@ export function buildReadTools({ scope, services }: BuildReadToolsContext) {
           throw new Error(`File "${path}" is no longer available in this project.`)
         }
 
-        const fullText = renderDocumentContentToMarkdown(document.content)
+        const noteRows = await services.documentNotes.listByDocumentId(documentId)
+        let fullText = renderDocumentContentToMarkdown(document.content)
+        let aliasByNoteId = new Map<string, string>()
+        let aliasToNoteId = new Map<string, string>()
+        if (noteRows.length > 0) {
+          const documentNode = parseDocumentNode(document.content)
+          if (documentNode) {
+            const annotated = renderAnnotatedDocumentMarkdown(documentNode, noteRows)
+            fullText = annotated.markdown
+            aliasByNoteId = annotated.aliasByNoteId
+            aliasToNoteId = annotated.aliasToNoteId
+          }
+        }
+
         const lines = fullText.length > 0 ? fullText.split('\n') : ['']
         const totalLines = lines.length
         const start = Math.max(1, Math.min(start_line ?? 1, totalLines))
@@ -247,6 +266,17 @@ export function buildReadTools({ scope, services }: BuildReadToolsContext) {
           truncated = true
         }
 
+        const markerIds = extractAnnotationIdsFromMarkers(content)
+        const annotationContent =
+          markerIds.size > 0
+            ? renderAnnotationContentForPromptMarkerIds(
+                noteRows,
+                markerIds,
+                aliasToNoteId,
+                aliasByNoteId
+              )
+            : '(none)'
+
         return {
           path: normalizedPath,
           start_line: start,
@@ -254,6 +284,7 @@ export function buildReadTools({ scope, services }: BuildReadToolsContext) {
           total_lines: totalLines,
           truncated,
           content,
+          annotation_content: annotationContent,
         }
       },
     }),
@@ -290,7 +321,7 @@ export function buildReadTools({ scope, services }: BuildReadToolsContext) {
         const indexing = buildIndexingSummary(resolved)
 
         const notes: string[] = [
-          'The active-file prompt only contains a bounded local excerpt. Use this tool plus read_file when you need broader document context.',
+          'The active-file prompt only contains a bounded local excerpt. Use this tool plus read_file when you need broader document context; read_file includes author annotations for exact context.',
         ]
 
         if (!indexing) {
@@ -405,7 +436,7 @@ export function buildReadTools({ scope, services }: BuildReadToolsContext) {
           searchToolConfig.maxResultLimit
         )
         const notes: string[] = [
-          'Use read_file on the returned paths to inspect exact passages after you identify the relevant documents.',
+          'Use read_file on the returned paths to inspect exact passages and author annotations after you identify the relevant documents.',
         ]
 
         let searchScope:

@@ -105,6 +105,7 @@ interface ResolvedInlinePromptGenerationInput extends InlineScope {
   sessionId: string
   contextBefore: string
   contextAfter?: string
+  annotationContent: string
   truncated?: boolean
   prompt: string
   selectedText?: string
@@ -119,6 +120,7 @@ interface ResolvedInlineContinuationGenerationInput extends InlineScope {
   sessionId: string
   contextBefore: string
   contextAfter?: string
+  annotationContent: string
   truncated?: boolean
   continuationTailAnchor: string
   selectionFrom: number
@@ -858,6 +860,8 @@ export class InlineRuntime {
   ): Promise<ResolvedInlineGenerationInput> {
     const limits = configManager.getConfig().limits
     const budget = limits.promptExcerptChars
+    const snapshotBundle = await this.#yjsRuntime.buildSnapshotBundle(request.documentId)
+    const notes = snapshotBundle.notes
 
     const resolved = await this.#yjsRuntime.applyProsemirrorTransform<InlineContextResolution>(
       request.documentId,
@@ -873,7 +877,13 @@ export class InlineRuntime {
             const caretPos = zoneSnapshot.zoneFound
               ? zoneSnapshot.nodeFrom
               : Math.min(rawFrom, rawTo)
-            const contextResult = getPromptContextForRange(currentDoc, caretPos, caretPos, budget)
+            const contextResult = getPromptContextForRange(
+              currentDoc,
+              caretPos,
+              caretPos,
+              budget,
+              notes
+            )
             const anchorWindow = Math.min(caretPos, 8192)
             const anchorText = currentDoc.textBetween(
               Math.max(0, caretPos - anchorWindow),
@@ -903,7 +913,8 @@ export class InlineRuntime {
             currentDoc,
             selectionFrom,
             selectionTo,
-            budget
+            budget,
+            notes
           )
 
           return {
@@ -952,6 +963,7 @@ export class InlineRuntime {
         ...promptRequest,
         contextBefore: parts.before,
         contextAfter: parts.after,
+        annotationContent: contextResult.annotationContent,
         truncated: parts.truncated,
         selectionFrom: resolved.result.selectionFrom,
         selectionTo: resolved.result.selectionTo,
@@ -965,6 +977,7 @@ export class InlineRuntime {
       ...continuationRequest,
       contextBefore: parts.before,
       contextAfter: parts.after,
+      annotationContent: contextResult.annotationContent,
       truncated: parts.truncated,
       continuationTailAnchor: resolved.result.continuationTailAnchor,
       selectionFrom: resolved.result.selectionFrom,
@@ -1373,7 +1386,7 @@ export class InlineRuntime {
       if (input.mode === 'continue') {
         const contextBefore = generationSession.contextBefore ?? input.contextBefore
         const contextAfter = generationSession.contextAfter ?? input.contextAfter ?? null
-        const rendered = resolveContinuePrompt(contextBefore, contextAfter)
+        const rendered = resolveContinuePrompt(contextBefore, contextAfter, input.annotationContent)
         assertPromptProtocolMode(rendered.definition, 'continue')
         const cleaner = createStreamCleaner(contextBefore, contextAfter)
         const result = streamText({
@@ -1450,7 +1463,8 @@ export class InlineRuntime {
         const rendered = resolveSelectionPrompt(
           contextParts,
           prompt,
-          serializeInlineConversation(generationSession, { excludeTrailingUser: true })
+          serializeInlineConversation(generationSession, { excludeTrailingUser: true }),
+          input.annotationContent
         )
         assertPromptProtocolMode(rendered.definition, 'prompt')
 

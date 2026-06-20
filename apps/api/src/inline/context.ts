@@ -1,9 +1,14 @@
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import type { ContextParts } from '@lucentdocs/shared'
 import { buildPromptContextExcerpt } from '@lucentdocs/shared'
+import {
+  buildAnnotatedPromptContextExcerpt,
+  type AiAnnotationNote,
+} from '../ai/annotation-context.js'
 
 export interface InlinePromptContextResult {
   parts: ContextParts
+  annotationContent: string
   selectionFrom: number
   selectionTo: number
 }
@@ -12,13 +17,24 @@ export function getPromptContextForRange(
   doc: ProseMirrorNode,
   from: number,
   to: number,
-  budget: number
+  budget: number,
+  notes: readonly AiAnnotationNote[] = []
 ): InlinePromptContextResult {
   const docEnd = doc.content.size
   const clampedFrom = Math.max(0, Math.min(from, docEnd))
   const clampedTo = Math.max(0, Math.min(to, docEnd))
   const safeFrom = Math.min(clampedFrom, clampedTo)
   const safeTo = Math.max(clampedFrom, clampedTo)
+
+  if (notes.length > 0) {
+    const annotated = buildAnnotatedPromptContextExcerpt(doc, safeFrom, safeTo, budget, notes)
+    return {
+      parts: annotated.parts,
+      annotationContent: annotated.annotationContent,
+      selectionFrom: safeFrom,
+      selectionTo: safeTo,
+    }
+  }
 
   // Avoid materializing full document text for very large documents. We only need
   // a local window around the selection/caret, and prompt-excerpting enforces the
@@ -43,6 +59,7 @@ export function getPromptContextForRange(
 
   return {
     parts,
+    annotationContent: '(none)',
     selectionFrom: safeFrom,
     selectionTo: safeTo,
   }

@@ -27,30 +27,33 @@ function renderPrompt(
 
 export function resolveContinuePrompt(
   contextBefore: string,
-  contextAfter: string | null
+  contextAfter: string | null,
+  annotations = '(none)'
 ): RenderedPrompt {
   const definition = promptManager.resolvePromptForMode('continue')
-  const variables = buildContinueVariables(contextBefore, contextAfter)
+  const variables = buildContinueVariables(contextBefore, contextAfter, annotations)
   return renderPrompt(definition, variables)
 }
 
 export function resolveSelectionPrompt(
   contextParts: ContextParts,
   prompt: string,
-  conversation = ''
+  conversation = '',
+  annotations = '(none)'
 ): RenderedPrompt {
   const definition = promptManager.resolvePromptForMode('prompt')
-  const variables = buildPromptVariables(contextParts, prompt, conversation)
+  const variables = buildPromptVariables(contextParts, prompt, conversation, annotations)
   return renderPrompt(definition, variables)
 }
 
 export function resolveChatPrompt(
   currentFilePath: string,
   contextParts: ContextParts,
-  conversation: string
+  conversation: string,
+  annotations = '(none)'
 ): RenderedPrompt {
   const definition = promptManager.resolvePromptForMode('chat')
-  const variables = buildChatVariables(currentFilePath, contextParts, conversation)
+  const variables = buildChatVariables(currentFilePath, contextParts, conversation, annotations)
   return renderPrompt(definition, variables)
 }
 

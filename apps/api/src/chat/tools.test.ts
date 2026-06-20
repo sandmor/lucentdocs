@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   INLINE_AI_MAX_ZONE_CHOICES,
+  parseContent,
   parseInlineZoneWriteAction,
+  schema,
   type InlineZoneWriteAction,
 } from '@lucentdocs/shared'
 import { configManager } from '../config/runtime.js'
@@ -224,6 +226,176 @@ The town below stays dark and quiet.`)
     expect(result.semantic_matches[0]?.match_type).toBe('snippet')
     expect(result.semantic_matches[0]?.preview.toLowerCase()).toContain('silver forest')
     expect(result.notes[0]).toContain('bounded local excerpt')
+  })
+
+  test('read_file includes annotation markers and annotation content by default', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/annotated.md',
+      toEditorContent(`First paragraph.
+
+Second paragraph.`)
+    )
+
+    if (!document) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    const storedDocument = await adapter.services.documents.getForProject(project.id, document.id)
+    if (!storedDocument) {
+      throw new Error('Expected stored document to be readable.')
+    }
+
+    const parsed = parseContent(storedDocument.content)
+    const storedDocNode = schema.nodeFromJSON(parsed.doc)
+    const firstBlockId = storedDocNode.child(0).attrs.id
+    if (typeof firstBlockId !== 'string') {
+      throw new Error('Expected first block to have an id.')
+    }
+
+    await adapter.repositories.documentNotes.replaceAllForDocument(document.id, [
+      {
+        id: 'note_1',
+        documentId: document.id,
+        blockId: firstBlockId,
+        placement: 'about',
+        content: JSON.stringify({
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Use this hidden context.' }],
+            },
+          ],
+        }),
+        authorUserId: 'owner_1',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    const tools = buildReadTools({
+      scope: {
+        projectId: project.id,
+        documentId: document.id,
+      },
+      services: adapter.services,
+    })
+    const execute = tools.read_file.execute as
+      | ((input: { path: string; start_line?: number; end_line?: number }) => Promise<{
+          content: string
+          annotation_content: string
+        }>)
+      | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    const result = await execute({ path: 'chapters/annotated.md' })
+
+    expect(result.content).toContain('<annotation id="n1">')
+    expect(result.content).toContain('First paragraph.')
+    expect(result.content).toContain('</annotation>')
+    expect(result.annotation_content).toContain('<annotation_content id="n1">')
+    expect(result.annotation_content).toContain('Use this hidden context.')
+  })
+
+  test('read_file scopes annotation_content to markers in the returned line slice', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/annotated.md',
+      toEditorContent(`First paragraph.
+
+Second paragraph.`)
+    )
+
+    if (!document) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    const storedDocument = await adapter.services.documents.getForProject(project.id, document.id)
+    if (!storedDocument) {
+      throw new Error('Expected stored document to be readable.')
+    }
+
+    const parsed = parseContent(storedDocument.content)
+    const storedDocNode = schema.nodeFromJSON(parsed.doc)
+    const firstBlockId = storedDocNode.child(0).attrs.id
+    if (typeof firstBlockId !== 'string') {
+      throw new Error('Expected first block to have an id.')
+    }
+
+    await adapter.repositories.documentNotes.replaceAllForDocument(document.id, [
+      {
+        id: 'note_1',
+        documentId: document.id,
+        blockId: firstBlockId,
+        placement: 'about',
+        content: JSON.stringify({
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Use this hidden context.' }],
+            },
+          ],
+        }),
+        authorUserId: 'owner_1',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    const tools = buildReadTools({
+      scope: {
+        projectId: project.id,
+        documentId: document.id,
+      },
+      services: adapter.services,
+    })
+    const execute = tools.read_file.execute as
+      | ((input: { path: string; start_line?: number; end_line?: number }) => Promise<{
+          content: string
+          annotation_content: string
+        }>)
+      | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    const fullResult = await execute({ path: 'chapters/annotated.md' })
+    const fullLines = fullResult.content.split('\n')
+    const secondParagraphLine =
+      fullLines.findIndex((line) => line.includes('Second paragraph.')) + 1
+    const annotationOpenLine =
+      fullLines.findIndex((line) => line.includes('<annotation id="n1">')) + 1
+    const firstParagraphLine =
+      fullLines.findIndex((line) => line.includes('First paragraph.')) + 1
+
+    expect(secondParagraphLine).toBeGreaterThan(0)
+    expect(annotationOpenLine).toBeGreaterThan(0)
+    expect(firstParagraphLine).toBeGreaterThan(0)
+
+    const excluded = await execute({
+      path: 'chapters/annotated.md',
+      start_line: secondParagraphLine,
+      end_line: secondParagraphLine,
+    })
+    expect(excluded.content).not.toContain('n1')
+    expect(excluded.annotation_content).toBe('(none)')
+
+    const included = await execute({
+      path: 'chapters/annotated.md',
+      start_line: annotationOpenLine,
+      end_line: firstParagraphLine,
+    })
+    expect(included.content).toContain('<annotation id="n1">')
+    expect(included.annotation_content).toContain('<annotation_content id="n1">')
+    expect(included.annotation_content).toContain('Use this hidden context.')
   })
 
   test('search_project returns project-wide matches with indexing metadata', async () => {
