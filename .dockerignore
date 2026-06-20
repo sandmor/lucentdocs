@@ -1,0 +1,48 @@
+# dependencies and build output
+node_modules
+**/node_modules
+target
+**/target
+dist
+**/dist
+out
+*.tgz
+
+# user data and test artifacts
+data
+data-test
+apps/api/tmp
+tmp
+coverage
+*.lcov
+*.db-wal
+*.db-shm
+
+# version control and local env
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# IDE and OS
+.idea
+.DS_Store
+*.tsbuildinfo
+.eslintcache
+.cache
+
+# Playwright
+**/playwright-report
+**/test-results
+**/.cache/ms-playwright
+
+# Docker (avoid recursive context)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# docs and CI (not needed in image)
+.github
+*.md
+!README.md

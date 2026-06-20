@@ -1,0 +1,41 @@
+services:
+  lucentdocs:
+    image: sandmor/lucentdocs:latest
+    ports:
+      - "5677:5677"
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      NODE_ENV: production
+      LUCENTDOCS_DATA_DIR: /app/data
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - lucentdocs-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:5677/.well-known/docker-health').then((r)=>process.exit(r.status===204?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  qdrant:
+    profiles:
+      - qdrant
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  lucentdocs-data:
+  qdrant-data:

@@ -54,6 +54,34 @@ bun run build
 bun run serve
 ```
 
+## Docker deployment
+
+```bash
+cp .env.example .env   # edit as needed
+docker compose up -d
+```
+
+Pulls [`sandmor/lucentdocs:latest`](https://hub.docker.com/r/sandmor/lucentdocs). The app is at `http://localhost:5677`. Data persists in the `lucentdocs-data` volume. Compose sets `HOST`, `NODE_ENV`, `LUCENTDOCS_DATA_DIR`, and `QDRANT_URL` for the container.
+
+Optional Qdrant (`qdrant/qdrant:latest`): set `VECTOR_STORAGE=qdrant` in `.env`, then:
+
+```bash
+docker compose --profile qdrant up -d
+```
+
+### CI image publishing
+
+The [Docker workflow](.github/workflows/docker.yml) builds on pull requests and pushes to [Docker Hub](https://hub.docker.com/r/sandmor/lucentdocs) on pushes to `master` and version tags (`v*`).
+
+Set these repository secrets:
+
+| Secret | Value |
+|--------|-------|
+| `DOCKER_USERNAME` | Docker Hub username |
+| `DOCKER_PASSWORD` | Docker Hub access token |
+
+On `master`, published tags include `latest` and `sha-<short-sha>`. Version tags (for example `v1.2.3`) also receive semver tags.
+
 ## Other commands
 
 ```bash
