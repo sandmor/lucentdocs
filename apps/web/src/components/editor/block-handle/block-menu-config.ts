@@ -13,10 +13,12 @@ import type { EditorView } from 'prosemirror-view'
 import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import type { ActiveBlockInfo, BlockActionId } from '../prosemirror/block-resolve'
 import { supportsTurnInto } from '../prosemirror/block-resolve'
+import { supportsTurnIntoNote } from '../notes/note-transforms'
 
 const PROTECTED_BLOCK_ACTIONS = new Set<BlockActionId>([
   'turn-into-paragraph',
   'turn-into-code',
+  'turn-into-note',
   'duplicate',
   'delete',
 ])
@@ -63,6 +65,12 @@ export const turnIntoBlockMenuItems: BlockMenuItem[] = [
     isEnabled: (info) => supportsTurnInto(info.node),
     isChecked: (info) => info.node.type.name === 'code_block',
   },
+  {
+    id: 'turn-into-note',
+    label: 'Note',
+    icon: MessageSquareText,
+    isEnabled: (info) => supportsTurnIntoNote(info.node),
+  },
 ]
 
 export const moreBlockMenuItems: BlockMenuItem[] = [
@@ -70,11 +78,13 @@ export const moreBlockMenuItems: BlockMenuItem[] = [
     id: 'add-note',
     label: 'Add note',
     icon: MessageSquareText,
+    isEnabled: (info) => !isListType(info.node.type.name),
   },
   {
     id: 'duplicate',
     label: 'Duplicate',
     icon: Copy,
+    isEnabled: (info) => info.node.type.name !== 'note_marker',
   },
   {
     id: 'delete',
@@ -83,6 +93,10 @@ export const moreBlockMenuItems: BlockMenuItem[] = [
     destructive: true,
   },
 ]
+
+function isListType(typeName: string): boolean {
+  return typeName === 'bullet_list' || typeName === 'ordered_list' || typeName === 'list_item'
+}
 
 export function isProtectedBlockAction(action: BlockActionId): boolean {
   return PROTECTED_BLOCK_ACTIONS.has(action) || action === 'move-up' || action === 'move-down'

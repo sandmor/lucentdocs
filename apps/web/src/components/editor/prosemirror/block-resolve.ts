@@ -11,6 +11,7 @@ export type BlockActionId =
   | 'insert-paragraph'
   | 'insert-code'
   | 'add-note'
+  | 'turn-into-note'
   | 'turn-into-paragraph'
   | 'turn-into-code'
   | 'move-up'
@@ -19,6 +20,11 @@ export type BlockActionId =
   | 'delete'
 
 const TURN_INTO_TARGET_TYPES = new Set(['paragraph', 'code_block'])
+const LIST_BLOCK_TYPES = new Set(['bullet_list', 'ordered_list', 'list_item'])
+
+export function isListBlockType(typeName: string): boolean {
+  return LIST_BLOCK_TYPES.has(typeName)
+}
 
 export function resolveBlockAtPos(view: EditorView, docPos: number): ActiveBlockInfo | null {
   const { doc } = view.state
@@ -153,6 +159,7 @@ export function canMoveBlockDown(doc: PMNode, pos: number, nodeSize: number): bo
 }
 
 export function supportsTurnInto(node: PMNode): boolean {
+  if (node.type.name === 'note_marker') return false
   return TURN_INTO_TARGET_TYPES.has(node.type.name)
 }
 

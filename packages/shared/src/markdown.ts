@@ -38,18 +38,45 @@ function serializeCodeBlock(state: MarkdownSerializerState, node: Node) {
   state.closeBlock(node)
 }
 
+function serializeNoteMarker() {
+  // Ephemeral editor-only node — omitted from export.
+}
+
+function serializeAiZone(state: MarkdownSerializerState, node: Node) {
+  state.renderContent(node)
+}
+
 export const lucentMarkdownSerializer = new MarkdownSerializer(
   {
     ...defaultMarkdownSerializer.nodes,
     code_block: serializeCodeBlock,
+    note_marker: serializeNoteMarker,
   },
   defaultMarkdownSerializer.marks
+)
+
+/** Markdown serializer that unwraps ai_zone inline content for stored-doc export. */
+export const lucentExportMarkdownSerializer = new MarkdownSerializer(
+  {
+    ...lucentMarkdownSerializer.nodes,
+    ai_zone: serializeAiZone,
+  },
+  lucentMarkdownSerializer.marks
 )
 
 export function proseMirrorDocToMarkdown(doc: JsonObject): MarkdownResult<string> {
   try {
     const node = schema.nodeFromJSON(doc)
     return { ok: true, value: lucentMarkdownSerializer.serialize(node) }
+  } catch (e) {
+    return { ok: false, error: { kind: 'serialize_failed', cause: e } }
+  }
+}
+
+export function proseMirrorDocToExportMarkdown(doc: JsonObject): MarkdownResult<string> {
+  try {
+    const node = schema.nodeFromJSON(doc)
+    return { ok: true, value: lucentExportMarkdownSerializer.serialize(node) }
   } catch (e) {
     return { ok: false, error: { kind: 'serialize_failed', cause: e } }
   }

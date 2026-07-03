@@ -75,6 +75,7 @@ export function handleBlockAction(
       moveBlockDown(view, info)
       break
     case 'duplicate': {
+      if (node.type.name === 'note_marker') return
       const newNode = node.type.create(node.attrs, node.content)
       insertAfter(newNode)
       break

@@ -13,7 +13,11 @@ export const BLOCK_ID_NODE_TYPES = new Set([
   'bullet_list',
   'ordered_list',
   'list_item',
+  'note_marker',
 ])
+
+/** Document nodes that exist only in the editor and are omitted from export. */
+export const EPHEMERAL_DOC_NODE_TYPES = new Set(['note_marker'])
 
 function isRecord(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

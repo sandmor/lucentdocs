@@ -5,7 +5,7 @@ import { ySyncPluginKey } from 'y-prosemirror'
 import { gapBreaksZoneSegmentChain } from '@lucentdocs/shared'
 import { getAIZones, type AIZone, aiWriterPluginKey } from './writer-plugin'
 
-const STRUCTURAL_GAP_BLOCK_TYPES = new Set(['code_block', 'horizontal_rule'])
+const STRUCTURAL_GAP_BLOCK_TYPES = new Set(['code_block', 'horizontal_rule', 'note_marker'])
 
 export const AI_ZONE_ALLOWED_META = 'aiZoneAllowDocChange'
 

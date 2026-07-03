@@ -18,6 +18,8 @@ import { installYjsSelectionPatch } from './yjs-selection-patch'
 import { blockDragPlugin } from './block-drag-plugin'
 import { createBlockIdPlugin } from '../notes/block-id-plugin'
 import { createNotesViewPlugin } from '../notes/notes-plugin'
+import { createNotesLifecyclePlugin } from '../notes/notes-lifecycle-plugin'
+import { createNoteMarkerClipboardPlugin } from '../notes/note-marker-clipboard-plugin'
 
 export type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>
 
@@ -52,6 +54,7 @@ interface BuildPluginsOptions {
   aiHandlers?: AIWriterActionHandlers
   aiWriterController?: AIWriterController
   collaboration?: CollaborationOptions
+  getNotesMap?: () => Y.Map<unknown> | null
 }
 
 function buildCollaborationPlugins(options: CollaborationOptions): Plugin[] {
@@ -90,7 +93,7 @@ function buildFormatKeymap() {
 }
 
 export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
-  const { aiHandlers, aiWriterController, collaboration } = options
+  const { aiHandlers, aiWriterController, collaboration, getNotesMap } = options
 
   const effectiveHandlers: AIWriterActionHandlers = aiHandlers ?? {
     onAccept() {},
@@ -106,6 +109,10 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
 
   plugins.push(createBlockIdPlugin())
   plugins.push(createNotesViewPlugin())
+  if (getNotesMap) {
+    plugins.push(createNotesLifecyclePlugin(getNotesMap))
+  }
+  plugins.push(createNoteMarkerClipboardPlugin())
   plugins.push(createAIWriterPlugin(effectiveHandlers))
   plugins.push(buildInputRules())
 

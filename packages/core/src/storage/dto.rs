@@ -63,8 +63,8 @@ pub struct DocumentContentDto {
 pub struct DocumentNoteDto {
   pub id: String,
   pub document_id: String,
-  pub block_id: String,
-  pub placement: String,
+  pub anchor_kind: String,
+  pub anchor_id: String,
   pub content: String,
   pub author_user_id: String,
   pub created_at: i64,

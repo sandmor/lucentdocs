@@ -9,13 +9,13 @@ import {
 
 function note(
   id: string,
-  blockId: string,
-  placement: AiAnnotationNote['placement']
+  anchorId: string,
+  anchorKind: AiAnnotationNote['anchorKind']
 ): AiAnnotationNote {
   return {
     id,
-    blockId,
-    placement,
+    anchorId,
+    anchorKind,
     content: {
       type: 'doc',
       content: [{ type: 'paragraph', content: [{ type: 'text', text: `content for ${id}` }] }],
@@ -28,6 +28,14 @@ function note(
 function makeDoc() {
   return schema.nodes.doc.create(null, [
     schema.nodes.paragraph.create({ id: 'block-a' }, schema.text('Alpha paragraph.')),
+    schema.nodes.paragraph.create({ id: 'block-b' }, schema.text('Beta paragraph.')),
+  ])
+}
+
+function makeDocWithMarker() {
+  return schema.nodes.doc.create(null, [
+    schema.nodes.paragraph.create({ id: 'block-a' }, schema.text('Alpha paragraph.')),
+    schema.nodes.note_marker.create({ id: 'marker-1' }),
     schema.nodes.paragraph.create({ id: 'block-b' }, schema.text('Beta paragraph.')),
   ])
 }
@@ -65,26 +73,23 @@ describe('extractAnnotationIdsFromMarkers', () => {
 })
 
 describe('annotation context rendering', () => {
-  test('wraps about notes and inserts inter-block markers', () => {
-    const rendered = renderAnnotatedDocumentMarkdown(makeDoc(), [
-      note('n-about', 'block-a', 'about'),
-      note('n-after', 'block-a', 'after'),
-      note('n-before', 'block-b', 'before'),
+  test('wraps block notes and inserts marker note annotations', () => {
+    const rendered = renderAnnotatedDocumentMarkdown(makeDocWithMarker(), [
+      note('n-block', 'block-a', 'block'),
+      note('n-marker', 'marker-1', 'marker'),
     ])
 
     expect(rendered.markdown).toContain('<annotation id="n1">')
     expect(rendered.markdown).toContain('Alpha paragraph.')
     expect(rendered.markdown).toContain('</annotation>')
     expect(rendered.markdown).toContain('<annotation id="n2" />')
-    expect(rendered.markdown).toContain('<annotation id="n3" />')
     expect(rendered.annotationContent).toContain('<annotation_content id="n1">')
-    expect(rendered.annotationContent).toContain('content for n-after')
-    expect(rendered.annotationContent).toContain('content for n-before')
+    expect(rendered.annotationContent).toContain('content for n-marker')
   })
 
   test('omits orphaned notes', () => {
     const rendered = renderAnnotatedDocumentMarkdown(makeDoc(), [
-      note('n-missing', 'missing', 'about'),
+      note('n-missing', 'missing', 'block'),
     ])
 
     expect(rendered.markdown).not.toContain('n-missing')
@@ -94,7 +99,7 @@ describe('annotation context rendering', () => {
   test('adds annotation markers to bounded prompt context', () => {
     const doc = makeDoc()
     const result = buildAnnotatedPromptContextExcerpt(doc, 1, 1, 12_000, [
-      note('n-about', 'block-a', 'about'),
+      note('n-block', 'block-a', 'block'),
     ])
 
     expect(result.parts.before).toBe('')
@@ -107,7 +112,7 @@ describe('annotation context rendering', () => {
     const doc = makeLongDoc()
     const caretPos = doc.content.size - 1
     const result = buildAnnotatedPromptContextExcerpt(doc, caretPos, caretPos, 100, [
-      note('real-note-id', 'block-a', 'about'),
+      note('real-note-id', 'block-a', 'block'),
     ])
 
     expect(result.parts.before).not.toContain('<annotation id="n1">')

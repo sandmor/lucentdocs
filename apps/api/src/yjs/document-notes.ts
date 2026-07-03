@@ -10,7 +10,7 @@ import {
   schema,
   type DocumentNoteRecord,
   type DocumentNoteSnapshot,
-  type NotePlacement,
+  type NoteAnchorKind,
 } from '@lucentdocs/shared'
 import type { JsonObject } from '@lucentdocs/shared'
 
@@ -18,8 +18,8 @@ export const NOTES_MAP_KEY = 'notes'
 
 export interface SerializedNoteFromYjs {
   id: string
-  blockId: string
-  placement: NotePlacement
+  anchorKind: NoteAnchorKind
+  anchorId: string
   content: JsonObject
   authorUserId: string
   createdAt: number
@@ -37,18 +37,18 @@ export function serializeNotesMap(doc: Y.Doc): SerializedNoteFromYjs[] {
   notesMap.forEach((value, noteId) => {
     if (!(value instanceof Y.Map)) return
 
-    const blockId = value.get('blockId')
-    const placement = value.get('placement')
+    const anchorKind = value.get('anchorKind')
+    const anchorId = value.get('anchorId')
     const body = value.get('body')
     const authorUserId = value.get('authorUserId')
-    if (typeof blockId !== 'string' || typeof placement !== 'string') return
+    if (typeof anchorKind !== 'string' || typeof anchorId !== 'string') return
     if (!(body instanceof Y.XmlFragment)) return
     if (typeof authorUserId !== 'string' || authorUserId.length === 0) return
 
     notes.push({
       id: typeof value.get('id') === 'string' ? (value.get('id') as string) : noteId,
-      blockId,
-      placement: placement as NotePlacement,
+      anchorKind: anchorKind as NoteAnchorKind,
+      anchorId,
       content: yXmlFragmentToProseMirrorRootNode(body, noteSchema).toJSON() as JsonObject,
       authorUserId,
       createdAt: typeof value.get('createdAt') === 'number' ? (value.get('createdAt') as number) : Date.now(),
@@ -83,8 +83,8 @@ export function hydrateNotesMap(doc: Y.Doc, records: DocumentNoteRecord[]): void
       const bodyFragment = new Y.XmlFragment()
 
       noteMap.set('id', snapshot.id)
-      noteMap.set('blockId', snapshot.blockId)
-      noteMap.set('placement', snapshot.placement)
+      noteMap.set('anchorKind', snapshot.anchorKind)
+      noteMap.set('anchorId', snapshot.anchorId)
       noteMap.set('authorUserId', snapshot.authorUserId)
       noteMap.set('createdAt', snapshot.createdAt)
       noteMap.set('updatedAt', snapshot.updatedAt)

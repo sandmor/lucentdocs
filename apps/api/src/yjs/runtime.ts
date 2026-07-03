@@ -347,8 +347,8 @@ export class YjsRuntime {
     const noteRecords = bundle.notes.map((note) => ({
       id: note.id,
       documentId: documentName,
-      blockId: note.blockId,
-      placement: note.placement,
+      anchorKind: note.anchorKind,
+      anchorId: note.anchorId,
       content: JSON.stringify(note.content),
       authorUserId: note.authorUserId,
       createdAt: note.createdAt,

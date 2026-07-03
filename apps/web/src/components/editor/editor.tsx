@@ -17,6 +17,7 @@ import { useAIWriterState } from './inline/hooks'
 import { RemotePresenceOverlay } from './collaboration/remote-presence-overlay'
 import { createAIBubbleNodeViews } from './collaboration/ai-bubble-node-view'
 import { createCodeBlockNodeView } from './nodes/code-block-node-view'
+import { createNoteMarkerNodeView } from './nodes/note-marker-node-view'
 import { AIBubblePresenceStore } from './collaboration/ai-bubble-presence'
 import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
@@ -194,7 +195,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     ReturnType<typeof createYjsProvider>['awareness'] | null
   >(null)
   const [notesMap, setNotesMap] = useState<Y.Map<unknown> | null>(null)
-  const [justCreatedNote, setJustCreatedNote] = useState<{ id: string; blockId: string } | null>(null)
+  const [justCreatedNote, setJustCreatedNote] = useState<{ id: string; anchorId: string } | null>(null)
+  const notesMapRef = useRef<Y.Map<unknown> | null>(null)
 
   // Selection range also needed as local state for overlay components
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
@@ -344,6 +346,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     const state = EditorState.create({
       doc: pmDoc,
       plugins: buildPlugins({
+        getNotesMap: () => notesMapRef.current,
         collaboration: {
           yjsFragment: type,
           yjsMapping: mapping as ProsemirrorMapping,
@@ -371,6 +374,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       nodeViews: {
         ...createAIBubbleNodeViews(bubblePresence),
         ...createCodeBlockNodeView(),
+        note_marker: createNoteMarkerNodeView(),
       },
       dispatchTransaction(tr) {
         const previousZones = aiWriterPluginKey.getState(view.state)?.zones ?? []
@@ -449,6 +453,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       if (!destroyed) {
         setPresenceAwareness(provider.awareness)
         setNotesMap(provider.notes)
+        notesMapRef.current = provider.notes
       }
     })
     setEditorView(view)
@@ -536,6 +541,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       viewRef.current = null
       setPresenceAwareness(null)
       setNotesMap(null)
+      notesMapRef.current = null
       setEditorView(null)
       setStoreEditorView(null)
       setStoreEditorSelection(null)
@@ -727,7 +733,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         onBlockBarInteractionChange={handleMobileBlockBarInteractionChange}
         notesMap={notesMap}
         currentUserId={noteCreatorUserId}
-        onNoteCreated={(noteId, blockId) => setJustCreatedNote({ id: noteId, blockId })}
+        onNoteCreated={(noteId, anchorId) => setJustCreatedNote({ id: noteId, anchorId })}
       />
       <RemotePresenceOverlay view={editorView} awareness={presenceAwareness} />
       <SearchResultMarkers
@@ -741,7 +747,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           container={editorShell}
           notesMap={notesMap}
           noteCreatorUserId={noteCreatorUserId}
-          onNoteCreated={(noteId, blockId) => setJustCreatedNote({ id: noteId, blockId })}
+          onNoteCreated={(noteId, anchorId) => setJustCreatedNote({ id: noteId, anchorId })}
         />
         <NotesGutter
           view={editorView}

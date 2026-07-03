@@ -157,7 +157,33 @@ const extendedNodes = nodesWithBlockIds
         ]
       },
     },
+    note_marker: {
+      group: 'block',
+      atom: true,
+      selectable: true,
+      defining: false,
+      attrs: { id: { default: null } },
+      toDOM(node) {
+        const blockId = node.attrs.id as string | null | undefined
+        return [
+          'div',
+          mergeBlockIdIntoDomAttrs(
+            {
+              class: 'note-marker',
+              'data-note-marker': 'true',
+              contenteditable: 'false',
+            },
+            blockId
+          ),
+        ]
+      },
+    },
   })
+
+const extendedNodesWithMarker = extendedNodes.update(
+  'note_marker',
+  withBlockId(extendedNodes.get('note_marker')!)
+)
 
 const extendedMarks = basicSchema.spec.marks.update('code', {
   ...basicSchema.spec.marks.get('code')!,
@@ -165,6 +191,6 @@ const extendedMarks = basicSchema.spec.marks.update('code', {
 })
 
 export const schema: Schema = new Schema({
-  nodes: extendedNodes,
+  nodes: extendedNodesWithMarker,
   marks: extendedMarks,
 })

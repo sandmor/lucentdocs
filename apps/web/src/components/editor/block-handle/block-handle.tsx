@@ -35,6 +35,7 @@ import {
   type BlockMenuItem,
 } from './block-menu-config'
 import { addNoteForBlock } from '../notes/note-actions'
+import { turnBlockIntoNote } from '../notes/note-transforms'
 import type { BlockActionId } from '../prosemirror/block-resolve'
 import type * as Y from 'yjs'
 
@@ -43,7 +44,7 @@ interface BlockHandleProps {
   container: HTMLElement | null
   notesMap?: Y.Map<unknown> | null
   noteCreatorUserId: string
-  onNoteCreated?: (noteId: string, blockId: string) => void
+  onNoteCreated?: (noteId: string, anchorId: string) => void
 }
 
 interface HandleSnapshot {
@@ -332,7 +333,14 @@ export function BlockHandle({ view, container, notesMap, noteCreatorUserId, onNo
       if (action === 'add-note') {
         if (!notesMap) return
         const created = addNoteForBlock(view, effectiveBlock, notesMap, noteCreatorUserId)
-        if (created) onNoteCreated?.(created.id, created.blockId)
+        if (created) onNoteCreated?.(created.id, created.anchorId)
+        setMenuOpen(null)
+        return
+      }
+      if (action === 'turn-into-note') {
+        if (!notesMap) return
+        const created = turnBlockIntoNote(view, effectiveBlock, notesMap, noteCreatorUserId)
+        if (created) onNoteCreated?.(created.id, created.anchorId)
         setMenuOpen(null)
         return
       }

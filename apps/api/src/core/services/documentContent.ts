@@ -1,16 +1,5 @@
-import { parseContent, schema, lucentMarkdownSerializer } from '@lucentdocs/shared'
+import { parseContent, schema, lucentExportMarkdownSerializer } from '@lucentdocs/shared'
 import { Node as ProseMirrorNode } from 'prosemirror-model'
-import { MarkdownSerializer } from 'prosemirror-markdown'
-
-const markdownSerializer = new MarkdownSerializer(
-  {
-    ...lucentMarkdownSerializer.nodes,
-    ai_zone(state, node) {
-      state.renderContent(node)
-    },
-  },
-  lucentMarkdownSerializer.marks
-)
 
 export function parseDocumentNode(content: string): ProseMirrorNode | null {
   try {
@@ -26,7 +15,7 @@ export function renderDocumentContentToMarkdown(content: string): string {
   if (!documentNode) return ''
 
   try {
-    return markdownSerializer.serialize(documentNode).trimEnd()
+    return lucentExportMarkdownSerializer.serialize(documentNode).trimEnd()
   } catch {
     return documentNode.textBetween(0, documentNode.content.size, '\n\n', '\n').trimEnd()
   }

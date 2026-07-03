@@ -7,8 +7,8 @@ use crate::storage::error::StorageResult;
 struct PersistNoteJson {
   id: String,
   document_id: String,
-  block_id: String,
-  placement: String,
+  anchor_kind: String,
+  anchor_id: String,
   content: String,
   author_user_id: String,
   created_at: i64,
@@ -20,8 +20,8 @@ impl From<PersistNoteJson> for DocumentNoteDto {
     Self {
       id: note.id,
       document_id: note.document_id,
-      block_id: note.block_id,
-      placement: note.placement,
+      anchor_kind: note.anchor_kind,
+      anchor_id: note.anchor_id,
       content: note.content,
       author_user_id: note.author_user_id,
       created_at: note.created_at,
@@ -78,13 +78,13 @@ pub async fn persist(
         for note in &notes {
           sqlx::query(
             "INSERT INTO document_notes (
-               id, documentId, blockId, placement, content, authorUserId, createdAt, updatedAt
+               id, documentId, anchorKind, anchorId, content, authorUserId, createdAt, updatedAt
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
           )
           .bind(&note.id)
           .bind(&document_id)
-          .bind(&note.block_id)
-          .bind(&note.placement)
+          .bind(&note.anchor_kind)
+          .bind(&note.anchor_id)
           .bind(&note.content)
           .bind(&note.author_user_id)
           .bind(note.created_at)

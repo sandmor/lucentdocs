@@ -12,12 +12,14 @@ import { SideElement, SideElementLayer } from '../side-elements/side-element'
 import { useSideElementsStore } from '../side-elements/use-side-elements-store'
 import { useDocumentNotes } from './use-document-notes'
 import type { DocumentNoteViewModel } from './notes-store'
-import { deleteNoteFromMap } from './notes-store'
+import { deleteNoteAndReconcileMarker } from './note-reconcile'
 import {
   buildTopLevelBlockIdIndex,
-  groupNotesByBlockId,
+  computeNoteGutterDesiredTop,
+  groupNotesByAnchorId,
   resolveNoteAnchorLayout,
 } from './note-anchor'
+import type { NoteAnchorKind } from '@lucentdocs/shared'
 import { NoteEditor } from './note-editor'
 import { NoteCard } from './note-card'
 import { buildNoteDecorations, updateNoteDecorations } from './notes-plugin'
@@ -33,15 +35,32 @@ interface NotesGutterProps {
   notesMap: Y.Map<unknown> | null
   projectId?: string
   currentUserId: string
-  justCreatedNote?: { id: string; blockId: string } | null
+  justCreatedNote?: { id: string; anchorId: string } | null
   onJustCreatedNoteHandled?: () => void
 }
 
 interface MobileBlockMarkerLayout {
-  blockId: string
+  anchorId: string
   left: number
   top: number
   count: number
+}
+
+function resolveSheetAnchorKind(
+  view: EditorView,
+  anchorId: string,
+  notes: DocumentNoteViewModel[]
+): NoteAnchorKind {
+  const fromNote = notes.find((note) => note.anchorId === anchorId)?.anchorKind
+  if (fromNote) return fromNote
+
+  const pos = buildTopLevelBlockIdIndex(view).get(anchorId)
+  if (pos !== undefined) {
+    const node = view.state.doc.nodeAt(pos)
+    if (node?.type.name === 'note_marker') return 'marker'
+  }
+
+  return 'block'
 }
 
 function addExpandedId(prev: Set<string>, id: string): Set<string> {
@@ -70,8 +89,8 @@ export function NotesGutter({
   const notes = useDocumentNotes(notesMap)
   const isCoarsePointer = useIsCoarsePointer()
   const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(() => new Set())
-  const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null)
-  const [sheetBlockId, setSheetBlockId] = useState<string | null>(null)
+  const [highlightedAnchorId, setHighlightedAnchorId] = useState<string | null>(null)
+  const [sheetAnchorId, setSheetAnchorId] = useState<string | null>(null)
   const { layoutEpoch } = useSideElementsStore()
 
   const authorLabels = useNoteAuthorLabels(
@@ -83,7 +102,7 @@ export function NotesGutter({
   const orphanedNotes = useMemo(() => {
     if (!view) return notes
     const index = buildTopLevelBlockIdIndex(view)
-    return notes.filter((note) => !index.has(note.blockId))
+    return notes.filter((note) => !index.has(note.anchorId))
     // layoutEpoch triggers recompute when editor scrolls/resizes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes, view, layoutEpoch])
@@ -91,14 +110,14 @@ export function NotesGutter({
   const anchoredNotes = useMemo(() => {
     if (!view) return []
     const index = buildTopLevelBlockIdIndex(view)
-    return notes.filter((note) => index.has(note.blockId))
+    return notes.filter((note) => index.has(note.anchorId))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes, view, layoutEpoch])
 
-  const activeHighlightedBlockId = useMemo(() => {
-    if (!highlightedBlockId) return null
-    return notes.some((note) => note.blockId === highlightedBlockId) ? highlightedBlockId : null
-  }, [notes, highlightedBlockId])
+  const activeHighlightedAnchorId = useMemo(() => {
+    if (!highlightedAnchorId) return null
+    return notes.some((note) => note.anchorId === highlightedAnchorId) ? highlightedAnchorId : null
+  }, [notes, highlightedAnchorId])
 
   const activeExpandedNoteIds = useMemo(() => {
     const noteIds = new Set(notes.map((note) => note.id))
@@ -107,14 +126,14 @@ export function NotesGutter({
 
   const decorationCacheKey = useMemo(
     () =>
-      [activeHighlightedBlockId ?? '', notes.map((note) => `${note.id}:${note.updatedAt}:${note.blockId}`).join('|')].join(
+      [activeHighlightedAnchorId ?? '', notes.map((note) => `${note.id}:${note.updatedAt}:${note.anchorId}`).join('|')].join(
         ';'
       ),
-    [notes, activeHighlightedBlockId]
+    [notes, activeHighlightedAnchorId]
   )
 
-  const openSheet = useCallback((blockId: string) => {
-    setSheetBlockId(blockId)
+  const openSheet = useCallback((anchorId: string) => {
+    setSheetAnchorId(anchorId)
   }, [])
 
   useEffect(() => {
@@ -122,17 +141,17 @@ export function NotesGutter({
 
     const decorations = buildNoteDecorations(view, {
       notes,
-      highlightedBlockId: activeHighlightedBlockId,
+      highlightedBlockId: activeHighlightedAnchorId,
     })
     updateNoteDecorations(view, decorations, decorationCacheKey)
-  }, [view, notes, activeHighlightedBlockId, decorationCacheKey])
+  }, [view, notes, activeHighlightedAnchorId, decorationCacheKey])
 
   const [prevJustCreatedNote, setPrevJustCreatedNote] = useState(justCreatedNote)
   if (justCreatedNote !== prevJustCreatedNote) {
     setPrevJustCreatedNote(justCreatedNote)
     if (justCreatedNote) {
       if (isCoarsePointer) {
-        setSheetBlockId(justCreatedNote.blockId)
+        setSheetAnchorId(justCreatedNote.anchorId)
       } else {
         setExpandedNoteIds((prev) => addExpandedId(prev, justCreatedNote.id))
       }
@@ -152,21 +171,34 @@ export function NotesGutter({
 
     const containerRect = container.getBoundingClientRect()
     const blockIndex = buildTopLevelBlockIdIndex(view)
-    const grouped = groupNotesByBlockId(notes)
+    const grouped = groupNotesByAnchorId(notes)
     const markers: MobileBlockMarkerLayout[] = []
 
-    for (const [blockId, blockNotes] of grouped) {
-      const pos = blockIndex.get(blockId)
-      if (pos === undefined) continue
-      const dom = view.nodeDOM(pos)
-      if (!(dom instanceof HTMLElement)) continue
+    for (const [anchorId, anchorNotes] of grouped) {
+      const representative = anchorNotes[0]
+      if (!representative) continue
 
-      const rect = dom.getBoundingClientRect()
+      const anchor = resolveNoteAnchorLayout(
+        view,
+        anchorId,
+        representative.anchorKind,
+        blockIndex
+      )
+      if (anchor.orphan) continue
+
+      const pos = blockIndex.get(anchorId)
+      const dom = pos !== undefined ? view.nodeDOM(pos) : null
+      const rect = dom instanceof HTMLElement ? dom.getBoundingClientRect() : null
+      if (!rect) continue
+
       markers.push({
-        blockId,
+        anchorId,
         left: rect.right - containerRect.left + 4,
-        top: rect.top - containerRect.top + Math.max(0, (rect.height - ORB_SIZE) / 2),
-        count: blockNotes.length,
+        top: computeNoteGutterDesiredTop(anchor, {
+          containerTop: containerRect.top,
+          orbSize: ORB_SIZE,
+        }),
+        count: anchorNotes.length,
       })
     }
 
@@ -183,11 +215,17 @@ export function NotesGutter({
     const blockIndex = buildTopLevelBlockIdIndex(view)
 
     return anchoredNotes.map((note) => {
-      const anchor = resolveNoteAnchorLayout(view, note.blockId, note.placement, blockIndex)
+      const anchor = resolveNoteAnchorLayout(view, note.anchorId, note.anchorKind, blockIndex)
+      const desiredTop = anchor.orphan
+        ? 0
+        : computeNoteGutterDesiredTop(anchor, {
+            containerTop: containerRect.top,
+            orbSize: ORB_SIZE,
+          })
       return {
         note,
         left,
-        desiredTop: (anchor?.top ?? 0) - containerRect.top,
+        desiredTop,
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,7 +233,7 @@ export function NotesGutter({
 
   const handleDeleteNote = (note: DocumentNoteViewModel) => {
     if (!notesMap) return
-    deleteNoteFromMap(notesMap, note.id)
+    deleteNoteAndReconcileMarker(view, notesMap, note.id)
     setExpandedNoteIds((prev) => removeExpandedId(prev, note.id))
   }
 
@@ -214,7 +252,7 @@ export function NotesGutter({
       {isCoarsePointer &&
         mobileMarkers.map((marker) => (
           <div
-            key={marker.blockId}
+            key={marker.anchorId}
             className="pointer-events-auto absolute z-58"
             style={{
               left: `${Math.round(marker.left)}px`,
@@ -224,7 +262,7 @@ export function NotesGutter({
             <NoteSideOrb
               count={marker.count}
               title={`${marker.count} note${marker.count === 1 ? '' : 's'}`}
-              onClick={() => openSheet(marker.blockId)}
+              onClick={() => openSheet(marker.anchorId)}
             />
           </div>
         ))}
@@ -250,8 +288,8 @@ export function NotesGutter({
                 onExpand={() => expandNote(note.id)}
                 onCollapse={() => collapseNote(note.id)}
                 onDelete={() => handleDeleteNote(note)}
-                onMouseEnter={() => setHighlightedBlockId(note.blockId)}
-                onMouseLeave={() => setHighlightedBlockId(null)}
+                onMouseEnter={() => setHighlightedAnchorId(note.anchorId)}
+                onMouseLeave={() => setHighlightedAnchorId(null)}
               />
             </SideElement>
           ))}
@@ -301,14 +339,16 @@ export function NotesGutter({
         </div>
       )}
 
-      {isCoarsePointer && sheetBlockId && (
+      {isCoarsePointer && sheetAnchorId && (
         <NoteSheet
-          blockId={sheetBlockId}
-          notes={notes.filter((note) => note.blockId === sheetBlockId)}
+          anchorId={sheetAnchorId}
+          anchorKind={resolveSheetAnchorKind(view, sheetAnchorId, notes)}
+          notes={notes.filter((note) => note.anchorId === sheetAnchorId)}
           notesMap={notesMap}
+          view={view}
           projectId={projectId}
           currentUserId={currentUserId}
-          onClose={() => setSheetBlockId(null)}
+          onClose={() => setSheetAnchorId(null)}
         />
       )}
     </>

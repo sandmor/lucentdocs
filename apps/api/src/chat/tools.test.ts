@@ -259,8 +259,8 @@ Second paragraph.`)
       {
         id: 'note_1',
         documentId: document.id,
-        blockId: firstBlockId,
-        placement: 'about',
+        anchorKind: 'block',
+        anchorId: firstBlockId,
         content: JSON.stringify({
           type: 'doc',
           content: [
@@ -333,8 +333,8 @@ Second paragraph.`)
       {
         id: 'note_1',
         documentId: document.id,
-        blockId: firstBlockId,
-        placement: 'about',
+        anchorKind: 'block',
+        anchorId: firstBlockId,
         content: JSON.stringify({
           type: 'doc',
           content: [

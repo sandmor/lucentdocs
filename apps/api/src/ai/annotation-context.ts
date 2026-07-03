@@ -1,19 +1,18 @@
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
-import { MarkdownSerializer } from 'prosemirror-markdown'
 import {
-  lucentMarkdownSerializer,
+  lucentExportMarkdownSerializer,
   parseNoteBodyContent,
   proseMirrorDocToMarkdown,
   schema,
   type JsonObject,
-  type NotePlacement,
+  type NoteAnchorKind,
 } from '@lucentdocs/shared'
 import { buildPromptContextExcerpt, type ContextParts } from '@lucentdocs/shared'
 
 export interface AiAnnotationNote {
   id: string
-  blockId: string
-  placement: NotePlacement
+  anchorKind: NoteAnchorKind
+  anchorId: string
   content: string | JsonObject
   createdAt: number
   updatedAt: number
@@ -27,17 +26,12 @@ export interface AnnotatedContextResult {
 const ANNOTATION_CONTENT_MAX_CHARS = 4_000
 const OMISSION_LATER = '<omitted content="later"/>'
 
-const markdownSerializer = new MarkdownSerializer(
-  {
-    ...lucentMarkdownSerializer.nodes,
-    ai_zone(state, node) {
-      state.renderContent(node)
-    },
-  },
-  lucentMarkdownSerializer.marks
-)
+const markdownSerializer = lucentExportMarkdownSerializer
 
-type NotesByPlacement = Record<NotePlacement, AiAnnotationNote[]>
+interface NotesByAnchor {
+  block: AiAnnotationNote[]
+  marker: AiAnnotationNote[]
+}
 
 interface PromptAliasState {
   aliasByNoteId: Map<string, string>
@@ -68,11 +62,10 @@ function comparePromptAliases(left: string, right: string): number {
   return Number(left.slice(1)) - Number(right.slice(1))
 }
 
-function createEmptyPlacementGroups(): NotesByPlacement {
+function createEmptyAnchorGroups(): NotesByAnchor {
   return {
-    before: [],
-    about: [],
-    after: [],
+    block: [],
+    marker: [],
   }
 }
 
@@ -80,18 +73,21 @@ function compareNotes(left: AiAnnotationNote, right: AiAnnotationNote): number {
   return left.createdAt - right.createdAt || left.updatedAt - right.updatedAt || left.id.localeCompare(right.id)
 }
 
-function groupNotesByBlock(notes: readonly AiAnnotationNote[]): Map<string, NotesByPlacement> {
-  const grouped = new Map<string, NotesByPlacement>()
+function groupNotesByAnchor(notes: readonly AiAnnotationNote[]): Map<string, NotesByAnchor> {
+  const grouped = new Map<string, NotesByAnchor>()
   for (const note of notes) {
-    const existing = grouped.get(note.blockId) ?? createEmptyPlacementGroups()
-    existing[note.placement].push(note)
-    grouped.set(note.blockId, existing)
+    const existing = grouped.get(note.anchorId) ?? createEmptyAnchorGroups()
+    if (note.anchorKind === 'marker') {
+      existing.marker.push(note)
+    } else {
+      existing.block.push(note)
+    }
+    grouped.set(note.anchorId, existing)
   }
 
   for (const groups of grouped.values()) {
-    groups.before.sort(compareNotes)
-    groups.about.sort(compareNotes)
-    groups.after.sort(compareNotes)
+    groups.block.sort(compareNotes)
+    groups.marker.sort(compareNotes)
   }
 
   return grouped
@@ -225,7 +221,7 @@ function renderAnnotatedRange(
   doc: ProseMirrorNode,
   from: number,
   to: number,
-  notesByBlock: ReadonlyMap<string, NotesByPlacement>,
+  notesByAnchor: ReadonlyMap<string, NotesByAnchor>,
   includedIds: Set<string>,
   aliasState: PromptAliasState,
   mode: 'plain' | 'markdown'
@@ -241,13 +237,16 @@ function renderAnnotatedRange(
     if (blockEnd < from || blockStart > to) return
 
     const blockId = topLevelBlockId(node)
-    const groups = blockId ? notesByBlock.get(blockId) : undefined
+    const groups = blockId ? notesByAnchor.get(blockId) : undefined
 
-    if (groups && blockStart >= from && blockStart <= to) {
-      for (const note of groups.before) {
-        chunks.push(annotationMarker(note, aliasState))
-        includedIds.add(note.id)
+    if (node.type.name === 'note_marker') {
+      if (groups && blockStart >= from && blockStart <= to) {
+        for (const note of groups.marker) {
+          chunks.push(annotationMarker(note, aliasState))
+          includedIds.add(note.id)
+        }
       }
+      return
     }
 
     const includesBlock =
@@ -267,19 +266,12 @@ function renderAnnotatedRange(
           ? serializeBlockMarkdown(node)
           : serializeBlockPlainSlice(node, localFrom, localTo)
 
-      if (groups && groups.about.length > 0) {
-        text = wrapAnnotatedBlock(text, groups.about, aliasState)
-        collectUsedNotes(groups.about, includedIds)
+      if (groups && groups.block.length > 0) {
+        text = wrapAnnotatedBlock(text, groups.block, aliasState)
+        collectUsedNotes(groups.block, includedIds)
       }
 
       chunks.push(text)
-    }
-
-    if (groups && blockEnd >= from && blockEnd <= to) {
-      for (const note of groups.after) {
-        chunks.push(annotationMarker(note, aliasState))
-        includedIds.add(note.id)
-      }
     }
   })
 
@@ -301,7 +293,7 @@ export function buildAnnotatedPromptContextExcerpt(
   const windowSize = Math.min(docEnd, Math.max(2048, Math.floor(budget * 2)))
   const beforeStart = Math.max(0, safeFrom - windowSize)
   const afterEnd = Math.min(docEnd, safeTo + windowSize)
-  const notesByBlock = groupNotesByBlock(notes)
+  const notesByAnchor = groupNotesByAnchor(notes)
   const includedIds = new Set<string>()
   const aliasState = createPromptAliasState()
   const hasSelection = safeFrom < safeTo
@@ -310,19 +302,19 @@ export function buildAnnotatedPromptContextExcerpt(
     doc,
     beforeStart,
     safeFrom,
-    notesByBlock,
+    notesByAnchor,
     includedIds,
     aliasState,
     'plain'
   )
   const markerContent = hasSelection
-    ? renderAnnotatedRange(doc, safeFrom, safeTo, notesByBlock, includedIds, aliasState, 'plain')
+    ? renderAnnotatedRange(doc, safeFrom, safeTo, notesByAnchor, includedIds, aliasState, 'plain')
     : ''
   const rawContextAfter = renderAnnotatedRange(
     doc,
     safeTo,
     afterEnd,
-    notesByBlock,
+    notesByAnchor,
     includedIds,
     aliasState,
     'plain'
@@ -363,14 +355,14 @@ export function renderAnnotatedDocumentMarkdown(
   aliasByNoteId: Map<string, string>
   aliasToNoteId: Map<string, string>
 } {
-  const notesByBlock = groupNotesByBlock(notes)
+  const notesByAnchor = groupNotesByAnchor(notes)
   const includedIds = new Set<string>()
   const aliasState = createPromptAliasState()
   const markdown = renderAnnotatedRange(
     doc,
     0,
     doc.content.size,
-    notesByBlock,
+    notesByAnchor,
     includedIds,
     aliasState,
     'markdown'

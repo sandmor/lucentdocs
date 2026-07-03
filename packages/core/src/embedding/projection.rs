@@ -132,6 +132,10 @@ fn append_node_text(state: &mut ProjectionBuilderState, node: &Value, position: 
     return;
   }
 
+  if ty == "note_marker" {
+    return;
+  }
+
   if ty == "hard_break" || ty == "horizontal_rule" {
     append_unmapped_text(state, "\n");
     return;

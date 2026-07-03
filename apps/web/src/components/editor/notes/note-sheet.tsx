@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -7,23 +7,28 @@ import {
 } from '@/components/ui/dialog'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import type { EditorView } from 'prosemirror-view'
 import type * as Y from 'yjs'
+import type { NoteAnchorKind } from '@lucentdocs/shared'
 import type { DocumentNoteViewModel } from './notes-store'
-import { createNoteInMap, deleteNoteFromMap } from './notes-store'
+import { createNoteInMap } from './notes-store'
+import { deleteNoteAndReconcileMarker } from './note-reconcile'
 import { NoteEditor, type NoteEditorHandle } from './note-editor'
 import { useNoteAuthorLabels } from './use-note-author-labels'
 import { cn } from '@/lib/utils'
+import { useRef, useState } from 'react'
 
 interface NoteSheetProps {
-  blockId: string
+  anchorId: string
+  anchorKind: NoteAnchorKind
   notes: DocumentNoteViewModel[]
   notesMap: Y.Map<unknown>
+  view: EditorView | null
   projectId?: string
   currentUserId: string
   onClose: () => void
 }
 
-/** Per-note reading / editing state within the sheet */
 function NoteSheetItem({
   note,
   authorLabel,
@@ -71,7 +76,6 @@ function NoteSheetItem({
         </button>
       </div>
 
-      {/* Body — tap to edit */}
       <div
         className={cn(
           isEditing ? 'min-h-16' : 'min-h-0',
@@ -99,9 +103,11 @@ function NoteSheetItem({
 }
 
 export function NoteSheet({
-  blockId,
+  anchorId,
+  anchorKind,
   notes,
   notesMap,
+  view,
   projectId,
   currentUserId,
   onClose,
@@ -114,11 +120,11 @@ export function NoteSheet({
 
   const handleAddNote = useCallback(() => {
     createNoteInMap(notesMap, {
-      blockId,
-      placement: 'about',
+      anchorKind,
+      anchorId,
       authorUserId: currentUserId,
     })
-  }, [notesMap, blockId, currentUserId])
+  }, [notesMap, anchorId, anchorKind, currentUserId])
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -128,7 +134,7 @@ export function NoteSheet({
         </DialogHeader>
         <div className="flex max-h-[58vh] flex-col gap-3 overflow-y-auto pb-1">
           {notes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No notes for this block yet.</p>
+            <p className="text-sm text-muted-foreground">No notes for this anchor yet.</p>
           ) : (
             notes.map((note) => (
               <NoteSheetItem
@@ -136,7 +142,7 @@ export function NoteSheet({
                 note={note}
                 authorLabel={authorLabels.getLabel(note.authorUserId)}
                 authorColor={authorLabels.getColor(note.authorUserId)}
-                onDelete={() => deleteNoteFromMap(notesMap, note.id)}
+                onDelete={() => deleteNoteAndReconcileMarker(view, notesMap, note.id)}
               />
             ))
           )}

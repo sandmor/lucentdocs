@@ -12,8 +12,8 @@ const makeDoc = (text: string) => ({
 
 const makeNote = (id: string, authorUserId = 'user-1') => ({
   id,
-  blockId: 'block-1',
-  placement: 'about' as const,
+  anchorKind: 'block' as const,
+  anchorId: 'block-1',
   content: { type: 'doc', content: [{ type: 'paragraph' }] },
   authorUserId,
   createdAt: 1,
@@ -48,8 +48,8 @@ describe('version snapshot bundles', () => {
         notes: [
           {
             id: 'invalid',
-            blockId: 'block-1',
-            placement: 'about',
+            anchorKind: 'block',
+            anchorId: 'block-1',
             content: { type: 'doc', content: [{ type: 'paragraph' }] },
             createdAt: 1,
             updatedAt: 1,

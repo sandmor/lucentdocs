@@ -13,7 +13,7 @@ const notesSnapshotCache = new WeakMap<Y.Map<unknown>, NotesSnapshotCacheEntry>(
 
 function buildNotesSignature(notes: DocumentNoteViewModel[]): string {
   return notes
-    .map((note) => `${note.id}:${note.updatedAt}:${note.blockId}:${note.placement}`)
+    .map((note) => `${note.id}:${note.updatedAt}:${note.anchorId}:${note.anchorKind}`)
     .join('|')
 }
 

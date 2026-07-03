@@ -1,13 +1,13 @@
 import type { JsonObject } from './json.js'
 
-export const NOTE_PLACEMENTS = ['before', 'after', 'about'] as const
-export type NotePlacement = (typeof NOTE_PLACEMENTS)[number]
+export const NOTE_ANCHOR_KINDS = ['block', 'marker'] as const
+export type NoteAnchorKind = (typeof NOTE_ANCHOR_KINDS)[number]
 
 export interface DocumentNoteRecord {
   id: string
   documentId: string
-  blockId: string
-  placement: NotePlacement
+  anchorKind: NoteAnchorKind
+  anchorId: string
   content: string
   authorUserId: string
   createdAt: number
@@ -16,8 +16,8 @@ export interface DocumentNoteRecord {
 
 export interface DocumentNoteSnapshot {
   id: string
-  blockId: string
-  placement: NotePlacement
+  anchorKind: NoteAnchorKind
+  anchorId: string
   content: JsonObject
   authorUserId: string
   createdAt: number
@@ -38,8 +38,8 @@ function isRecord(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isNotePlacement(value: unknown): value is NotePlacement {
-  return typeof value === 'string' && NOTE_PLACEMENTS.includes(value as NotePlacement)
+function isNoteAnchorKind(value: unknown): value is NoteAnchorKind {
+  return typeof value === 'string' && NOTE_ANCHOR_KINDS.includes(value as NoteAnchorKind)
 }
 
 export function createDefaultNoteBody(): JsonObject {
@@ -112,28 +112,31 @@ function parseNoteSnapshots(value: unknown): DocumentNoteSnapshot[] {
 
 function parseNoteSnapshot(value: unknown): DocumentNoteSnapshot | null {
   if (!isRecord(value)) return null
-  if (typeof value.id !== 'string' || typeof value.blockId !== 'string') return null
-  if (!isNotePlacement(value.placement)) return null
+  if (typeof value.id !== 'string') return null
   if (!isRecord(value.content) || value.content.type !== 'doc') return null
   if (typeof value.createdAt !== 'number' || typeof value.updatedAt !== 'number') return null
   if (typeof value.authorUserId !== 'string' || value.authorUserId.length === 0) return null
 
-  return {
-    id: value.id,
-    blockId: value.blockId,
-    placement: value.placement,
-    content: value.content,
-    authorUserId: value.authorUserId,
-    createdAt: value.createdAt,
-    updatedAt: value.updatedAt,
+  if (isNoteAnchorKind(value.anchorKind) && typeof value.anchorId === 'string') {
+    return {
+      id: value.id,
+      anchorKind: value.anchorKind,
+      anchorId: value.anchorId,
+      content: value.content,
+      authorUserId: value.authorUserId,
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt,
+    }
   }
+
+  return null
 }
 
 export function noteRecordToSnapshot(record: DocumentNoteRecord): DocumentNoteSnapshot {
   return {
     id: record.id,
-    blockId: record.blockId,
-    placement: record.placement,
+    anchorKind: record.anchorKind,
+    anchorId: record.anchorId,
     content: parseNoteBodyContent(record.content),
     authorUserId: record.authorUserId,
     createdAt: record.createdAt,
@@ -148,8 +151,8 @@ export function noteSnapshotToRecord(
   return {
     id: snapshot.id,
     documentId,
-    blockId: snapshot.blockId,
-    placement: snapshot.placement,
+    anchorKind: snapshot.anchorKind,
+    anchorId: snapshot.anchorId,
     content: serializeNoteBody(snapshot.content),
     authorUserId: snapshot.authorUserId,
     createdAt: snapshot.createdAt,

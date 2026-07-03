@@ -253,8 +253,8 @@ export interface DocumentEmbeddingDto {
 export interface DocumentNoteDto {
   id: string
   documentId: string
-  blockId: string
-  placement: string
+  anchorKind: string
+  anchorId: string
   content: string
   authorUserId: string
   createdAt: number

@@ -11,6 +11,7 @@ export {
   ensureBlockIds,
   BLOCK_ID_ATTR,
   BLOCK_ID_NODE_TYPES,
+  EPHEMERAL_DOC_NODE_TYPES,
   collectTopLevelBlockIds,
   mergeBlockIdIntoDomAttrs,
   readBlockIdFromDom,
@@ -19,10 +20,10 @@ export type {
   DocumentNoteRecord,
   DocumentNoteSnapshot,
   VersionSnapshotBundle,
-  NotePlacement,
+  NoteAnchorKind,
 } from './document-notes.js'
 export {
-  NOTE_PLACEMENTS,
+  NOTE_ANCHOR_KINDS,
   createDefaultNoteBody,
   parseNoteBodyContent,
   serializeNoteBody,
@@ -31,7 +32,9 @@ export {
 } from './document-notes.js'
 export {
   proseMirrorDocToMarkdown,
+  proseMirrorDocToExportMarkdown,
   lucentMarkdownSerializer,
+  lucentExportMarkdownSerializer,
   type MarkdownParseError,
   type MarkdownResult,
 } from './markdown.js'

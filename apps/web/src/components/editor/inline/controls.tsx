@@ -50,7 +50,7 @@ interface InlineAIControlsProps {
   onBlockBarInteractionChange: (interacting: boolean) => void
   notesMap?: Y.Map<unknown> | null
   currentUserId?: string
-  onNoteCreated?: (noteId: string, blockId: string) => void
+  onNoteCreated?: (noteId: string, anchorId: string) => void
 }
 
 export function InlineAIControls({

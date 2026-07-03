@@ -22,6 +22,7 @@ import {
   type BlockMenuItem,
 } from './block-menu-config'
 import { addNoteForBlock } from '../notes/note-actions'
+import { turnBlockIntoNote } from '../notes/note-transforms'
 import type * as Y from 'yjs'
 
 type ExpandPanel = 'insert' | 'turn-into' | null
@@ -33,7 +34,7 @@ interface MobileBlockBarProps {
   onInteractionChange: (interacting: boolean) => void
   notesMap?: Y.Map<unknown> | null
   currentUserId?: string
-  onNoteCreated?: (noteId: string, blockId: string) => void
+  onNoteCreated?: (noteId: string, anchorId: string) => void
 }
 
 function preventFocusSteal(event: React.PointerEvent) {
@@ -67,7 +68,16 @@ export function MobileBlockBar({
       if (action === 'add-note') {
         if (notesMap && currentUserId) {
           const created = addNoteForBlock(view, activeBlock, notesMap, currentUserId)
-          if (created) onNoteCreated?.(created.id, created.blockId)
+          if (created) onNoteCreated?.(created.id, created.anchorId)
+        }
+        setExpandPanel(null)
+        setMoreMenuOpen(false)
+        return
+      }
+      if (action === 'turn-into-note') {
+        if (notesMap && currentUserId) {
+          const created = turnBlockIntoNote(view, activeBlock, notesMap, currentUserId)
+          if (created) onNoteCreated?.(created.id, created.anchorId)
         }
         setExpandPanel(null)
         setMoreMenuOpen(false)

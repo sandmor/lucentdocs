@@ -230,8 +230,8 @@ export function documentNoteFromDto(dto: DocumentNoteDto): DocumentNoteRecord {
   return {
     id: dto.id,
     documentId: dto.documentId,
-    blockId: dto.blockId,
-    placement: dto.placement as DocumentNoteRecord['placement'],
+    anchorKind: dto.anchorKind as DocumentNoteRecord['anchorKind'],
+    anchorId: dto.anchorId,
     content: dto.content,
     authorUserId: dto.authorUserId,
     createdAt: dto.createdAt,
@@ -243,8 +243,8 @@ export function documentNoteToDto(note: DocumentNoteRecord): DocumentNoteDto {
   return {
     id: note.id,
     documentId: note.documentId,
-    blockId: note.blockId,
-    placement: note.placement,
+    anchorKind: note.anchorKind,
+    anchorId: note.anchorId,
     content: note.content,
     authorUserId: note.authorUserId,
     createdAt: note.createdAt,

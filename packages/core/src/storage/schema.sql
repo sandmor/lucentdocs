@@ -53,8 +53,8 @@ CREATE TABLE IF NOT EXISTS document_content (
 CREATE TABLE IF NOT EXISTS document_notes (
   id TEXT PRIMARY KEY,
   documentId TEXT NOT NULL,
-  blockId TEXT NOT NULL,
-  placement TEXT NOT NULL CHECK (placement IN ('before', 'after', 'about')),
+  anchorKind TEXT NOT NULL CHECK (anchorKind IN ('block', 'marker')),
+  anchorId TEXT NOT NULL,
   content TEXT NOT NULL,
   authorUserId TEXT NOT NULL,
   createdAt INTEGER NOT NULL,

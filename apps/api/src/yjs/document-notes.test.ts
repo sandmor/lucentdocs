@@ -24,8 +24,8 @@ const makeNoteRecord = (
   overrides: Partial<DocumentNoteRecord> & Pick<DocumentNoteRecord, 'documentId'>
 ): DocumentNoteRecord => ({
   id: 'note-1',
-  blockId: BLOCK_ID,
-  placement: 'about',
+  anchorKind: 'block',
+  anchorId: BLOCK_ID,
   content: JSON.stringify({
     type: 'doc',
     content: [{ type: 'paragraph', content: [{ type: 'text', text: 'remember this' }] }],
@@ -69,8 +69,8 @@ describe('document notes integration', () => {
       notes: [
         {
           id: 'note-1',
-          blockId: BLOCK_ID,
-          placement: 'about',
+          anchorKind: 'block',
+          anchorId: BLOCK_ID,
           content: {
             type: 'doc',
             content: [{ type: 'paragraph', content: [{ type: 'text', text: 'remember this' }] }],
@@ -110,7 +110,7 @@ describe('document notes integration', () => {
       makeNoteRecord({
         id: 'note-persist',
         documentId: doc.id,
-        blockId: 'blk-persist',
+        anchorId: 'blk-persist',
         content: JSON.stringify({
           type: 'doc',
           content: [{ type: 'paragraph', content: [{ type: 'text', text: 'saved note' }] }],

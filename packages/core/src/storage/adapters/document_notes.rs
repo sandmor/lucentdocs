@@ -10,9 +10,10 @@ struct DocumentNoteRow {
   id: String,
   #[sqlx(rename = "documentId")]
   document_id: String,
-  #[sqlx(rename = "blockId")]
-  block_id: String,
-  placement: String,
+  #[sqlx(rename = "anchorKind")]
+  anchor_kind: String,
+  #[sqlx(rename = "anchorId")]
+  anchor_id: String,
   content: String,
   #[sqlx(rename = "authorUserId")]
   author_user_id: String,
@@ -26,8 +27,8 @@ fn row_to_dto(row: DocumentNoteRow) -> DocumentNoteDto {
   DocumentNoteDto {
     id: row.id,
     document_id: row.document_id,
-    block_id: row.block_id,
-    placement: row.placement,
+    anchor_kind: row.anchor_kind,
+    anchor_id: row.anchor_id,
     content: row.content,
     author_user_id: row.author_user_id,
     created_at: row.created_at,
@@ -43,7 +44,7 @@ pub async fn list_by_document_id(
   engine
     .with_conn(tx_id, async |conn| {
       let rows = sqlx::query_as::<_, DocumentNoteRow>(
-        "SELECT id, documentId, blockId, placement, content, authorUserId, createdAt, updatedAt
+        "SELECT id, documentId, anchorKind, anchorId, content, authorUserId, createdAt, updatedAt
            FROM document_notes
           WHERE documentId = ?
           ORDER BY createdAt ASC",
@@ -69,13 +70,13 @@ async fn replace_all_for_document_conn(
   for note in notes {
     sqlx::query(
       "INSERT INTO document_notes (
-         id, documentId, blockId, placement, content, authorUserId, createdAt, updatedAt
+         id, documentId, anchorKind, anchorId, content, authorUserId, createdAt, updatedAt
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&note.id)
     .bind(document_id)
-    .bind(&note.block_id)
-    .bind(&note.placement)
+    .bind(&note.anchor_kind)
+    .bind(&note.anchor_id)
     .bind(&note.content)
     .bind(&note.author_user_id)
     .bind(note.created_at)
