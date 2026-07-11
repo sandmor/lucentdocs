@@ -366,7 +366,7 @@ export function buildPromptVariables(
     )
     if (contextParts.truncated) {
       modeGuidanceLines.push(
-        '- story_context is a local excerpt, not the full file. Use search_project to find relevant documents, then read_file and search_file if you need more context.'
+        '- story_context is a local excerpt, not the full file. Use search with whole_project=true to find relevant documents, then read for exact passages and annotations.'
       )
     }
     modeGuidanceLines.push('- write_zone offsets are relative to the <selection> content only.')
@@ -382,7 +382,7 @@ export function buildPromptVariables(
     modeGuidanceLines.push('MODE GUIDANCE:')
     if (contextParts.truncated) {
       modeGuidanceLines.push(
-        '- story_context is a local excerpt, not the full file. Use search_project to find relevant documents, then read_file and search_file if you need more context.'
+        '- story_context is a local excerpt, not the full file. Use search with whole_project=true to find relevant documents, then read for exact passages and annotations.'
       )
     }
     modeGuidanceLines.push('- The AI zone text follows the <caret /> marker in story_context.')
@@ -410,8 +410,8 @@ export function buildChatVariables(
   annotations = '(none)'
 ): Record<string, string> {
   const chatInstruction = contextParts.truncated
-    ? 'The active file excerpt is incomplete. Use search_project to locate relevant documents, then use search_file and read_file for exact passages.'
-    : 'Use search_project, search_file, or read_file if you need to inspect other documents or find specific content.'
+    ? 'The active file excerpt is incomplete. Use search with whole_project=true to locate relevant documents, then read for exact passages and annotations.'
+    : 'Use search (active file by default), whole_project search, grep, glob, or read when you need to inspect documents or find specific content.'
 
   return {
     currentFilePath: currentFilePath.trim() || '(untitled)',

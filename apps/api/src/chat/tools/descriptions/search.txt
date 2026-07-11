@@ -1,0 +1,16 @@
+Semantic search over project documents using the embedding index. Finds conceptually related passages, not exact substring matches.
+
+Usage:
+- query is required (natural language or descriptive phrase).
+- When path is omitted, search defaults to the active file.
+- Set whole_project=true to search across the entire project.
+- Optional path scopes the search when whole_project is false:
+  - file path → search within that document only
+  - directory path → direct children only
+  - directory path + recursive=true → directory and all subdirectories
+- Returns matches with start_line/end_line aligned to read output (with annotations included by default).
+- relevance_score is higher for better matches.
+- Use whole_project=true when the answer may be outside the active file or you need to discover which documents matter.
+- Use grep for exact text; use glob to discover paths by filename pattern.
+- After search identifies relevant paths, call read to inspect exact passages and author annotations.
+- If meta.semantic_unavailable is true, fall back to grep for exact text search.

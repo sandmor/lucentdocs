@@ -1,0 +1,11 @@
+Fast file pattern matching over the project document tree.
+
+Usage:
+- Supports glob patterns like "**/*.md", "chapters/*", or "notes/research/**".
+- Returns matching document paths sorted alphabetically.
+- Optional path scopes the search to a directory prefix (project-relative, no leading slash).
+- Use this tool when you need to find files by name patterns.
+- Once you have a path, use read to inspect file contents or list a directory.
+- When you need exact text inside files, use grep after glob narrows candidates.
+- When you need meaning-based discovery, use search instead.
+- You can call multiple glob searches in parallel when exploring.

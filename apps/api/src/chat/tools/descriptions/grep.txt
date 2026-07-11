@@ -1,0 +1,13 @@
+Exact content search over project documents. Scans rendered markdown at query time (no separate lexical index).
+
+Usage:
+- pattern is required. By default it is a case-insensitive substring match.
+- Set regex=true to use JavaScript regular expression syntax.
+- Optional path limits search to a file or directory prefix (project-relative, no leading slash).
+- Optional include filters paths by glob (e.g. "*.md").
+- Returns grouped matches as "path:" headers with "Line N: text" entries.
+- Use grep when you know the exact words or pattern to find.
+- Use search when you need semantic / meaning-based matches — search is NOT a substring matcher.
+- After grep finds a path and line, use read with offset/limit for surrounding context and annotations.
+- Results are capped; if truncated, narrow path or include before retrying.
+- Set include_annotations=true to also search author annotation note bodies (labeled source="annotation").

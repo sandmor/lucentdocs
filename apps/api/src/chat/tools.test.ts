@@ -14,6 +14,12 @@ import {
 } from '../embeddings/provider.js'
 import { createTestAdapter } from '../testing/factory.js'
 import { toEditorContent } from '../testing/editor-content.js'
+import {
+  GLOB_DESCRIPTION,
+  GREP_DESCRIPTION,
+  READ_DESCRIPTION,
+  SEARCH_DESCRIPTION,
+} from './tools/descriptions/index.js'
 import { buildInlineZoneWriteTools, buildReadTools, hasValidToolScope } from './tools.js'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -140,12 +146,26 @@ describe('hasValidToolScope', () => {
   })
 })
 
+describe('agent tool descriptions', () => {
+  test('include routing guidance for sibling tools', () => {
+    expect(READ_DESCRIPTION).toContain('grep')
+    expect(READ_DESCRIPTION).toContain('glob')
+    expect(READ_DESCRIPTION).toContain('search')
+    expect(READ_DESCRIPTION).toContain('annotation')
+    expect(GLOB_DESCRIPTION).toContain('read')
+    expect(GREP_DESCRIPTION).toContain('search')
+    expect(SEARCH_DESCRIPTION).toContain('whole_project')
+    expect(SEARCH_DESCRIPTION).toContain('active file')
+    expect(READ_DESCRIPTION.length).toBeGreaterThan(200)
+  })
+})
+
 describe('buildReadTools', () => {
   afterEach(() => {
     resetEmbeddingClient()
   })
 
-  test('search_file returns semantic matches for the active document', async () => {
+  test('search returns semantic matches for a scoped file path', async () => {
     const adapter = createTestAdapter()
     await initializeEmbeddingSelection(adapter)
 
@@ -206,29 +226,109 @@ The town below stays dark and quiet.`)
       },
       services: adapter.services,
     })
-    const execute = tools.search_file.execute as
-      | ((input: { query: string; limit?: number }) => Promise<{
-          path: string
-          indexing: { type: string; description: string } | null
-          semantic_matches: Array<{ match_type: string; preview: string }>
-          notes: string[]
+    const execute = tools.search.execute as
+      | ((input: { query: string; path?: string; limit?: number }) => Promise<{
+          path?: string
+          matches: Array<{
+            path: string
+            match_type: string
+            preview: string
+            relevance_score: number
+            start_line: number | null
+          }>
+          meta: { suggested_next?: string; semantic_unavailable?: boolean }
         }>)
       | undefined
 
     expect(execute).toBeDefined()
     if (!execute) return
 
-    const result = await execute({ query: 'silver forest', limit: 3 })
+    const result = await execute({ query: 'silver forest', path: 'chapters/one.md', limit: 3 })
 
     expect(result.path).toBe('chapters/one.md')
-    expect(result.indexing?.type).toBe('sliding_window')
-    expect(result.indexing?.description).toContain('Sliding window')
-    expect(result.semantic_matches[0]?.match_type).toBe('snippet')
-    expect(result.semantic_matches[0]?.preview.toLowerCase()).toContain('silver forest')
-    expect(result.notes[0]).toContain('bounded local excerpt')
+    expect(result.matches[0]?.match_type).toBe('snippet')
+    expect(result.matches[0]?.preview.toLowerCase()).toContain('silver forest')
+    expect(result.matches[0]?.relevance_score).toBeGreaterThan(0)
+    expect(result.meta.suggested_next).toBe('read')
   })
 
-  test('read_file includes annotation markers and annotation content by default', async () => {
+  test('search without path defaults to the active file', async () => {
+    const adapter = createTestAdapter()
+    await initializeEmbeddingSelection(adapter)
+
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const active = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/active.md',
+      toEditorContent('Moonlight floods the silver forest in the active chapter.')
+    )
+    const other = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/other.md',
+      toEditorContent('The copper city wakes at dawn.')
+    )
+
+    if (!active || !other) {
+      throw new Error('Expected test documents to be created.')
+    }
+
+    const now = Date.now()
+    for (const [documentId, text, hash] of [
+      [active.id, 'Moonlight floods the silver forest in the active chapter.', 'active-hash'],
+      [other.id, 'The copper city wakes at dawn.', 'other-hash'],
+    ] as const) {
+      await adapter.repositories.documentEmbeddings.replaceEmbeddings({
+        documentId,
+        providerConfigId: null,
+        providerId: 'openrouter',
+        type: 'openrouter',
+        baseURL: OPENROUTER_BASE_URL,
+        model: 'openai/text-embedding-3-small',
+        strategy: {
+          type: 'sliding_window',
+          properties: {
+            level: 'paragraph',
+            windowSize: 2,
+            stride: 1,
+            minUnitChars: 40,
+            maxUnitChars: 400,
+          },
+        },
+        documentTimestamp: now,
+        contentHash: hash,
+        chunks: [
+          {
+            ordinal: 0,
+            start: 0,
+            end: text.length,
+            selectionFrom: 0,
+            selectionTo: text.length,
+            text,
+            embedding: [0.1, 0.2, 0.3],
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+
+    const tools = buildReadTools({
+      scope: { projectId: project.id, documentId: active.id },
+      services: adapter.services,
+    })
+    const execute = tools.search.execute as
+      | ((input: { query: string }) => Promise<{ path?: string; matches: Array<{ path: string }> }>)
+      | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    const result = await execute({ query: 'silver forest' })
+    expect(result.path).toBe('chapters/active.md')
+    expect(result.matches.every((match) => match.path === 'chapters/active.md')).toBe(true)
+  })
+
+  test('read includes annotation markers and annotation bodies by default', async () => {
     const adapter = createTestAdapter()
     const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
     const document = await adapter.services.documents.createForProject(
@@ -283,10 +383,10 @@ Second paragraph.`)
       },
       services: adapter.services,
     })
-    const execute = tools.read_file.execute as
-      | ((input: { path: string; start_line?: number; end_line?: number }) => Promise<{
-          content: string
-          annotation_content: string
+    const execute = tools.read.execute as
+      | ((input: { path: string; offset?: number; limit?: number; include_annotations?: boolean }) => Promise<{
+          kind: string
+          output: string
         }>)
       | undefined
 
@@ -295,14 +395,14 @@ Second paragraph.`)
 
     const result = await execute({ path: 'chapters/annotated.md' })
 
-    expect(result.content).toContain('<annotation id="n1">')
-    expect(result.content).toContain('First paragraph.')
-    expect(result.content).toContain('</annotation>')
-    expect(result.annotation_content).toContain('<annotation_content id="n1">')
-    expect(result.annotation_content).toContain('Use this hidden context.')
+    expect(result.kind).toBe('file')
+    expect(result.output).toContain('<annotation id="n1">')
+    expect(result.output).toContain('First paragraph.')
+    expect(result.output).toContain('<annotations>')
+    expect(result.output).toContain('Use this hidden context.')
   })
 
-  test('read_file scopes annotation_content to markers in the returned line slice', async () => {
+  test('read scopes annotations to the returned line slice', async () => {
     const adapter = createTestAdapter()
     const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
     const document = await adapter.services.documents.createForProject(
@@ -357,10 +457,9 @@ Second paragraph.`)
       },
       services: adapter.services,
     })
-    const execute = tools.read_file.execute as
-      | ((input: { path: string; start_line?: number; end_line?: number }) => Promise<{
-          content: string
-          annotation_content: string
+    const execute = tools.read.execute as
+      | ((input: { path: string; offset?: number; limit?: number }) => Promise<{
+          output: string
         }>)
       | undefined
 
@@ -368,37 +467,121 @@ Second paragraph.`)
     if (!execute) return
 
     const fullResult = await execute({ path: 'chapters/annotated.md' })
-    const fullLines = fullResult.content.split('\n')
+    const fullLines = fullResult.output.split('\n')
     const secondParagraphLine =
       fullLines.findIndex((line) => line.includes('Second paragraph.')) + 1
-    const annotationOpenLine =
-      fullLines.findIndex((line) => line.includes('<annotation id="n1">')) + 1
-    const firstParagraphLine =
-      fullLines.findIndex((line) => line.includes('First paragraph.')) + 1
 
     expect(secondParagraphLine).toBeGreaterThan(0)
-    expect(annotationOpenLine).toBeGreaterThan(0)
-    expect(firstParagraphLine).toBeGreaterThan(0)
 
     const excluded = await execute({
       path: 'chapters/annotated.md',
-      start_line: secondParagraphLine,
-      end_line: secondParagraphLine,
+      offset: secondParagraphLine,
+      limit: 1,
     })
-    expect(excluded.content).not.toContain('n1')
-    expect(excluded.annotation_content).toBe('(none)')
-
-    const included = await execute({
-      path: 'chapters/annotated.md',
-      start_line: annotationOpenLine,
-      end_line: firstParagraphLine,
-    })
-    expect(included.content).toContain('<annotation id="n1">')
-    expect(included.annotation_content).toContain('<annotation_content id="n1">')
-    expect(included.annotation_content).toContain('Use this hidden context.')
+    expect(excluded.output).not.toContain('n1')
+    expect(excluded.output).not.toContain('<annotations>')
   })
 
-  test('search_project returns project-wide matches with indexing metadata', async () => {
+  test('read lists directory entries with trailing slashes', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/one.md',
+      toEditorContent('Chapter body')
+    )
+
+    if (!document) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    const tools = buildReadTools({
+      scope: { projectId: project.id, documentId: document.id },
+      services: adapter.services,
+    })
+    const execute = tools.read.execute as
+      | ((input: { path: string }) => Promise<{ kind: string; output: string; entries: string[] }>)
+      | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    const result = await execute({ path: '/' })
+    expect(result.kind).toBe('directory')
+    expect(result.entries.some((entry) => entry === 'chapters/')).toBe(true)
+    expect(result.output).toContain('chapters/')
+  })
+
+  test('glob returns matching project paths', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const one = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/one.md',
+      toEditorContent('one')
+    )
+    const two = await adapter.services.documents.createForProject(
+      project.id,
+      'notes/two.md',
+      toEditorContent('two')
+    )
+
+    if (!one || !two) {
+      throw new Error('Expected test documents to be created.')
+    }
+
+    const tools = buildReadTools({
+      scope: { projectId: project.id, documentId: one.id },
+      services: adapter.services,
+    })
+    const execute = tools.glob.execute as
+      | ((input: { pattern: string }) => Promise<{ paths: string[] }>)
+      | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    const result = await execute({ pattern: 'chapters/*.md' })
+    expect(result.paths).toEqual(['chapters/one.md'])
+  })
+
+  test('grep finds exact manuscript matches with line numbers', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/one.md',
+      toEditorContent(`# Chapter One
+
+Moonlight floods the silver forest.`)
+    )
+
+    if (!document) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    const tools = buildReadTools({
+      scope: { projectId: project.id, documentId: document.id },
+      services: adapter.services,
+    })
+    const execute = tools.grep.execute as
+      | ((input: { pattern: string }) => Promise<{
+          matches: Array<{ line: number; text: string; source: string }>
+          output: string
+        }>)
+      | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    const result = await execute({ pattern: 'silver forest' })
+    expect(result.matches[0]?.source).toBe('manuscript')
+    expect(result.matches[0]?.line).toBeGreaterThan(0)
+    expect(result.matches[0]?.text.toLowerCase()).toContain('silver forest')
+    expect(result.output).toContain('Line')
+  })
+
+  test('search returns project-wide matches with relevance scores', async () => {
     const adapter = createTestAdapter()
     await initializeEmbeddingSelection(adapter)
 
@@ -486,30 +669,30 @@ The copper city wakes at dawn while market bells echo through the square.`)
       },
       services: adapter.services,
     })
-    const execute = tools.search_project.execute as
-      | ((input: { query: string; limit?: number }) => Promise<{
-          results: Array<{
+    const execute = tools.search.execute as
+      | ((input: { query: string; whole_project?: boolean; limit?: number }) => Promise<{
+          matches: Array<{
             path: string
             match_type: string
-            indexing: { type: string; description: string } | null
-            snippets: Array<{ preview: string }>
+            preview: string
+            relevance_score: number
           }>
-          notes: string[]
+          meta: { suggested_next?: string }
         }>)
       | undefined
 
     expect(execute).toBeDefined()
     if (!execute) return
 
-    const result = await execute({ query: 'silver forest', limit: 5 })
+    const result = await execute({ query: 'silver forest', whole_project: true, limit: 5 })
 
-    expect(result.results[0]?.path).toBe('chapters/one.md')
-    expect(result.results[0]?.indexing?.type).toBe('sliding_window')
-    expect(result.results[0]?.snippets[0]?.preview.toLowerCase()).toContain('silver forest')
-    expect(result.notes[0]).toContain('read_file')
+    expect(result.matches[0]?.path).toBe('chapters/one.md')
+    expect(result.matches[0]?.preview.toLowerCase()).toContain('silver forest')
+    expect(result.matches[0]?.relevance_score).toBeGreaterThan(0)
+    expect(result.meta.suggested_next).toBe('read')
   })
 
-  test('search tools reject queries that exceed the configured max length', async () => {
+  test('search rejects queries that exceed the configured max length', async () => {
     const adapter = createTestAdapter()
     await initializeEmbeddingSelection(adapter)
 
@@ -531,7 +714,7 @@ The copper city wakes at dawn while market bells echo through the square.`)
       },
       services: adapter.services,
     })
-    const execute = tools.search_file.execute as
+    const execute = tools.search.execute as
       | ((input: { query: string; limit?: number }) => Promise<unknown>)
       | undefined
 
@@ -544,46 +727,176 @@ The copper city wakes at dawn while market bells echo through the square.`)
     )
   })
 
-  test('search_project resolves indexing consistently for sole and shared documents', async () => {
+  test('read rejects missing paths with suggestions', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/one.md',
+      toEditorContent('Body')
+    )
+
+    if (!document) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    const tools = buildReadTools({
+      scope: { projectId: project.id, documentId: document.id },
+      services: adapter.services,
+    })
+    const execute = tools.read.execute as ((input: { path: string }) => Promise<unknown>) | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    await expect(execute({ path: 'chapters/one' })).rejects.toThrow('Did you mean')
+  })
+
+  test('read can omit annotations when include_annotations is false', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/annotated.md',
+      toEditorContent('First paragraph.')
+    )
+
+    if (!document) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    const storedDocument = await adapter.services.documents.getForProject(project.id, document.id)
+    if (!storedDocument) {
+      throw new Error('Expected stored document to be readable.')
+    }
+
+    const parsed = parseContent(storedDocument.content)
+    const storedDocNode = schema.nodeFromJSON(parsed.doc)
+    const firstBlockId = storedDocNode.child(0).attrs.id
+    if (typeof firstBlockId !== 'string') {
+      throw new Error('Expected first block to have an id.')
+    }
+
+    await adapter.repositories.documentNotes.replaceAllForDocument(document.id, [
+      {
+        id: 'note_1',
+        documentId: document.id,
+        anchorKind: 'block',
+        anchorId: firstBlockId,
+        content: JSON.stringify({
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Hidden context.' }],
+            },
+          ],
+        }),
+        authorUserId: 'owner_1',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    const tools = buildReadTools({
+      scope: { projectId: project.id, documentId: document.id },
+      services: adapter.services,
+    })
+    const execute = tools.read.execute as
+      | ((input: { path: string; include_annotations?: boolean }) => Promise<{ output: string }>)
+      | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    const result = await execute({ path: 'chapters/annotated.md', include_annotations: false })
+    expect(result.output).not.toContain('<annotation')
+    expect(result.output).not.toContain('<annotations>')
+    expect(result.output).toContain('First paragraph.')
+  })
+
+  test('grep rejects invalid regex patterns with a clear error', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/one.md',
+      toEditorContent('Moonlight floods the silver forest.')
+    )
+
+    if (!document) {
+      throw new Error('Expected test document to be created.')
+    }
+
+    const tools = buildReadTools({
+      scope: { projectId: project.id, documentId: document.id },
+      services: adapter.services,
+    })
+    const execute = tools.grep.execute as
+      | ((input: { pattern: string; regex?: boolean }) => Promise<unknown>)
+      | undefined
+
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    await expect(execute({ pattern: '(unclosed', regex: true })).rejects.toThrow(
+      'Invalid regular expression pattern'
+    )
+  })
+
+  test('search start_line aligns with read output for annotated documents', async () => {
     const adapter = createTestAdapter()
     await initializeEmbeddingSelection(adapter)
 
-    const projectA = await adapter.services.projects.create('Project A', { ownerUserId: 'owner_1' })
-    const projectB = await adapter.services.projects.create('Project B', { ownerUserId: 'owner_2' })
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/annotated.md',
+      toEditorContent(`First paragraph.
 
-    const soleDoc = await adapter.services.documents.createForProject(
-      projectA.id,
-      'chapters/sole.md',
-      toEditorContent('Moonlight settles over the valley and lights every stone.')
-    )
-    const sharedDoc = await adapter.services.documents.createForProject(
-      projectA.id,
-      'chapters/shared.md',
-      toEditorContent('Moonlight reaches the bridge and glows across the river.')
+Moonlight floods the silver forest.`)
     )
 
-    if (!soleDoc || !sharedDoc) {
-      throw new Error('Expected test documents to be created.')
+    if (!document) {
+      throw new Error('Expected test document to be created.')
     }
 
-    await adapter.repositories.projectDocuments.insert({
-      projectId: projectB.id,
-      documentId: sharedDoc.id,
-      addedAt: Date.now(),
-    })
+    const storedDocument = await adapter.services.documents.getForProject(project.id, document.id)
+    if (!storedDocument) {
+      throw new Error('Expected stored document to be readable.')
+    }
 
-    await adapter.services.indexingSettings.updateProjectStrategy(projectA.id, {
-      type: 'whole_document',
-      properties: {},
-    })
-    await adapter.services.indexingSettings.updateUserStrategy('owner_1', {
-      type: 'whole_document',
-      properties: {},
-    })
+    const parsed = parseContent(storedDocument.content)
+    const storedDocNode = schema.nodeFromJSON(parsed.doc)
+    const firstBlockId = storedDocNode.child(0).attrs.id
+    if (typeof firstBlockId !== 'string') {
+      throw new Error('Expected first block to have an id.')
+    }
+
+    await adapter.repositories.documentNotes.replaceAllForDocument(document.id, [
+      {
+        id: 'note_1',
+        documentId: document.id,
+        anchorKind: 'block',
+        anchorId: firstBlockId,
+        content: JSON.stringify({
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Hidden context.' }],
+            },
+          ],
+        }),
+        authorUserId: 'owner_1',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
 
     const now = Date.now()
     await adapter.repositories.documentEmbeddings.replaceEmbeddings({
-      documentId: soleDoc.id,
+      documentId: document.id,
       providerConfigId: null,
       providerId: 'openrouter',
       type: 'openrouter',
@@ -600,15 +913,15 @@ The copper city wakes at dawn while market bells echo through the square.`)
         },
       },
       documentTimestamp: now,
-      contentHash: 'sole-doc-indexing',
+      contentHash: 'annotated-search-alignment',
       chunks: [
         {
           ordinal: 0,
           start: 0,
-          end: 64,
-          selectionFrom: 0,
-          selectionTo: 64,
-          text: 'Moonlight settles over the valley and lights every stone.',
+          end: 34,
+          selectionFrom: 18,
+          selectionTo: 52,
+          text: 'Moonlight floods the silver forest.',
           embedding: [0.1, 0.2, 0.3],
         },
       ],
@@ -616,63 +929,37 @@ The copper city wakes at dawn while market bells echo through the square.`)
       updatedAt: now,
     })
 
-    await adapter.repositories.documentEmbeddings.replaceEmbeddings({
-      documentId: sharedDoc.id,
-      providerConfigId: null,
-      providerId: 'openrouter',
-      type: 'openrouter',
-      baseURL: OPENROUTER_BASE_URL,
-      model: 'openai/text-embedding-3-small',
-      strategy: {
-        type: 'sliding_window',
-        properties: {
-          level: 'paragraph',
-          windowSize: 2,
-          stride: 1,
-          minUnitChars: 40,
-          maxUnitChars: 400,
-        },
-      },
-      documentTimestamp: now + 1,
-      contentHash: 'shared-doc-indexing',
-      chunks: [
-        {
-          ordinal: 0,
-          start: 0,
-          end: 62,
-          selectionFrom: 0,
-          selectionTo: 62,
-          text: 'Moonlight reaches the bridge and glows across the river.',
-          embedding: [0.11, 0.19, 0.31],
-        },
-      ],
-      createdAt: now,
-      updatedAt: now,
-    })
-
     const tools = buildReadTools({
-      scope: {
-        projectId: projectA.id,
-        documentId: soleDoc.id,
-      },
+      scope: { projectId: project.id, documentId: document.id },
       services: adapter.services,
     })
-    const execute = tools.search_project.execute as
-      | ((input: { query: string; limit?: number }) => Promise<{
-          results: Array<{
-            path: string
-            indexing: { type: string } | null
-          }>
+    const searchExecute = tools.search.execute as
+      | ((input: { query: string; path: string }) => Promise<{
+          matches: Array<{ start_line: number | null }>
+        }>)
+      | undefined
+    const readExecute = tools.read.execute as
+      | ((input: { path: string; offset?: number; limit?: number }) => Promise<{
+          output: string
         }>)
       | undefined
 
-    expect(execute).toBeDefined()
-    if (!execute) return
+    expect(searchExecute).toBeDefined()
+    expect(readExecute).toBeDefined()
+    if (!searchExecute || !readExecute) return
 
-    const result = await execute({ query: 'moonlight', limit: 10 })
-    const resultByPath = new Map(result.results.map((entry) => [entry.path, entry]))
+    const searchResult = await searchExecute({
+      query: 'silver forest',
+      path: 'chapters/annotated.md',
+    })
+    const startLine = searchResult.matches[0]?.start_line
+    expect(startLine).toBeGreaterThan(0)
 
-    expect(resultByPath.get('chapters/sole.md')?.indexing?.type).toBe('whole_document')
-    expect(resultByPath.get('chapters/shared.md')?.indexing?.type).toBe('sliding_window')
+    const readResult = await readExecute({
+      path: 'chapters/annotated.md',
+      offset: startLine ?? 1,
+      limit: 3,
+    })
+    expect(readResult.output.toLowerCase()).toContain('silver forest')
   })
 })

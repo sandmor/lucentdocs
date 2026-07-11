@@ -1,0 +1,21 @@
+Read a project file or list a directory from the document tree. If the path does not exist, an error with suggestions is returned.
+
+Usage:
+- The path parameter is project-relative with no leading slash (e.g. "chapters/one.md"). Use "" or "/" for the project root directory.
+- To read a file, call read with a file path and optional offset/limit (1-based line numbers).
+- To browse a directory, call read with a directory path. Entries are returned one per line; directories end with "/".
+- By default, file reads return up to 2000 lines starting at offset (default 1).
+- To read later file sections, call read again with a larger offset.
+- To read later directory pages, call read again with a larger entry offset.
+- Use grep for exact text or regex matches in file contents.
+- Use glob when you know a filename pattern but not the exact path.
+- Use search for semantic / meaning-based discovery across documents.
+- Call read in parallel when you know multiple file paths to inspect.
+- Avoid tiny repeated slices. If you need more context, read a larger window.
+
+Annotations (Lucentdocs-specific):
+- Manuscript lines may contain <annotation id="n1" /> markers or wrapping <annotation> tags.
+- Author annotation bodies are returned in a separate <annotations> block — they are external author context, not editable manuscript text.
+- Do not quote annotation content as story text unless the user explicitly asks.
+- Set include_annotations=false when you only need raw manuscript text without author notes.
+- Use read (not grep or search) when you need full annotation bodies for a passage.
