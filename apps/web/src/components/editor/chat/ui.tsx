@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import type { UIMessage } from 'ai'
-import { BookOpen, Eye, MessageSquareQuote, Search, Trash2, User } from 'lucide-react'
+import { BookOpen, Eye, MessageSquareQuote, PenTool, Search, Trash2, User } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -145,18 +145,25 @@ function ToolTraceCard({ part }: { part: Record<string, unknown> }) {
 
   const isPending = state === 'call' || state === 'pending'
   const statusText = isPending ? 'Reviewing...' : 'Reviewed'
+  const isEditTool = toolName === 'edit'
 
   return (
     <details className="group max-w-full min-w-0 rounded-lg border border-border/40 bg-background/50 transition-colors hover:bg-muted/20">
       <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2.5 px-3 py-2 text-xs font-medium text-muted-foreground outline-none">
         {isPending ? (
-          <Search className="size-3.5 animate-pulse text-primary/60" />
+          isEditTool ? (
+            <PenTool className="size-3.5 animate-pulse text-primary/60" />
+          ) : (
+            <Search className="size-3.5 animate-pulse text-primary/60" />
+          )
+        ) : isEditTool ? (
+          <PenTool className="size-3.5 text-muted-foreground/60" />
         ) : (
           <Eye className="size-3.5 text-muted-foreground/60" />
         )}
 
         <span className="truncate text-foreground/70 group-hover:text-foreground transition-colors">
-          {toolName.replace(/-/g, ' ')}
+          {isEditTool ? 'edit file' : toolName.replace(/-/g, ' ')}
         </span>
 
         <span

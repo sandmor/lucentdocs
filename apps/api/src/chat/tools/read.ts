@@ -11,6 +11,7 @@ import {
 } from './document-text.js'
 import { formatPathNotFound } from './errors.js'
 import { buildPaginationMeta } from './meta.js'
+import { hashManuscriptText } from './document-manuscript.js'
 import { listDirectoryEntries, loadProjectFileIndex, resolveNormalizedPath, suggestPaths } from './paths.js'
 import { DEFAULT_READ_LINE_LIMIT, type BuildReadToolsContext } from './types.js'
 
@@ -123,10 +124,12 @@ async function readProjectFile(
         )
       : ''
 
-  const truncated = lineTruncated || charTruncated
-  const nextOffset = lineTruncated ? endLine + 1 : charTruncated ? startLine : null
+      const truncated = lineTruncated || charTruncated
+      const nextOffset = lineTruncated ? endLine + 1 : charTruncated ? startLine : null
 
-  return {
+      context.editSession?.recordRead(normalizedPath, hashManuscriptText(loaded.plainManuscript))
+
+      return {
     kind: 'file' as const,
     path: normalizedPath,
     start_line: startLine,

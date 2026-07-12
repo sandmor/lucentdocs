@@ -105,6 +105,7 @@ export const chatRouter = router({
         id: thread.id,
         title: thread.title,
         messages: thread.messages,
+        settings: thread.settings,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
         generating: ctx.chatRuntime.isGenerating(input),
@@ -207,6 +208,49 @@ export const chatRouter = router({
       })
 
       return created
+    }),
+
+  updateSettings: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        chatId: idSchema,
+        editingEnabled: z.boolean(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      const updated = await ctx.services.chats.updateSettings(
+        input.projectId,
+        input.documentId,
+        input.chatId,
+        { editingEnabled: input.editingEnabled }
+      )
+      if (!updated) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Chat thread ${input.chatId} not found`,
+        })
+      }
+
+      publishChatChangedEvent(input, {
+        reason: 'chats.update',
+        changedChatIds: [updated.id],
+        deletedChatIds: [],
+      })
+      await ctx.chatRuntime.publishPersistedState({
+        projectId: input.projectId,
+        documentId: input.documentId,
+        chatId: updated.id,
+      })
+
+      return {
+        id: updated.id,
+        settings: updated.settings,
+        updatedAt: updated.updatedAt,
+      }
     }),
 
   generateById: protectedProcedure

@@ -2,6 +2,15 @@ import { nanoid } from 'nanoid'
 import { isValidId } from '@lucentdocs/shared'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { ChatThreadRow } from '../../core/ports/chats.port.js'
+import {
+  createEmptyChatThreadPayload,
+  parseThreadPayload,
+  serializeThreadPayload,
+  type ChatThreadPayloadV1,
+  type ChatThreadSettings,
+} from './chat-thread-payload.js'
+
+export type { ChatThreadSettings } from './chat-thread-payload.js'
 
 export interface ChatThread {
   id: string
@@ -9,6 +18,7 @@ export interface ChatThread {
   documentId: string
   title: string
   messages: unknown[]
+  settings: ChatThreadSettings
   createdAt: number
   updatedAt: number
 }
@@ -31,16 +41,13 @@ export interface ChatsService {
     chatId: string,
     messages: unknown[]
   ): Promise<ChatThread | null>
+  updateSettings(
+    projectId: string,
+    documentId: string,
+    chatId: string,
+    settings: Partial<ChatThreadSettings>
+  ): Promise<ChatThread | null>
   delete(projectId: string, documentId: string, chatId: string): Promise<boolean>
-}
-
-function parseMessages(raw: string): unknown[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
 }
 
 function countMessages(messages: unknown[]): number {
@@ -72,12 +79,14 @@ function summarizeTitle(messages: unknown[]): string {
 }
 
 function toChatThread(row: ChatThreadRow): ChatThread {
+  const payload = parseThreadPayload(row.messages)
   return {
     id: row.id,
     projectId: row.projectId,
     documentId: row.documentId,
     title: row.title,
-    messages: parseMessages(row.messages),
+    messages: payload.messages,
+    settings: payload.settings,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -90,6 +99,16 @@ function toSummary(thread: ChatThread): ChatThreadSummary {
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     messageCount: countMessages(thread.messages),
+  }
+}
+
+function mergeSettings(
+  current: ChatThreadSettings,
+  patch: Partial<ChatThreadSettings>
+): ChatThreadSettings {
+  return {
+    editingEnabled:
+      typeof patch.editingEnabled === 'boolean' ? patch.editingEnabled : current.editingEnabled,
   }
 }
 
@@ -121,12 +140,13 @@ export function createChatsService(repos: RepositorySet): ChatsService {
       const now = Date.now()
       const id = nanoid()
       const normalizedTitle = title.trim() || 'New chat'
+      const payload = createEmptyChatThreadPayload()
       await repos.chats.insert({
         id,
         projectId,
         documentId,
         title: normalizedTitle,
-        messages: '[]',
+        messages: serializeThreadPayload(payload),
         createdAt: now,
         updatedAt: now,
       })
@@ -136,7 +156,8 @@ export function createChatsService(repos: RepositorySet): ChatsService {
         projectId,
         documentId,
         title: normalizedTitle,
-        messages: [],
+        messages: payload.messages,
+        settings: payload.settings,
         createdAt: now,
         updatedAt: now,
       }
@@ -152,11 +173,19 @@ export function createChatsService(repos: RepositorySet): ChatsService {
       const existing = await repos.chats.findById(projectId, documentId, chatId)
       if (!existing) return null
 
+      const currentPayload = parseThreadPayload(existing.messages)
+      const nextPayload: ChatThreadPayloadV1 = {
+        v: 1,
+        settings: currentPayload.settings,
+        messages,
+      }
+
       const updatedAt = Date.now()
-      const nextTitle = existing.title === 'New chat' ? summarizeTitle(messages) : existing.title
+      const nextTitle =
+        existing.title === 'New chat' ? summarizeTitle(messages) : existing.title
       const updated = await repos.chats.update(projectId, documentId, chatId, {
         title: nextTitle,
-        messages: JSON.stringify(messages),
+        messages: serializeThreadPayload(nextPayload),
         updatedAt,
       })
       if (!updated) return null
@@ -167,6 +196,43 @@ export function createChatsService(repos: RepositorySet): ChatsService {
         documentId: existing.documentId,
         title: nextTitle,
         messages,
+        settings: nextPayload.settings,
+        createdAt: existing.createdAt,
+        updatedAt,
+      }
+    },
+
+    async updateSettings(
+      projectId: string,
+      documentId: string,
+      chatId: string,
+      settings: Partial<ChatThreadSettings>
+    ): Promise<ChatThread | null> {
+      if (!isValidId(projectId) || !isValidId(documentId) || !isValidId(chatId)) return null
+      const existing = await repos.chats.findById(projectId, documentId, chatId)
+      if (!existing) return null
+
+      const currentPayload = parseThreadPayload(existing.messages)
+      const nextPayload: ChatThreadPayloadV1 = {
+        v: 1,
+        settings: mergeSettings(currentPayload.settings, settings),
+        messages: currentPayload.messages,
+      }
+
+      const updatedAt = Date.now()
+      const updated = await repos.chats.update(projectId, documentId, chatId, {
+        messages: serializeThreadPayload(nextPayload),
+        updatedAt,
+      })
+      if (!updated) return null
+
+      return {
+        id: existing.id,
+        projectId: existing.projectId,
+        documentId: existing.documentId,
+        title: existing.title,
+        messages: nextPayload.messages,
+        settings: nextPayload.settings,
         createdAt: existing.createdAt,
         updatedAt,
       }

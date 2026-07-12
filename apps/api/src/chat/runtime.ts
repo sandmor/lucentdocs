@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 import type { UIMessage, UIMessageChunk } from 'ai'
 import type { ServiceSet } from '../core/services/types.js'
+import type { YjsRuntime } from '../yjs/runtime.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
 import { GenerationEngine, type ChatScope } from './generation-engine.js'
 import {
@@ -69,9 +70,9 @@ export class ChatRuntime {
   #generationEngine: GenerationEngine
   #services: ServiceSet
 
-  constructor(services: ServiceSet) {
+  constructor(services: ServiceSet, yjsRuntime: YjsRuntime) {
     this.#services = services
-    this.#generationEngine = new GenerationEngine(services)
+    this.#generationEngine = new GenerationEngine(services, yjsRuntime)
   }
 
   #shouldRetainState(key: string): boolean {
@@ -325,6 +326,7 @@ export class ChatRuntime {
           rollbackMessages: persistedMessages,
           selectionFrom: input.selectionFrom,
           selectionTo: input.selectionTo,
+          editingEnabled: existingThread.settings.editingEnabled,
           generationId,
           abortController: controller,
         },
@@ -372,6 +374,6 @@ export class ChatRuntime {
   }
 }
 
-export function createChatRuntime(services: ServiceSet): ChatRuntime {
-  return new ChatRuntime(services)
+export function createChatRuntime(services: ServiceSet, yjsRuntime: YjsRuntime): ChatRuntime {
+  return new ChatRuntime(services, yjsRuntime)
 }

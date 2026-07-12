@@ -16,6 +16,63 @@ import type { JsonObject } from '@lucentdocs/shared'
 
 export const NOTES_MAP_KEY = 'notes'
 
+export function deleteNotesForAnchorInMap(notesMap: Y.Map<unknown>, anchorId: string): string[] {
+  const deleted: string[] = []
+  notesMap.forEach((value, noteId) => {
+    if (!(value instanceof Y.Map)) return
+    if (value.get('anchorId') === anchorId) {
+      notesMap.delete(noteId)
+      deleted.push(noteId)
+    }
+  })
+  return deleted
+}
+
+export function reanchorNotesForAnchorInMap(
+  notesMap: Y.Map<unknown>,
+  fromAnchorId: string,
+  to: { anchorKind: NoteAnchorKind; anchorId: string },
+  filter?: { anchorKind?: NoteAnchorKind }
+): string[] {
+  const updated: string[] = []
+  const now = Date.now()
+
+  notesMap.forEach((value, noteId) => {
+    if (!(value instanceof Y.Map)) return
+    if (value.get('anchorId') !== fromAnchorId) return
+    if (filter?.anchorKind !== undefined && value.get('anchorKind') !== filter.anchorKind) return
+
+    value.set('anchorKind', to.anchorKind)
+    value.set('anchorId', to.anchorId)
+    value.set('updatedAt', now)
+    updated.push(noteId)
+  })
+
+  return updated
+}
+
+export function reconcileNotesAfterDocumentEdit(
+  notesMap: Y.Map<unknown>,
+  options: {
+    deletedBlockIds: readonly string[]
+    blockIdMigrations: ReadonlyArray<{ from: string; to: string }>
+  }
+): void {
+  const migratedFrom = new Set(options.blockIdMigrations.map((entry) => entry.from))
+
+  for (const migration of options.blockIdMigrations) {
+    reanchorNotesForAnchorInMap(notesMap, migration.from, {
+      anchorKind: 'block',
+      anchorId: migration.to,
+    }, { anchorKind: 'block' })
+  }
+
+  for (const anchorId of options.deletedBlockIds) {
+    if (migratedFrom.has(anchorId)) continue
+    deleteNotesForAnchorInMap(notesMap, anchorId)
+  }
+}
+
 export interface SerializedNoteFromYjs {
   id: string
   anchorKind: NoteAnchorKind

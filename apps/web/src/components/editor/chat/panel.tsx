@@ -3,6 +3,7 @@ import { type UIMessage } from 'ai'
 import { StopCircle, Trash2, Plus, History, CornerDownLeft, PenTool } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
@@ -59,8 +60,11 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
 
   const createThreadMutation = trpc.chat.create.useMutation()
   const deleteThreadMutation = trpc.chat.deleteById.useMutation()
+  const updateSettingsMutation = trpc.chat.updateSettings.useMutation()
   const generateMutation = trpc.chat.generateById.useMutation()
   const cancelGenerationMutation = trpc.chat.cancelGenerationById.useMutation()
+
+  const editingEnabled = activeThreadQuery.data?.settings.editingEnabled ?? false
 
   const { streamGenerationIdRef, enqueueStreamChunk, stopStreamChunkPump, startStreamChunkPump } =
     useChatStreamPump({
@@ -244,6 +248,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
             id: event.thread.id,
             title: event.thread.title,
             messages: nextMessages,
+            settings: event.thread.settings,
             createdAt: event.thread.createdAt,
             updatedAt: event.thread.updatedAt,
             generating: event.generating,
@@ -440,6 +445,52 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
             </h3>
           </div>
           <div className="flex items-center gap-0.5">
+            <label
+              className={cn(
+                'mr-1 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10px] font-medium text-muted-foreground',
+                !hasActiveThreadId && 'opacity-50'
+              )}
+              title="Allow AI to edit project files in this chat"
+            >
+              <PenTool className="size-3" />
+              <span className="hidden sm:inline">Edit</span>
+              <Switch
+                data-chat-editing-toggle="true"
+                size="sm"
+                checked={editingEnabled}
+                disabled={
+                  !queryEnabled ||
+                  !hasActiveThreadId ||
+                  isGenerating ||
+                  updateSettingsMutation.isPending
+                }
+                onCheckedChange={(checked) => {
+                  if (!projectId || !documentId || !activeThreadId) return
+                  updateSettingsMutation.mutate(
+                    {
+                      projectId,
+                      documentId,
+                      chatId: activeThreadId,
+                      editingEnabled: checked,
+                    },
+                    {
+                      onSuccess: () => {
+                        void utils.chat.getById.invalidate({
+                          projectId,
+                          documentId,
+                          chatId: activeThreadId,
+                        })
+                      },
+                      onError: (error) => {
+                        toast.error('Failed to update chat settings', {
+                          description: error.message,
+                        })
+                      },
+                    }
+                  )
+                }}
+              />
+            </label>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -497,7 +548,9 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
         )}
 
         <p className="mt-1 text-xs text-muted-foreground">
-          Ask about this project and inspect files with tools.
+          {editingEnabled
+            ? 'Editing enabled — the AI can modify project files in this chat.'
+            : 'Ask about this project and inspect files with tools.'}
         </p>
       </div>
 

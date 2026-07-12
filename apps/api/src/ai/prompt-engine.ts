@@ -50,10 +50,17 @@ export function resolveChatPrompt(
   currentFilePath: string,
   contextParts: ContextParts,
   conversation: string,
-  annotations = '(none)'
+  annotations = '(none)',
+  editingEnabled = false
 ): RenderedPrompt {
   const definition = promptManager.resolvePromptForMode('chat')
-  const variables = buildChatVariables(currentFilePath, contextParts, conversation, annotations)
+  const variables = buildChatVariables(
+    currentFilePath,
+    contextParts,
+    conversation,
+    annotations,
+    editingEnabled
+  )
   return renderPrompt(definition, variables)
 }
 

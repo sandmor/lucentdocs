@@ -11,6 +11,7 @@ export const DOCUMENTS_CHANGED_REASONS = [
   'documents.move-directory',
   'documents.delete-directory',
   'documents.set-default',
+  'chat.edit',
 ] as const
 
 export type DocumentsChangedReason = (typeof DOCUMENTS_CHANGED_REASONS)[number]

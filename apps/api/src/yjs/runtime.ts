@@ -23,7 +23,9 @@ import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import {
   hydrateNotesMap,
   notesMapToRecords,
+  reconcileNotesAfterDocumentEdit,
   snapshotsFromRecords,
+  getNotesMap,
 } from './document-notes.js'
 
 export { setupWSConnection }
@@ -210,6 +212,21 @@ export class YjsRuntime {
     }
 
     return transformed
+  }
+
+  async reconcileDocumentNotesAfterEdit(
+    documentName: string,
+    options: {
+      deletedBlockIds: readonly string[]
+      blockIdMigrations: ReadonlyArray<{ from: string; to: string }>
+    }
+  ): Promise<void> {
+    this.#ensurePersistenceInitialized()
+    await this.ensureDocumentLoaded(documentName)
+    const liveDoc = getYDoc(documentName)
+    liveDoc.transact(() => {
+      reconcileNotesAfterDocumentEdit(getNotesMap(liveDoc), options)
+    }, 'chat-edit-notes')
   }
 
   async flushAllDocumentStates(): Promise<void> {

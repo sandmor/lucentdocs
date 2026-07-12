@@ -1,0 +1,26 @@
+Performs exact string replacements in project document manuscript text.
+
+Usage:
+- You must use read on the same path at least once in this conversation before calling edit. This tool errors if you attempt an edit without a prior read.
+- Edits run against the live document. If the file changed outside this chat since the last read, the edit fails with a stale-read error — re-read and retry.
+- After a successful edit, you may edit the same path again in this generation without re-reading; the session tracks the updated manuscript.
+- When editing text from read output, match manuscript text only. Never include line-number prefixes (e.g. "12: ") in old_string or new_string.
+- Never include <annotation> tags or annotation bodies from the <annotations> block in old_string or new_string.
+- Text shown between <annotation> opening/closing tags in read output is manuscript text and is editable; only the separate <annotations> author-note bodies are read-only context.
+- ALWAYS prefer editing existing project documents. Do not describe edits in prose when edit can apply them.
+- The edit fails if old_string is not found in the manuscript. Common Unicode punctuation differences (curly quotes, apostrophes, dashes, non-breaking spaces, CRLF line endings) and NFC/NFD equivalence are normalized automatically when matching.
+- Matching is exact for regular spaces, tabs, indentation, and repeated whitespace — those are not collapsed or trimmed.
+- new_string must not contain LucentDocs annotation or tool markup tags.
+- The edit fails if old_string matches multiple times unless you provide more surrounding context or set replace_all=true.
+- Use replace_all when renaming a term across the whole file.
+- After a successful edit, call read again if you need to verify the updated passage or annotations.
+
+Sibling tools:
+- Use read to load exact manuscript text and annotation markers before editing.
+- Use grep for exact search across files; use search for semantic discovery.
+- Use glob when you know a filename pattern but not the exact path.
+
+Annotation safety (Lucentdocs-specific):
+- note_marker anchors and block ids are preserved automatically when possible.
+- Do not attempt to edit annotation note bodies; they are read-only author context.
+- Avoid edits that delete entire annotated blocks unless the user explicitly asked for removal.

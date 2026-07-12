@@ -407,11 +407,18 @@ export function buildChatVariables(
   currentFilePath: string,
   contextParts: ContextParts,
   conversation: string,
-  annotations = '(none)'
+  annotations = '(none)',
+  editingEnabled = false
 ): Record<string, string> {
-  const chatInstruction = contextParts.truncated
+  const baseInstruction = contextParts.truncated
     ? 'The active file excerpt is incomplete. Use search with whole_project=true to locate relevant documents, then read for exact passages and annotations.'
     : 'Use search (active file by default), whole_project search, grep, glob, or read when you need to inspect documents or find specific content.'
+
+  const editingInstruction = editingEnabled
+    ? ' Editing is enabled for this chat. Use read on a path before calling edit. Match manuscript text only in edit (no line-number prefixes, no <annotation> tags, no annotation bodies). Text inside <annotation> wrappers in read output is still manuscript and editable. Unicode punctuation differences such as curly quotes and dashes are normalized automatically when matching. Prefer edit over describing changes in prose.'
+    : ''
+
+  const chatInstruction = `${baseInstruction}${editingInstruction}`
 
   return {
     currentFilePath: currentFilePath.trim() || '(untitled)',

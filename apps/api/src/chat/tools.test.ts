@@ -17,10 +17,22 @@ import { toEditorContent } from '../testing/editor-content.js'
 import {
   GLOB_DESCRIPTION,
   GREP_DESCRIPTION,
+  EDIT_DESCRIPTION,
   READ_DESCRIPTION,
   SEARCH_DESCRIPTION,
 } from './tools/descriptions/index.js'
-import { buildInlineZoneWriteTools, buildReadTools, hasValidToolScope } from './tools.js'
+import {
+  buildEditTools,
+  buildInlineZoneWriteTools,
+  buildReadTools,
+  hasValidToolScope,
+} from './tools.js'
+import { DocumentEditSession } from './tools/document-edit-session.js'
+import { createYjsRuntime, type YjsRuntime } from '../yjs/runtime.js'
+import {
+  createEmptyChatThreadPayload,
+  serializeThreadPayload,
+} from '../core/services/chat-thread-payload.js'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 
@@ -156,6 +168,8 @@ describe('agent tool descriptions', () => {
     expect(GREP_DESCRIPTION).toContain('search')
     expect(SEARCH_DESCRIPTION).toContain('whole_project')
     expect(SEARCH_DESCRIPTION).toContain('active file')
+    expect(EDIT_DESCRIPTION).toContain('read')
+    expect(EDIT_DESCRIPTION).toContain('annotation')
     expect(READ_DESCRIPTION.length).toBeGreaterThan(200)
   })
 })
@@ -384,7 +398,12 @@ Second paragraph.`)
       services: adapter.services,
     })
     const execute = tools.read.execute as
-      | ((input: { path: string; offset?: number; limit?: number; include_annotations?: boolean }) => Promise<{
+      | ((input: {
+          path: string
+          offset?: number
+          limit?: number
+          include_annotations?: boolean
+        }) => Promise<{
           kind: string
           output: string
         }>)
@@ -744,7 +763,9 @@ The copper city wakes at dawn while market bells echo through the square.`)
       scope: { projectId: project.id, documentId: document.id },
       services: adapter.services,
     })
-    const execute = tools.read.execute as ((input: { path: string }) => Promise<unknown>) | undefined
+    const execute = tools.read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
 
     expect(execute).toBeDefined()
     if (!execute) return
@@ -961,5 +982,380 @@ Moonlight floods the silver forest.`)
       limit: 3,
     })
     expect(readResult.output.toLowerCase()).toContain('silver forest')
+  })
+})
+
+function createTestYjsRuntime(adapter: ReturnType<typeof createTestAdapter>): YjsRuntime {
+  const yjsRuntime = createYjsRuntime(
+    {
+      yjsDocuments: adapter.repositories.yjsDocuments,
+      versionSnapshots: adapter.repositories.versionSnapshots,
+      documentContent: adapter.repositories.documentContent,
+      documentNotes: adapter.repositories.documentNotes,
+    },
+    { persistenceFlushIntervalMs: 1000, versionSnapshotIntervalMs: 0 }
+  )
+  yjsRuntime.initialize()
+  return yjsRuntime
+}
+
+function createEditContext(
+  adapter: ReturnType<typeof createTestAdapter>,
+  projectId: string,
+  documentId: string,
+  yjsRuntime: YjsRuntime
+) {
+  const editSession = new DocumentEditSession()
+  return {
+    scope: { projectId, documentId },
+    services: adapter.services,
+    yjsRuntime,
+    editSession,
+  }
+}
+
+describe('buildEditTools', () => {
+  test('edit rejects paths that were not read in this generation', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/edit-me.md',
+      toEditorContent('Alpha beta gamma.')
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const tools = buildEditTools(
+      createEditContext(adapter, project.id, document.id, createTestYjsRuntime(adapter))
+    )
+    const execute = tools.edit.execute as
+      | ((input: { path: string; old_string: string; new_string: string }) => Promise<unknown>)
+      | undefined
+    expect(execute).toBeDefined()
+    if (!execute) return
+
+    await expect(
+      execute({
+        path: 'chapters/edit-me.md',
+        old_string: 'Alpha',
+        new_string: 'Omega',
+      })
+    ).rejects.toThrow(/must call read/)
+  })
+
+  test('edit applies manuscript replacements after read and preserves content', async () => {
+    const adapter = createTestAdapter()
+    const yjsRuntime = createTestYjsRuntime(adapter)
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/edit-me.md',
+      toEditorContent('Alpha beta gamma.')
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const context = createEditContext(adapter, project.id, document.id, yjsRuntime)
+    const readTools = buildReadTools(context)
+    const editTools = buildEditTools(context)
+
+    const readExecute = readTools.read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
+    const editExecute = editTools.edit.execute as
+      | ((input: {
+          path: string
+          old_string: string
+          new_string: string
+        }) => Promise<{ replacements: number; output: string }>)
+      | undefined
+
+    expect(readExecute).toBeDefined()
+    expect(editExecute).toBeDefined()
+    if (!readExecute || !editExecute) return
+
+    await readExecute({ path: 'chapters/edit-me.md' })
+    const result = await editExecute({
+      path: 'chapters/edit-me.md',
+      old_string: 'Alpha',
+      new_string: 'Omega',
+    })
+
+    expect(result.replacements).toBe(1)
+    expect(result.output).toContain('Edit applied successfully')
+
+    const updated = await adapter.services.documents.getForProject(project.id, document.id)
+    expect(updated?.content).toContain('Omega beta gamma')
+  })
+
+  test('edit matches manuscript text when old_string uses ASCII quotes in a curly-quote document', async () => {
+    const adapter = createTestAdapter()
+    const yjsRuntime = createTestYjsRuntime(adapter)
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const curlyLine = '“What kind of life?” he asked, though he already felt the answer.'
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/curly.md',
+      toEditorContent(`${curlyLine}\n\nSecond paragraph.`)
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const context = createEditContext(adapter, project.id, document.id, yjsRuntime)
+
+    const readExecute = buildReadTools(context).read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
+    const editExecute = buildEditTools(context).edit.execute as
+      | ((input: {
+          path: string
+          old_string: string
+          new_string: string
+        }) => Promise<{ replacements: number }>)
+      | undefined
+
+    expect(readExecute).toBeDefined()
+    expect(editExecute).toBeDefined()
+    if (!readExecute || !editExecute) return
+
+    await readExecute({ path: 'chapters/curly.md' })
+    const result = await editExecute({
+      path: 'chapters/curly.md',
+      old_string: '"What kind of life?" he asked, though he already felt the answer.',
+      new_string: '"What kind of life?" she asked, though she already felt the answer.',
+    })
+
+    expect(result.replacements).toBe(1)
+
+    const updated = await adapter.services.documents.getForProject(project.id, document.id)
+    expect(updated?.content).toContain('she asked')
+  })
+
+  test('edit rejects ambiguous multi-match without replace_all', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/repeat.md',
+      toEditorContent('repeat repeat at the end.')
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const context = createEditContext(
+      adapter,
+      project.id,
+      document.id,
+      createTestYjsRuntime(adapter)
+    )
+    const readExecute = buildReadTools(context).read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
+    const editExecute = buildEditTools(context).edit.execute as
+      | ((input: { path: string; old_string: string; new_string: string }) => Promise<unknown>)
+      | undefined
+
+    expect(readExecute).toBeDefined()
+    expect(editExecute).toBeDefined()
+    if (!readExecute || !editExecute) return
+
+    await readExecute({ path: 'chapters/repeat.md' })
+    await expect(
+      editExecute({
+        path: 'chapters/repeat.md',
+        old_string: 'repeat',
+        new_string: 'echo',
+      })
+    ).rejects.toThrow(/multiple matches/)
+  })
+
+  test('edit rejects stale reads after external content changes', async () => {
+    const adapter = createTestAdapter()
+    const yjsRuntime = createTestYjsRuntime(adapter)
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/stale.md',
+      toEditorContent('Original text here.')
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const context = createEditContext(adapter, project.id, document.id, yjsRuntime)
+    const readExecute = buildReadTools(context).read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
+    const editExecute = buildEditTools(context).edit.execute as
+      | ((input: { path: string; old_string: string; new_string: string }) => Promise<unknown>)
+      | undefined
+
+    expect(readExecute).toBeDefined()
+    expect(editExecute).toBeDefined()
+    if (!readExecute || !editExecute) return
+
+    await readExecute({ path: 'chapters/stale.md' })
+    await yjsRuntime.replaceLiveDocumentContent(
+      document.id,
+      parseContent(toEditorContent('Changed elsewhere.')).doc
+    )
+
+    await expect(
+      editExecute({
+        path: 'chapters/stale.md',
+        old_string: 'Original text here.',
+        new_string: 'Edited text here.',
+      })
+    ).rejects.toThrow(/changed since it was last read/)
+  })
+
+  test('edit allows sequential disjoint edits after updating the session hash', async () => {
+    const adapter = createTestAdapter()
+    const yjsRuntime = createTestYjsRuntime(adapter)
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/sequential.md',
+      toEditorContent('First second third.')
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const context = createEditContext(adapter, project.id, document.id, yjsRuntime)
+    const readExecute = buildReadTools(context).read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
+    const editExecute = buildEditTools(context).edit.execute as
+      | ((input: {
+          path: string
+          old_string: string
+          new_string: string
+        }) => Promise<{ replacements: number }>)
+      | undefined
+
+    expect(readExecute).toBeDefined()
+    expect(editExecute).toBeDefined()
+    if (!readExecute || !editExecute) return
+
+    await readExecute({ path: 'chapters/sequential.md' })
+    await editExecute({
+      path: 'chapters/sequential.md',
+      old_string: 'First',
+      new_string: 'One',
+    })
+    await editExecute({
+      path: 'chapters/sequential.md',
+      old_string: 'third',
+      new_string: 'three',
+    })
+
+    await yjsRuntime.ensureDocumentLoaded(document.id)
+    const json = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(JSON.stringify(json)).toContain('One')
+    expect(JSON.stringify(json)).toContain('three')
+  })
+
+  test('edit validation rejects reserved markup and oversized input', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/validate.md',
+      toEditorContent('Hello world.')
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const context = createEditContext(adapter, project.id, document.id, createTestYjsRuntime(adapter))
+    const readExecute = buildReadTools(context).read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
+    const editExecute = buildEditTools(context).edit.execute as
+      | ((input: { path: string; old_string: string; new_string: string }) => Promise<unknown>)
+      | undefined
+
+    expect(readExecute).toBeDefined()
+    expect(editExecute).toBeDefined()
+    if (!readExecute || !editExecute) return
+
+    await readExecute({ path: 'chapters/validate.md' })
+
+    await expect(
+      editExecute({
+        path: 'chapters/validate.md',
+        old_string: 'Hello',
+        new_string: '<annotation id="n1">oops</annotation>',
+      })
+    ).rejects.toThrow(/must not contain/)
+
+    await expect(
+      editExecute({
+        path: 'chapters/validate.md',
+        old_string: 'x'.repeat(200_000),
+        new_string: 'y',
+      })
+    ).rejects.toThrow(/maximum length/)
+  })
+
+  test('edit normalizes line-number and annotation wrappers from old_string', async () => {
+    const adapter = createTestAdapter()
+    const yjsRuntime = createTestYjsRuntime(adapter)
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapters/normalize.md',
+      toEditorContent('Hello world.')
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const context = createEditContext(adapter, project.id, document.id, yjsRuntime)
+    const readExecute = buildReadTools(context).read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
+    const editExecute = buildEditTools(context).edit.execute as
+      | ((input: {
+          path: string
+          old_string: string
+          new_string: string
+        }) => Promise<{ replacements: number }>)
+      | undefined
+
+    expect(readExecute).toBeDefined()
+    expect(editExecute).toBeDefined()
+    if (!readExecute || !editExecute) return
+
+    await readExecute({ path: 'chapters/normalize.md' })
+    const result = await editExecute({
+      path: 'chapters/normalize.md',
+      old_string: '1: <annotation id="n1">\nHello world.\n</annotation>',
+      new_string: 'Goodbye world.',
+    })
+
+    expect(result.replacements).toBe(1)
+    const json = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(JSON.stringify(json)).toContain('Goodbye world.')
+  })
+})
+
+describe('chats service envelope', () => {
+  test('create initializes v1 payload and updateSettings persists editingEnabled', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'notes.md',
+      toEditorContent('Draft')
+    )
+    if (!document) throw new Error('Expected test document to be created.')
+
+    const created = await adapter.services.chats.create(project.id, document.id)
+    if (!created) throw new Error('Expected chat thread to be created.')
+    expect(created.settings.editingEnabled).toBe(false)
+
+    const row = await adapter.repositories.chats.findById(project.id, document.id, created.id)
+    expect(row?.messages).toBe(serializeThreadPayload(createEmptyChatThreadPayload()))
+
+    const updated = await adapter.services.chats.updateSettings(
+      project.id,
+      document.id,
+      created.id,
+      {
+        editingEnabled: true,
+      }
+    )
+    expect(updated?.settings.editingEnabled).toBe(true)
   })
 })

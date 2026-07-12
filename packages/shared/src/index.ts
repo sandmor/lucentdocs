@@ -16,6 +16,11 @@ export {
   mergeBlockIdIntoDomAttrs,
   readBlockIdFromDom,
 } from './block-id.js'
+export {
+  collectDeletedTopLevelBlockIds,
+  collectTopLevelMarkerIds,
+  readTopLevelBlockId,
+} from './note-reconcile.js'
 export type {
   DocumentNoteRecord,
   DocumentNoteSnapshot,

@@ -163,7 +163,7 @@ export async function createContainer(
     }
   )
 
-  const chatRuntime = createChatRuntime(adapter.services)
+  const chatRuntime = createChatRuntime(adapter.services, yjsRuntime)
   const documentImportRuntime = createDocumentImportRuntime({
     queue: adapter.jobQueue,
   })

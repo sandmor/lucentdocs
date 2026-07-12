@@ -11,8 +11,10 @@ import { getLanguageModel } from '../ai/index.js'
 import { assertPromptProtocolMode, resolveChatPrompt } from '../ai/prompt-engine.js'
 import { configManager } from '../config/runtime.js'
 import type { ServiceSet } from '../core/services/types.js'
+import type { YjsRuntime } from '../yjs/runtime.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
-import { buildReadTools } from './tools.js'
+import { buildEditTools, buildReadTools } from './tools.js'
+import { DocumentEditSession } from './tools/document-edit-session.js'
 import {
   buildCurrentFileContextWithAnnotations,
   isAbortError,
@@ -36,6 +38,7 @@ export interface GenerationOptions {
   rollbackMessages: UIMessage[]
   selectionFrom?: number
   selectionTo?: number
+  editingEnabled: boolean
   generationId: string
   abortController: AbortController
 }
@@ -114,9 +117,11 @@ async function waitForAbortableDelay(controller: AbortController, delayMs: numbe
 
 export class GenerationEngine {
   #services: ServiceSet
+  #yjsRuntime: YjsRuntime
 
-  constructor(services: ServiceSet) {
+  constructor(services: ServiceSet, yjsRuntime: YjsRuntime) {
     this.#services = services
+    this.#yjsRuntime = yjsRuntime
   }
 
   /**
@@ -132,6 +137,7 @@ export class GenerationEngine {
       rollbackMessages,
       selectionFrom,
       selectionTo,
+      editingEnabled,
       generationId,
       abortController,
     } = options
@@ -187,7 +193,8 @@ export class GenerationEngine {
         currentFilePath,
         fileContext.parts,
         serializeConversationForPrompt(baseMessages),
-        fileContext.annotationContent
+        fileContext.annotationContent,
+        editingEnabled
       )
       assertPromptProtocolMode(rendered.definition, 'chat')
 
@@ -202,7 +209,7 @@ export class GenerationEngine {
         model,
         system: `${rendered.systemPrompt}\n\n${rendered.userPrompt}`,
         messages: modelMessages,
-        tools: this.buildTools(scope),
+        tools: this.buildTools(scope, editingEnabled),
         stopWhen: stepCountIs(runtimeLimits.aiToolSteps),
         maxOutputTokens: rendered.definition.defaults.maxOutputTokens,
         temperature: rendered.definition.defaults.temperature,
@@ -322,6 +329,7 @@ export class GenerationEngine {
               id: saved.id,
               title: saved.title,
               messages: saved.messages,
+              settings: saved.settings,
               createdAt: saved.createdAt,
               updatedAt: saved.updatedAt,
             },
@@ -347,7 +355,19 @@ export class GenerationEngine {
     }
   }
 
-  private buildTools(scope: ChatScope) {
-    return buildReadTools({ scope, services: this.#services })
+  private buildTools(scope: ChatScope, editingEnabled: boolean) {
+    const editSession = new DocumentEditSession()
+    const context = {
+      scope,
+      services: this.#services,
+      yjsRuntime: this.#yjsRuntime,
+      editSession,
+    }
+    const tools = buildReadTools(context)
+    if (!editingEnabled) return tools
+    return {
+      ...tools,
+      ...buildEditTools(context),
+    }
   }
 }

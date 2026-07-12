@@ -10,7 +10,7 @@ import {
 import { nanoid } from 'nanoid'
 import { safeValidateUIMessages, type UIMessage } from 'ai'
 import { configManager } from '../config/runtime.js'
-import type { ChatThread } from '../core/services/chats.service.js'
+import type { ChatThread, ChatThreadSettings } from '../core/services/chats.service.js'
 import { parseDocumentNode } from '../core/services/documentContent.js'
 import {
   buildAnnotatedPromptContextExcerpt,
@@ -26,6 +26,7 @@ export interface PersistedChatThread {
   id: string
   title: string
   messages: unknown[]
+  settings: ChatThreadSettings
   createdAt: number
   updatedAt: number
 }
@@ -55,6 +56,7 @@ export function toPersistedThread(thread: ChatThread | null): PersistedChatThrea
     id: thread.id,
     title: thread.title,
     messages: thread.messages,
+    settings: thread.settings,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
   }
@@ -296,5 +298,7 @@ export function getToolLimits() {
   return {
     MAX_TOOL_ENTRIES: limits.toolEntries,
     MAX_TOOL_READ_CHARS: limits.toolReadChars,
+    MAX_TOOL_EDIT_NEEDLE_CHARS: limits.toolReadChars,
+    MAX_TOOL_EDIT_REPLACEMENT_CHARS: limits.toolReadChars,
   }
 }

@@ -2,10 +2,11 @@ import { createGlobTool } from './glob.js'
 import { createGrepTool } from './grep.js'
 import { createReadTool } from './read.js'
 import { createSearchTool } from './search.js'
-import type { BuildReadToolsContext, ToolScope } from './types.js'
+import type { BuildEditToolsContext, BuildReadToolsContext, ToolScope } from './types.js'
 
 export { buildInlineZoneWriteTools } from './write.js'
-export type { BuildReadToolsContext, ToolScope }
+export { buildEditTools } from './edit.js'
+export type { BuildEditToolsContext, BuildReadToolsContext, ToolScope }
 
 export function buildReadTools(context: BuildReadToolsContext) {
   return {

@@ -22,6 +22,7 @@ export interface LoadedDocumentText {
   documentId: string
   path: string
   content: string
+  plainManuscript: string
   noteRows: AiAnnotationNote[]
   aliasByNoteId: Map<string, string>
   aliasToNoteId: Map<string, string>
@@ -38,7 +39,8 @@ export async function loadDocumentText(
   if (!document) return null
 
   const noteRows = await services.documentNotes.listByDocumentId(documentId)
-  let content = renderDocumentContentToMarkdown(document.content)
+  const plainManuscript = renderDocumentContentToMarkdown(document.content)
+  let content = plainManuscript
   let aliasByNoteId = new Map<string, string>()
   let aliasToNoteId = new Map<string, string>()
 
@@ -56,6 +58,7 @@ export async function loadDocumentText(
     documentId,
     path,
     content,
+    plainManuscript,
     noteRows,
     aliasByNoteId,
     aliasToNoteId,
