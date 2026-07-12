@@ -9,6 +9,12 @@ import {
   type ChatThreadPayloadV1,
   type ChatThreadSettings,
 } from './chat-thread-payload.js'
+import {
+  deleteMessageAt,
+  normalizeMessages,
+  replaceMessageText,
+  type DeleteChatMessageMode,
+} from '../../chat/utils.js'
 
 export type { ChatThreadSettings } from './chat-thread-payload.js'
 
@@ -40,6 +46,20 @@ export interface ChatsService {
     documentId: string,
     chatId: string,
     messages: unknown[]
+  ): Promise<ChatThread | null>
+  updateMessageById(
+    projectId: string,
+    documentId: string,
+    chatId: string,
+    messageId: string,
+    text: string
+  ): Promise<ChatThread | null>
+  deleteMessagesById(
+    projectId: string,
+    documentId: string,
+    chatId: string,
+    messageId: string,
+    mode: DeleteChatMessageMode
   ): Promise<ChatThread | null>
   updateSettings(
     projectId: string,
@@ -200,6 +220,36 @@ export function createChatsService(repos: RepositorySet): ChatsService {
         createdAt: existing.createdAt,
         updatedAt,
       }
+    },
+
+    async updateMessageById(
+      projectId: string,
+      documentId: string,
+      chatId: string,
+      messageId: string,
+      text: string
+    ): Promise<ChatThread | null> {
+      const thread = await this.getById(projectId, documentId, chatId)
+      if (!thread) return null
+      const messages = await normalizeMessages(thread.messages)
+      const updatedMessages = replaceMessageText(messages, messageId, text)
+      await normalizeMessages(updatedMessages)
+      return this.save(projectId, documentId, chatId, updatedMessages)
+    },
+
+    async deleteMessagesById(
+      projectId: string,
+      documentId: string,
+      chatId: string,
+      messageId: string,
+      mode: DeleteChatMessageMode
+    ): Promise<ChatThread | null> {
+      const thread = await this.getById(projectId, documentId, chatId)
+      if (!thread) return null
+      const messages = await normalizeMessages(thread.messages)
+      const updatedMessages = deleteMessageAt(messages, messageId, mode)
+      await normalizeMessages(updatedMessages)
+      return this.save(projectId, documentId, chatId, updatedMessages)
     },
 
     async updateSettings(

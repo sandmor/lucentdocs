@@ -769,10 +769,17 @@ export function EditorPage() {
       const activeId = activeDocumentIdRef.current
 
       if (parsedEvent.type === 'chats.changed') {
-        utils.chat.listByDocument.invalidate({
+        void utils.chat.listByDocument.invalidate({
           projectId: id,
           documentId: parsedEvent.documentId,
         })
+        for (const chatId of parsedEvent.changedChatIds) {
+          void utils.chat.getById.invalidate({
+            projectId: id,
+            documentId: parsedEvent.documentId,
+            chatId,
+          })
+        }
         return
       }
 

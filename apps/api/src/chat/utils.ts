@@ -262,6 +262,74 @@ export function createUserMessage(text: string): UIMessage {
   }
 }
 
+export function canContinueConversation(messages: UIMessage[]): boolean {
+  if (messages.length === 0) return false
+  return messages[messages.length - 1]?.role === 'user'
+}
+
+export function assertCanContinueConversation(messages: UIMessage[]): void {
+  if (canContinueConversation(messages)) return
+
+  if (messages.length === 0) {
+    throw new ChatRuntimeError('BAD_REQUEST', 'Cannot continue an empty chat.')
+  }
+
+  throw new ChatRuntimeError(
+    'BAD_REQUEST',
+    'Cannot continue unless the latest message is from the author.'
+  )
+}
+
+export type DeleteChatMessageMode = 'only' | 'from_here'
+
+export function findMessageIndex(messages: UIMessage[], messageId: string): number {
+  const index = messages.findIndex((message) => message.id === messageId)
+  if (index < 0) {
+    throw new ChatRuntimeError('NOT_FOUND', `Chat message ${messageId} not found`)
+  }
+  return index
+}
+
+export function replaceMessageText(
+  messages: UIMessage[],
+  messageId: string,
+  text: string
+): UIMessage[] {
+  const normalizedText = text.trim()
+  if (!normalizedText) {
+    throw new ChatRuntimeError('BAD_REQUEST', 'Chat message text is required.')
+  }
+
+  const index = findMessageIndex(messages, messageId)
+  const message = messages[index]!
+  const hasToolParts = message.parts.some((part) => {
+    const type = typeof part.type === 'string' ? part.type : ''
+    return type === 'dynamic-tool' || type.startsWith('tool-')
+  })
+  if (hasToolParts) {
+    throw new ChatRuntimeError('BAD_REQUEST', 'Messages with tool activity cannot be edited.')
+  }
+
+  return messages.map((current, currentIndex) =>
+    currentIndex === index
+      ? {
+          ...message,
+          parts: [{ type: 'text', text: normalizedText }],
+        }
+      : current
+  )
+}
+
+export function deleteMessageAt(
+  messages: UIMessage[],
+  messageId: string,
+  mode: DeleteChatMessageMode
+): UIMessage[] {
+  const index = findMessageIndex(messages, messageId)
+  if (mode === 'from_here') return messages.slice(0, index)
+  return messages.filter((_, currentIndex) => currentIndex !== index)
+}
+
 export function readResponseError(error: unknown): string {
   return error instanceof Error ? error.message : 'Failed to generate chat response'
 }

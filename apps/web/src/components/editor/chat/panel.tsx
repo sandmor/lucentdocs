@@ -7,9 +7,14 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
-import { asUIMessageArray, getTrailingAssistantMessage } from './message-utils'
+import { asUIMessageArray, canContinueConversation, getTrailingAssistantMessage } from './message-utils'
 import type { ChatThreadSummary } from './types'
-import { ChatBubble, EmptyChatState, ThreadRow } from './ui'
+import {
+  ChatBubble,
+  EmptyChatState,
+  ThreadRow,
+  type DeleteChatMessageMode,
+} from './ui'
 import { useChatStreamPump } from './use-stream-pump'
 import { useEditorStore } from '@/lib/editor-store'
 
@@ -28,6 +33,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const [isThreadBrowserOpen, setIsThreadBrowserOpen] = useState(false)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [draftEditingEnabled, setDraftEditingEnabled] = useState(false)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const activeThreadIdRef = useRef<string | null>(null)
@@ -62,6 +68,8 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const createThreadMutation = trpc.chat.create.useMutation()
   const deleteThreadMutation = trpc.chat.deleteById.useMutation()
   const updateSettingsMutation = trpc.chat.updateSettings.useMutation()
+  const updateMessageMutation = trpc.chat.updateMessageById.useMutation()
+  const deleteMessagesMutation = trpc.chat.deleteMessagesById.useMutation()
   const generateMutation = trpc.chat.generateById.useMutation()
   const cancelGenerationMutation = trpc.chat.cancelGenerationById.useMutation()
 
@@ -102,6 +110,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       messagesRef.current = []
       isGeneratingRef.current = false
       lastGenerationErrorRef.current = null
+      setEditingMessageId(null)
       if (options.clearInput) {
         setInput('')
       }
@@ -377,6 +386,100 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     ]
   )
 
+  const applyMessageRevision = useCallback(
+    (updated: {
+      id: string
+      messages: unknown[]
+      settings: { editingEnabled: boolean }
+      updatedAt: number
+    }) => {
+      if (!projectId || !documentId) return
+      const nextMessages = asUIMessageArray(updated.messages)
+      messagesRef.current = nextMessages
+      setMessages(nextMessages)
+      utils.chat.getById.setData(
+        { projectId, documentId, chatId: updated.id },
+        (previous) =>
+          previous
+            ? {
+                ...previous,
+                messages: nextMessages,
+                settings: updated.settings,
+                updatedAt: updated.updatedAt,
+              }
+            : previous
+      )
+      utils.chat.listByDocument.setData({ projectId, documentId }, (previous) => ({
+        threads: (previous?.threads ?? []).map((thread) =>
+          thread.id === updated.id
+            ? {
+                ...thread,
+                messageCount: nextMessages.length,
+                updatedAt: updated.updatedAt,
+              }
+            : thread
+        ),
+      }))
+    },
+    [documentId, projectId, utils.chat.getById, utils.chat.listByDocument]
+  )
+
+  const handleSaveMessage = useCallback(
+    async (messageId: string, text: string) => {
+      if (!projectId || !documentId || !activeThreadId || isGenerating) return
+      try {
+        const updated = await updateMessageMutation.mutateAsync({
+          projectId,
+          documentId,
+          chatId: activeThreadId,
+          messageId,
+          text,
+        })
+        applyMessageRevision(updated)
+        setEditingMessageId(null)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to edit message'
+        toast.error('Failed to edit message', { description: message })
+      }
+    },
+    [
+      activeThreadId,
+      applyMessageRevision,
+      documentId,
+      isGenerating,
+      projectId,
+      updateMessageMutation,
+    ]
+  )
+
+  const handleDeleteMessages = useCallback(
+    async (messageId: string, mode: DeleteChatMessageMode) => {
+      if (!projectId || !documentId || !activeThreadId || isGenerating) return
+      try {
+        const updated = await deleteMessagesMutation.mutateAsync({
+          projectId,
+          documentId,
+          chatId: activeThreadId,
+          messageId,
+          mode,
+        })
+        applyMessageRevision(updated)
+        setEditingMessageId(null)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to delete message'
+        toast.error('Failed to delete message', { description: message })
+      }
+    },
+    [
+      activeThreadId,
+      applyMessageRevision,
+      deleteMessagesMutation,
+      documentId,
+      isGenerating,
+      projectId,
+    ]
+  )
+
   const handleStop = async () => {
     if (!projectId || !documentId || !activeThreadId || !isGenerating) return
 
@@ -393,9 +496,47 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     }
   }
 
+  const canContinue = useMemo(
+    () => Boolean(activeThreadId && canContinueConversation(messages)),
+    [activeThreadId, messages]
+  )
+
+  const canSend = useMemo(
+    () =>
+      Boolean(
+        queryEnabled &&
+          !isGenerating &&
+          !generateMutation.isPending &&
+          (input.trim() || canContinue)
+      ),
+    [queryEnabled, isGenerating, generateMutation.isPending, input, canContinue]
+  )
+
   const handleSend = async () => {
     const trimmed = input.trim()
-    if (!trimmed || !projectId || !documentId || isGenerating) return
+    const continuing = !trimmed && canContinue
+
+    if ((!trimmed && !continuing) || !projectId || !documentId || isGenerating) return
+
+    if (continuing) {
+      if (!activeThreadId) return
+
+      try {
+        await generateMutation.mutateAsync({
+          projectId,
+          documentId,
+          chatId: activeThreadId,
+          message: '',
+          selectionFrom: editorSelection?.from,
+          selectionTo: editorSelection?.to,
+        })
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to start AI response generation'
+        toast.error('AI Chat Error', { description: message })
+      }
+      return
+    }
 
     let targetChatId = activeThreadId
     const enableEditingOnCreate = !targetChatId && draftEditingEnabled
@@ -625,6 +766,18 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
             key={message.id}
             message={message}
             isStreaming={streamingAssistantMessageId === message.id}
+            isEditing={editingMessageId === message.id}
+            disabled={
+              isGenerating || updateMessageMutation.isPending || deleteMessagesMutation.isPending
+            }
+            onStartEdit={setEditingMessageId}
+            onCancelEdit={() => setEditingMessageId(null)}
+            onSaveEdit={(messageId, text) => {
+              void handleSaveMessage(messageId, text)
+            }}
+            onDelete={(messageId, mode) => {
+              void handleDeleteMessages(messageId, mode)
+            }}
           />
         ))}
       </div>
@@ -662,7 +815,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
                 onClick={() => {
                   void handleSend()
                 }}
-                disabled={!queryEnabled || !input.trim() || generateMutation.isPending}
+                disabled={!canSend}
                 className="size-8 rounded-lg"
               >
                 <CornerDownLeft className="size-4" />
@@ -671,7 +824,9 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           </div>
         </div>
         <p className="mt-1.5 px-1 text-[10px] text-muted-foreground/60">
-          Enter to send, Shift+Enter for newline
+          {canContinue && !input.trim()
+            ? 'Enter to generate a reply without a new message'
+            : 'Enter to send, Shift+Enter for newline'}
         </p>
       </div>
     </div>

@@ -253,6 +253,72 @@ export const chatRouter = router({
       }
     }),
 
+  updateMessageById: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        chatId: idSchema,
+        messageId: idSchema,
+        text: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      const text = input.text.trim()
+      const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
+      if (text.length === 0 || text.length > maxChatMessageChars) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Message must be between 1 and ${maxChatMessageChars} characters`,
+        })
+      }
+
+      try {
+        const updated = await ctx.chatRuntime.updateMessageById(input, input.messageId, text)
+        return {
+          id: updated.id,
+          messages: updated.messages,
+          settings: updated.settings,
+          updatedAt: updated.updatedAt,
+        }
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
+  deleteMessagesById: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        chatId: idSchema,
+        messageId: idSchema,
+        mode: z.enum(['only', 'from_here']),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+
+      try {
+        const updated = await ctx.chatRuntime.deleteMessagesById(
+          input,
+          input.messageId,
+          input.mode
+        )
+        return {
+          id: updated.id,
+          messages: updated.messages,
+          settings: updated.settings,
+          updatedAt: updated.updatedAt,
+        }
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
   generateById: protectedProcedure
     .input(
       z.object({
@@ -269,10 +335,10 @@ export const chatRouter = router({
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
       const message = input.message.trim()
       const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
-      if (message.length === 0 || message.length > maxChatMessageChars) {
+      if (message.length > maxChatMessageChars) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `Message must be between 1 and ${maxChatMessageChars} characters`,
+          message: `Message must be at most ${maxChatMessageChars} characters`,
         })
       }
 

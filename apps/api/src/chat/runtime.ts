@@ -7,11 +7,13 @@ import { GenerationEngine, type ChatScope } from './generation-engine.js'
 import {
   buildThreadFromState,
   ChatRuntimeError,
+  assertCanContinueConversation,
   createObserveState,
   createUserMessage,
   normalizeMessages,
   toChatKey,
   toPersistedThread,
+  type DeleteChatMessageMode,
   type PersistedChatThread,
 } from './utils.js'
 
@@ -67,6 +69,7 @@ export class ChatRuntime {
   #listeners = new Map<string, Set<ChatStateListener>>()
   #liveStates = new Map<string, ChatObserveSnapshotEvent>()
   #activeGenerations = new Map<string, ActiveGeneration>()
+  #activeMessageRevisions = new Set<string>()
   #generationEngine: GenerationEngine
   #services: ServiceSet
 
@@ -218,6 +221,81 @@ export class ChatRuntime {
     return this.#activeGenerations.has(toChatKey(scope))
   }
 
+  async updateMessageById(
+    scope: ChatScope,
+    messageId: string,
+    text: string
+  ): Promise<PersistedChatThread> {
+    const key = this.#beginMessageRevision(scope)
+    try {
+      const updated = await this.#services.chats.updateMessageById(
+        scope.projectId,
+        scope.documentId,
+        scope.chatId,
+        messageId,
+        text
+      )
+      return await this.#publishMessageRevision(scope, updated)
+    } finally {
+      this.#activeMessageRevisions.delete(key)
+    }
+  }
+
+  async deleteMessagesById(
+    scope: ChatScope,
+    messageId: string,
+    mode: DeleteChatMessageMode
+  ): Promise<PersistedChatThread> {
+    const key = this.#beginMessageRevision(scope)
+    try {
+      const updated = await this.#services.chats.deleteMessagesById(
+        scope.projectId,
+        scope.documentId,
+        scope.chatId,
+        messageId,
+        mode
+      )
+      return await this.#publishMessageRevision(scope, updated)
+    } finally {
+      this.#activeMessageRevisions.delete(key)
+    }
+  }
+
+  #beginMessageRevision(scope: ChatScope): string {
+    const key = toChatKey(scope)
+    if (this.#activeGenerations.has(key)) {
+      throw new ChatRuntimeError(
+        'CONFLICT',
+        'Stop the current response before editing or deleting messages.'
+      )
+    }
+    if (this.#activeMessageRevisions.has(key)) {
+      throw new ChatRuntimeError('CONFLICT', 'Chat messages are being updated in another session.')
+    }
+    this.#activeMessageRevisions.add(key)
+    return key
+  }
+
+  async #publishMessageRevision(
+    scope: ChatScope,
+    updated: Awaited<ReturnType<ServiceSet['chats']['save']>>
+  ): Promise<PersistedChatThread> {
+    if (!updated) {
+      throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${scope.chatId} not found`)
+    }
+
+    projectSyncBus.publish({
+      type: 'chats.changed',
+      projectId: scope.projectId,
+      documentId: scope.documentId,
+      reason: 'chats.update',
+      changedChatIds: [updated.id],
+      deletedChatIds: [],
+    })
+    await this.publishPersistedState(scope)
+    return toPersistedThread(updated)!
+  }
+
   cancelGeneration(scope: ChatScope, generationId?: string): boolean {
     const active = this.#activeGenerations.get(toChatKey(scope))
     if (!active) return false
@@ -242,14 +320,11 @@ export class ChatRuntime {
 
   async startGeneration(input: StartChatGenerationInput): Promise<{ generationId: string }> {
     const key = toChatKey(input)
-    if (this.#activeGenerations.has(key)) {
+    if (this.#activeGenerations.has(key) || this.#activeMessageRevisions.has(key)) {
       throw new ChatRuntimeError('CONFLICT', 'Chat generation is already in progress.')
     }
 
     const promptText = input.message.trim()
-    if (!promptText) {
-      throw new ChatRuntimeError('BAD_REQUEST', 'Message is required to start generation.')
-    }
 
     const generationId = nanoid()
     const controller = new AbortController()
@@ -278,33 +353,45 @@ export class ChatRuntime {
 
       const persistedMessages = await normalizeMessages(existingThread.messages)
       const rollbackThread = toPersistedThread(existingThread)!
-      const userMessage = createUserMessage(promptText)
-      const baseMessages: UIMessage[] = [...persistedMessages, userMessage]
+      let baseMessages: UIMessage[]
+      let rollbackMessages: UIMessage[]
+      let liveThread: PersistedChatThread
 
-      const savedWithUser = await this.#services.chats.save(
-        input.projectId,
-        input.documentId,
-        input.chatId,
-        baseMessages
-      )
-      if (!savedWithUser) {
-        throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${input.chatId} not found`)
+      if (promptText) {
+        const userMessage = createUserMessage(promptText)
+        baseMessages = [...persistedMessages, userMessage]
+        rollbackMessages = persistedMessages
+
+        const savedWithUser = await this.#services.chats.save(
+          input.projectId,
+          input.documentId,
+          input.chatId,
+          baseMessages
+        )
+        if (!savedWithUser) {
+          throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${input.chatId} not found`)
+        }
+
+        projectSyncBus.publish({
+          type: 'chats.changed',
+          projectId: input.projectId,
+          documentId: input.documentId,
+          reason: 'chats.update',
+          changedChatIds: [savedWithUser.id],
+          deletedChatIds: [],
+        })
+
+        liveThread = buildThreadFromState(
+          toPersistedThread(savedWithUser)!,
+          baseMessages,
+          Date.now()
+        )
+      } else {
+        assertCanContinueConversation(persistedMessages)
+        baseMessages = persistedMessages
+        rollbackMessages = persistedMessages
+        liveThread = buildThreadFromState(rollbackThread, baseMessages, Date.now())
       }
-
-      projectSyncBus.publish({
-        type: 'chats.changed',
-        projectId: input.projectId,
-        documentId: input.documentId,
-        reason: 'chats.update',
-        changedChatIds: [savedWithUser.id],
-        deletedChatIds: [],
-      })
-
-      const liveThread = buildThreadFromState(
-        toPersistedThread(savedWithUser)!,
-        baseMessages,
-        Date.now()
-      )
 
       this.#emitSnapshot(
         createObserveState(input, {
@@ -323,7 +410,7 @@ export class ChatRuntime {
           baseThread: liveThread,
           baseMessages,
           rollbackThread,
-          rollbackMessages: persistedMessages,
+          rollbackMessages,
           selectionFrom: input.selectionFrom,
           selectionTo: input.selectionTo,
           editingEnabled: existingThread.settings.editingEnabled,
