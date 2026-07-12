@@ -54,6 +54,14 @@ export function ThreadRow({
   )
 }
 
+function ChatMarkdown({ children }: { children: string }) {
+  return (
+    <div className="chat-markdown streamdown text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none min-w-0">
+      <Streamdown>{children}</Streamdown>
+    </div>
+  )
+}
+
 function ChatBubbleImpl({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
   const isUser = message.role === 'user'
   const text = extractMessageText(message)
@@ -62,7 +70,7 @@ function ChatBubbleImpl({ message, isStreaming }: { message: UIMessage; isStream
   return (
     <div
       className={cn(
-        'animate-in fade-in-0 slide-in-from-bottom-1 flex w-full gap-3 py-3 duration-200',
+        'animate-in fade-in-0 slide-in-from-bottom-1 flex w-full min-w-0 gap-3 py-3 duration-200',
         isUser ? 'items-start' : 'items-start rounded-lg bg-muted/30 px-3'
       )}
     >
@@ -85,12 +93,17 @@ function ChatBubbleImpl({ message, isStreaming }: { message: UIMessage; isStream
         </div>
 
         <div
-          className={cn('text-sm leading-relaxed text-foreground/90', isUser ? 'font-medium' : '')}
+          className={cn(
+            'min-w-0 text-sm leading-relaxed text-foreground/90',
+            isUser ? 'font-medium break-words' : ''
+          )}
         >
           {text ? (
-            <div className="streamdown text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-              <Streamdown>{text}</Streamdown>
-            </div>
+            isUser ? (
+              <p className="break-words whitespace-pre-wrap">{text}</p>
+            ) : (
+              <ChatMarkdown>{text}</ChatMarkdown>
+            )
           ) : (
             isStreaming && <TypingIndicator />
           )}
@@ -148,7 +161,7 @@ function ToolTraceCard({ part }: { part: Record<string, unknown> }) {
   const isEditTool = toolName === 'edit'
 
   return (
-    <details className="group max-w-full min-w-0 rounded-lg border border-border/40 bg-background/50 transition-colors hover:bg-muted/20">
+    <details className="group max-w-full min-w-0 overflow-hidden rounded-lg border border-border/40 bg-background/50 transition-colors hover:bg-muted/20">
       <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2.5 px-3 py-2 text-xs font-medium text-muted-foreground outline-none">
         {isPending ? (
           isEditTool ? (
@@ -176,8 +189,8 @@ function ToolTraceCard({ part }: { part: Record<string, unknown> }) {
         </span>
       </summary>
 
-      <div className="border-t border-border/40 bg-muted/10 p-3">
-        <pre className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap wrap-break-word font-mono text-[10px] leading-relaxed text-muted-foreground/80 scrollbar-thin">
+      <div className="min-w-0 overflow-hidden border-t border-border/40 bg-muted/10 p-3">
+        <pre className="max-h-40 max-w-full overflow-x-auto overflow-y-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-muted-foreground/80 scrollbar-thin">
           {JSON.stringify(part, null, 2)}
         </pre>
       </div>
@@ -214,7 +227,7 @@ export function EmptyChatState({
               onClick={() => onSuggestionClick(suggestion)}
             >
               <MessageSquareQuote className="size-4 text-muted-foreground/70" />
-              <span className="leading-snug">{suggestion}</span>
+              <span className="min-w-0 leading-snug break-words">{suggestion}</span>
             </button>
           ))}
         </div>

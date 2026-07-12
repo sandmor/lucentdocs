@@ -27,6 +27,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const [isGenerating, setIsGenerating] = useState(false)
   const [isThreadBrowserOpen, setIsThreadBrowserOpen] = useState(false)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+  const [draftEditingEnabled, setDraftEditingEnabled] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const activeThreadIdRef = useRef<string | null>(null)
@@ -64,7 +65,9 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const generateMutation = trpc.chat.generateById.useMutation()
   const cancelGenerationMutation = trpc.chat.cancelGenerationById.useMutation()
 
-  const editingEnabled = activeThreadQuery.data?.settings.editingEnabled ?? false
+  const editingEnabled = hasActiveThreadId
+    ? (activeThreadQuery.data?.settings.editingEnabled ?? false)
+    : draftEditingEnabled
 
   const { streamGenerationIdRef, enqueueStreamChunk, stopStreamChunkPump, startStreamChunkPump } =
     useChatStreamPump({
@@ -104,6 +107,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       }
       if (options.clearThread) {
         setActiveThreadId(null)
+        setDraftEditingEnabled(false)
       }
       if (options.closeThreadBrowser) {
         setIsThreadBrowserOpen(false)
@@ -394,10 +398,51 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     if (!trimmed || !projectId || !documentId || isGenerating) return
 
     let targetChatId = activeThreadId
+    const enableEditingOnCreate = !targetChatId && draftEditingEnabled
+
     if (!targetChatId) {
-      targetChatId = await createThread()
-      if (!targetChatId) return
-      setActiveThreadId(targetChatId)
+      const newChatId = await createThread()
+      if (!newChatId) return
+      targetChatId = newChatId
+      setActiveThreadId(newChatId)
+
+      if (enableEditingOnCreate) {
+        try {
+          const updated = await updateSettingsMutation.mutateAsync({
+            projectId,
+            documentId,
+            chatId: newChatId,
+            editingEnabled: true,
+          })
+          utils.chat.getById.setData(
+            { projectId, documentId, chatId: newChatId },
+            (previous) => {
+              if (!previous) {
+                return {
+                  id: newChatId,
+                  title: 'New chat',
+                  messages: [],
+                  settings: updated.settings,
+                  createdAt: Date.now(),
+                  updatedAt: updated.updatedAt,
+                  generating: false,
+                }
+              }
+              return {
+                ...previous,
+                settings: updated.settings,
+                updatedAt: updated.updatedAt,
+              }
+            }
+          )
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : 'Failed to enable editing for this chat'
+          toast.error('Chat Error', { description: message })
+          return
+        }
+      }
+
       resetLocalChatState()
     }
 
@@ -433,10 +478,10 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   }, [isGenerating, messages])
 
   return (
-    <div data-chat-panel="true" className={cn('relative flex h-full flex-col', className)}>
+    <div data-chat-panel="true" className={cn('relative flex h-full min-w-0 flex-col overflow-hidden', className)}>
       <div className="border-b bg-background/70 px-4 py-3 backdrop-blur">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary/50 text-secondary-foreground">
               <PenTool className="size-3.5" />
             </div>
@@ -444,13 +489,14 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
               {activeThreadQuery.data?.title ?? activeThread?.title ?? 'New Chat'}
             </h3>
           </div>
-          <div className="flex items-center gap-0.5">
+          <div className="flex shrink-0 items-center gap-0.5">
             <label
-              className={cn(
-                'mr-1 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10px] font-medium text-muted-foreground',
-                !hasActiveThreadId && 'opacity-50'
-              )}
-              title="Allow AI to edit project files in this chat"
+              className="mr-1 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10px] font-medium text-muted-foreground"
+              title={
+                editingEnabled
+                  ? 'The AI can modify project files in this chat'
+                  : 'The AI can inspect project files but not modify them in this chat'
+              }
             >
               <PenTool className="size-3" />
               <span className="hidden sm:inline">Edit</span>
@@ -458,36 +504,50 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
                 data-chat-editing-toggle="true"
                 size="sm"
                 checked={editingEnabled}
+                aria-label={
+                  editingEnabled
+                    ? 'Editing enabled for this chat'
+                    : 'Editing disabled for this chat'
+                }
                 disabled={
-                  !queryEnabled ||
-                  !hasActiveThreadId ||
-                  isGenerating ||
-                  updateSettingsMutation.isPending
+                  !queryEnabled || isGenerating || updateSettingsMutation.isPending
                 }
                 onCheckedChange={(checked) => {
-                  if (!projectId || !documentId || !activeThreadId) return
-                  updateSettingsMutation.mutate(
-                    {
-                      projectId,
-                      documentId,
-                      chatId: activeThreadId,
-                      editingEnabled: checked,
-                    },
-                    {
-                      onSuccess: () => {
-                        void utils.chat.getById.invalidate({
-                          projectId,
-                          documentId,
-                          chatId: activeThreadId,
-                        })
+                  if (!projectId || !documentId) return
+
+                  if (hasActiveThreadId && activeThreadId) {
+                    updateSettingsMutation.mutate(
+                      {
+                        projectId,
+                        documentId,
+                        chatId: activeThreadId,
+                        editingEnabled: checked,
                       },
-                      onError: (error) => {
-                        toast.error('Failed to update chat settings', {
-                          description: error.message,
-                        })
-                      },
-                    }
-                  )
+                      {
+                        onSuccess: (updated) => {
+                          utils.chat.getById.setData(
+                            { projectId, documentId, chatId: activeThreadId },
+                            (previous) =>
+                              previous
+                                ? {
+                                    ...previous,
+                                    settings: updated.settings,
+                                    updatedAt: updated.updatedAt,
+                                  }
+                                : previous
+                          )
+                        },
+                        onError: (error) => {
+                          toast.error('Failed to update chat settings', {
+                            description: error.message,
+                          })
+                        },
+                      }
+                    )
+                    return
+                  }
+
+                  setDraftEditingEnabled(checked)
                 }}
               />
             </label>
@@ -554,7 +614,10 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
         </p>
       </div>
 
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
+      <div
+        ref={scrollRef}
+        className="flex-1 min-w-0 space-y-4 overflow-x-hidden overflow-y-auto px-3 py-4"
+      >
         {messages.length === 0 && <EmptyChatState onSuggestionClick={setInput} />}
 
         {messages.map((message) => (

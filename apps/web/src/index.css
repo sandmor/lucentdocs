@@ -1107,3 +1107,37 @@
 .ai-fc-dot:nth-child(3) {
   animation-delay: 0.32s;
 }
+
+/* Sidebar chat markdown — keep wide content inside the panel */
+.chat-markdown {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.chat-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.chat-markdown :not(pre) > code {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-markdown a {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown img {
+  max-width: 100%;
+  height: auto;
+}

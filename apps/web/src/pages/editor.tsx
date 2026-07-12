@@ -33,6 +33,7 @@ import { useEditorStore } from '@/lib/editor-store'
 const DESKTOP_SIDEBAR_STORAGE_KEY_PREFIX = 'lucentdocs:editor:desktop-sidebar:'
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH_PERCENTAGE = 25
 const DESKTOP_SIDEBAR_MIN_WIDTH_PERCENTAGE = 10
+const DESKTOP_SIDEBAR_CHAT_MIN_WIDTH_PERCENTAGE = 18
 const DESKTOP_SIDEBAR_MAX_WIDTH_PERCENTAGE = 40
 const DESKTOP_SIDEBAR_OPEN_THRESHOLD_PERCENTAGE = 1
 const DESKTOP_SIDEBAR_PANEL_ID = 'desktop-sidebar'
@@ -1152,7 +1153,11 @@ export function EditorPage() {
                     ? `${clampDesktopSidebarWidth(desktopSidebarWidthPercentage)}%`
                     : '0%'
                 }
-                minSize={`${DESKTOP_SIDEBAR_MIN_WIDTH_PERCENTAGE}%`}
+                minSize={`${
+                  sidebarPanel === 'chat'
+                    ? DESKTOP_SIDEBAR_CHAT_MIN_WIDTH_PERCENTAGE
+                    : DESKTOP_SIDEBAR_MIN_WIDTH_PERCENTAGE
+                }%`}
                 maxSize={`${DESKTOP_SIDEBAR_MAX_WIDTH_PERCENTAGE}%`}
                 collapsible
                 collapsedSize="0%"
