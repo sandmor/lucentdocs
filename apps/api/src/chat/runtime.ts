@@ -1,15 +1,19 @@
 import { nanoid } from 'nanoid'
 import type { UIMessage, UIMessageChunk } from 'ai'
+import type { ChatThreadPayload } from '../core/services/chat-thread-payload.js'
 import type { ServiceSet } from '../core/services/types.js'
 import type { YjsRuntime } from '../yjs/runtime.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
 import { GenerationEngine, type ChatScope } from './generation-engine.js'
 import {
-  buildThreadFromState,
+  appendUserMessage,
+  assertCanContinueConversationFromPayload,
+  pathToUIMessages,
+  resolveActivePath,
+} from './tree.js'
+import {
   ChatRuntimeError,
-  assertCanContinueConversation,
   createObserveState,
-  createUserMessage,
   normalizeMessages,
   toChatKey,
   toPersistedThread,
@@ -21,6 +25,9 @@ export interface StartChatGenerationInput extends ChatScope {
   message: string
   selectionFrom?: number
   selectionTo?: number
+  assistantNodeId?: string
+  promptMessages?: UIMessage[]
+  abortRestoreThread?: PersistedChatThread
 }
 
 export interface ChatObserveState {
@@ -58,18 +65,11 @@ interface ActiveGeneration {
   controller: AbortController
 }
 
-/**
- * Coordinates chat generation lifecycles and observation streams.
- *
- * Persisted chat threads remain the source of truth, while `#liveStates` keeps
- * enough transient state for reconnecting observers to resume a generation view
- * without waiting for the next database write.
- */
 export class ChatRuntime {
   #listeners = new Map<string, Set<ChatStateListener>>()
   #liveStates = new Map<string, ChatObserveSnapshotEvent>()
   #activeGenerations = new Map<string, ActiveGeneration>()
-  #activeMessageRevisions = new Set<string>()
+  #activeTreeMutations = new Set<string>()
   #generationEngine: GenerationEngine
   #services: ServiceSet
 
@@ -111,12 +111,7 @@ export class ChatRuntime {
   }
 
   #updateSnapshot(state: ChatObserveState): void {
-    const key = toChatKey(state)
-    if (this.#shouldRetainState(key)) {
-      this.#liveStates.set(key, this.#toSnapshotEvent(state))
-    } else {
-      this.#liveStates.delete(key)
-    }
+    this.#emitSnapshot(state)
   }
 
   #emitStreamChunk(scope: ChatScope, generationId: string, chunk: UIMessageChunk): void {
@@ -181,8 +176,6 @@ export class ChatRuntime {
     listeners.add(listener)
 
     try {
-      // Reuse the last live snapshot for reconnecting observers while a generation
-      // is still in flight; otherwise fall back to storage.
       const cachedState = this.#liveStates.get(key)
       if (cachedState) {
         listener(cachedState)
@@ -226,7 +219,7 @@ export class ChatRuntime {
     messageId: string,
     text: string
   ): Promise<PersistedChatThread> {
-    const key = this.#beginMessageRevision(scope)
+    const key = this.#beginTreeMutation(scope)
     try {
       const updated = await this.#services.chats.updateMessageById(
         scope.projectId,
@@ -235,9 +228,9 @@ export class ChatRuntime {
         messageId,
         text
       )
-      return await this.#publishMessageRevision(scope, updated)
+      return await this.#publishTreeChange(scope, updated)
     } finally {
-      this.#activeMessageRevisions.delete(key)
+      this.#activeTreeMutations.delete(key)
     }
   }
 
@@ -246,7 +239,7 @@ export class ChatRuntime {
     messageId: string,
     mode: DeleteChatMessageMode
   ): Promise<PersistedChatThread> {
-    const key = this.#beginMessageRevision(scope)
+    const key = this.#beginTreeMutation(scope)
     try {
       const updated = await this.#services.chats.deleteMessagesById(
         scope.projectId,
@@ -255,13 +248,153 @@ export class ChatRuntime {
         messageId,
         mode
       )
-      return await this.#publishMessageRevision(scope, updated)
+      return await this.#publishTreeChange(scope, updated)
     } finally {
-      this.#activeMessageRevisions.delete(key)
+      this.#activeTreeMutations.delete(key)
     }
   }
 
-  #beginMessageRevision(scope: ChatScope): string {
+  async selectBranch(scope: ChatScope, nodeId: string): Promise<PersistedChatThread> {
+    const key = this.#beginTreeMutation(scope)
+    try {
+      const updated = await this.#services.chats.selectBranchById(
+        scope.projectId,
+        scope.documentId,
+        scope.chatId,
+        nodeId
+      )
+      return await this.#publishTreeChange(scope, updated)
+    } finally {
+      this.#activeTreeMutations.delete(key)
+    }
+  }
+
+  async regenerateFromMessage(
+    scope: ChatScope,
+    messageId: string,
+    options?: { selectionFrom?: number; selectionTo?: number }
+  ): Promise<{ generationId: string }> {
+    return this.#forkAndGenerate(scope, messageId, options)
+  }
+
+  async editMessageAndGenerate(
+    scope: ChatScope,
+    messageId: string,
+    text: string,
+    options?: { selectionFrom?: number; selectionTo?: number }
+  ): Promise<{ generationId: string }> {
+    const thread = await this.#services.chats.getById(
+      scope.projectId,
+      scope.documentId,
+      scope.chatId
+    )
+    if (!thread) {
+      throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${scope.chatId} not found`)
+    }
+
+    const payload: ChatThreadPayload = {
+      v: 1,
+      settings: thread.settings,
+      ...thread.tree,
+    }
+    const path = resolveActivePath(payload)
+    const node = path.find((entry) => entry.id === messageId)
+    if (!node) {
+      throw new ChatRuntimeError('NOT_FOUND', `Chat message ${messageId} not found`)
+    }
+
+    const isLeaf = path[path.length - 1]?.id === messageId
+
+    if (isLeaf && node.role === 'user') {
+      await this.updateMessageById(scope, messageId, text)
+      return this.startGeneration({
+        ...scope,
+        message: '',
+        selectionFrom: options?.selectionFrom,
+        selectionTo: options?.selectionTo,
+      })
+    }
+
+    if (isLeaf && node.role === 'assistant') {
+      await this.updateMessageById(scope, messageId, text)
+      return this.regenerateFromMessage(scope, messageId, options)
+    }
+
+    if (node.role === 'user') {
+      return this.#forkAndGenerate(scope, messageId, { ...options, text })
+    }
+
+    return this.#forkAndGenerate(scope, messageId, options)
+  }
+
+  async #forkAndGenerate(
+    scope: ChatScope,
+    messageId: string,
+    options?: { text?: string; selectionFrom?: number; selectionTo?: number }
+  ): Promise<{ generationId: string }> {
+    const key = this.#beginTreeMutation(scope)
+    let forkNodeId: string
+    let promptMessages: UIMessage[]
+    let assistantNodeId: string | undefined
+    let abortRestoreThread: PersistedChatThread
+
+    try {
+      const existingBeforeFork = await this.#services.chats.getById(
+        scope.projectId,
+        scope.documentId,
+        scope.chatId
+      )
+      if (!existingBeforeFork) {
+        throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${scope.chatId} not found`)
+      }
+      abortRestoreThread = toPersistedThread(existingBeforeFork)!
+
+      const forked = await this.#services.chats.forkRegenerationById(
+        scope.projectId,
+        scope.documentId,
+        scope.chatId,
+        messageId,
+        options?.text
+      )
+      if (!forked) {
+        throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${scope.chatId} not found`)
+      }
+
+      forkNodeId = forked.forkNodeId
+      await this.#publishTreeChange(scope, forked.thread)
+
+      const payload: ChatThreadPayload = {
+        v: 1,
+        settings: forked.thread.settings,
+        ...forked.thread.tree,
+      }
+      const forkNode = payload.nodes[forkNodeId]
+      if (!forkNode) {
+        throw new ChatRuntimeError('NOT_FOUND', `Chat message ${forkNodeId} not found`)
+      }
+
+      const activePath = resolveActivePath(payload)
+      promptMessages =
+        forkNode.role === 'assistant'
+          ? pathToUIMessages(activePath.slice(0, -1))
+          : pathToUIMessages(activePath)
+      assistantNodeId = forkNode.role === 'assistant' ? forkNodeId : undefined
+    } finally {
+      this.#activeTreeMutations.delete(key)
+    }
+
+    return this.#runGeneration(scope, {
+      ...scope,
+      message: '',
+      assistantNodeId,
+      promptMessages,
+      abortRestoreThread,
+      selectionFrom: options?.selectionFrom,
+      selectionTo: options?.selectionTo,
+    })
+  }
+
+  #beginTreeMutation(scope: ChatScope): string {
     const key = toChatKey(scope)
     if (this.#activeGenerations.has(key)) {
       throw new ChatRuntimeError(
@@ -269,16 +402,16 @@ export class ChatRuntime {
         'Stop the current response before editing or deleting messages.'
       )
     }
-    if (this.#activeMessageRevisions.has(key)) {
+    if (this.#activeTreeMutations.has(key)) {
       throw new ChatRuntimeError('CONFLICT', 'Chat messages are being updated in another session.')
     }
-    this.#activeMessageRevisions.add(key)
+    this.#activeTreeMutations.add(key)
     return key
   }
 
-  async #publishMessageRevision(
+  async #publishTreeChange(
     scope: ChatScope,
-    updated: Awaited<ReturnType<ServiceSet['chats']['save']>>
+    updated: Awaited<ReturnType<ServiceSet['chats']['savePayload']>>
   ): Promise<PersistedChatThread> {
     if (!updated) {
       throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${scope.chatId} not found`)
@@ -319,111 +452,141 @@ export class ChatRuntime {
   }
 
   async startGeneration(input: StartChatGenerationInput): Promise<{ generationId: string }> {
-    const key = toChatKey(input)
-    if (this.#activeGenerations.has(key) || this.#activeMessageRevisions.has(key)) {
+    return this.#runGeneration(input, input)
+  }
+
+  async #runGeneration(
+    scope: ChatScope,
+    input: StartChatGenerationInput
+  ): Promise<{ generationId: string }> {
+    const key = toChatKey(scope)
+    if (this.#activeGenerations.has(key) || this.#activeTreeMutations.has(key)) {
       throw new ChatRuntimeError('CONFLICT', 'Chat generation is already in progress.')
     }
 
     const promptText = input.message.trim()
-
     const generationId = nanoid()
     const controller = new AbortController()
     this.#activeGenerations.set(key, { id: generationId, controller })
 
     try {
       const document = await this.#services.documents.getForProject(
-        input.projectId,
-        input.documentId
+        scope.projectId,
+        scope.documentId
       )
       if (!document) {
         throw new ChatRuntimeError(
           'NOT_FOUND',
-          `Document ${input.documentId} not found in project ${input.projectId}`
+          `Document ${scope.documentId} not found in project ${scope.projectId}`
         )
       }
 
       const existingThread = await this.#services.chats.getById(
-        input.projectId,
-        input.documentId,
-        input.chatId
+        scope.projectId,
+        scope.documentId,
+        scope.chatId
       )
       if (!existingThread) {
-        throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${input.chatId} not found`)
+        throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${scope.chatId} not found`)
       }
 
-      const persistedMessages = await normalizeMessages(existingThread.messages)
-      const rollbackThread = toPersistedThread(existingThread)!
-      let baseMessages: UIMessage[]
-      let rollbackMessages: UIMessage[]
-      let liveThread: PersistedChatThread
+      let rollbackThread = toPersistedThread(existingThread)!
+      let liveThread = rollbackThread
+      let abortRestoreThread = input.abortRestoreThread ?? rollbackThread
+      let promptMessages = input.promptMessages
+      let assistantNodeId = input.assistantNodeId ?? `assistant-${generationId}`
 
-      if (promptText) {
-        const userMessage = createUserMessage(promptText)
-        baseMessages = [...persistedMessages, userMessage]
-        rollbackMessages = persistedMessages
-
-        const savedWithUser = await this.#services.chats.save(
-          input.projectId,
-          input.documentId,
-          input.chatId,
-          baseMessages
+      if (input.promptMessages) {
+        const reloaded = await this.#services.chats.getById(
+          scope.projectId,
+          scope.documentId,
+          scope.chatId
+        )
+        if (!reloaded) {
+          throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${scope.chatId} not found`)
+        }
+        liveThread = toPersistedThread(reloaded)!
+        promptMessages = input.promptMessages
+        assistantNodeId = input.assistantNodeId ?? assistantNodeId
+        if (input.abortRestoreThread) {
+          abortRestoreThread = input.abortRestoreThread
+        }
+      } else if (promptText) {
+        const payload: ChatThreadPayload = {
+          v: 1,
+          settings: existingThread.settings,
+          ...existingThread.tree,
+        }
+        const appended = appendUserMessage(payload, promptText)
+        const savedWithUser = await this.#services.chats.savePayload(
+          scope.projectId,
+          scope.documentId,
+          scope.chatId,
+          appended.payload
         )
         if (!savedWithUser) {
-          throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${input.chatId} not found`)
+          throw new ChatRuntimeError('NOT_FOUND', `Chat thread ${scope.chatId} not found`)
         }
 
         projectSyncBus.publish({
           type: 'chats.changed',
-          projectId: input.projectId,
-          documentId: input.documentId,
+          projectId: scope.projectId,
+          documentId: scope.documentId,
           reason: 'chats.update',
           changedChatIds: [savedWithUser.id],
           deletedChatIds: [],
         })
 
-        liveThread = buildThreadFromState(
-          toPersistedThread(savedWithUser)!,
-          baseMessages,
-          Date.now()
-        )
+        liveThread = toPersistedThread(savedWithUser)!
+        abortRestoreThread = liveThread
+        rollbackThread = liveThread
+        promptMessages = await normalizeMessages(savedWithUser.messages)
       } else {
-        assertCanContinueConversation(persistedMessages)
-        baseMessages = persistedMessages
-        rollbackMessages = persistedMessages
-        liveThread = buildThreadFromState(rollbackThread, baseMessages, Date.now())
+        assertCanContinueConversationFromPayload({
+          v: 1,
+          settings: existingThread.settings,
+          ...existingThread.tree,
+        })
+        promptMessages = await normalizeMessages(existingThread.messages)
+      }
+
+      if (input.promptMessages && input.abortRestoreThread) {
+        rollbackThread = input.abortRestoreThread
+      }
+
+      if (!promptMessages) {
+        throw new ChatRuntimeError('BAD_REQUEST', 'No prompt context available for generation.')
       }
 
       this.#emitSnapshot(
-        createObserveState(input, {
+        createObserveState(scope, {
           thread: liveThread,
           generating: true,
           generationId,
         })
       )
 
-      // The generation engine finalizes persistence asynchronously. Keeping the
-      // controller in `#activeGenerations` lets later cancel/reconnect calls hit
-      // the same in-flight run.
       void this.#generationEngine.runGeneration(
         {
-          scope: input,
+          scope,
           baseThread: liveThread,
-          baseMessages,
+          promptMessages,
           rollbackThread,
-          rollbackMessages,
+          abortRestoreThread,
           selectionFrom: input.selectionFrom,
           selectionTo: input.selectionTo,
           editingEnabled: existingThread.settings.editingEnabled,
           generationId,
+          assistantNodeId,
           abortController: controller,
         },
         {
           onChunk: ({ generationId: activeGenerationId, chunk }) => {
-            this.#emitStreamChunk(input, activeGenerationId, chunk)
+            this.#emitStreamChunk(scope, activeGenerationId, chunk)
           },
           onProgress: (state) => {
             this.#updateSnapshot(
-              createObserveState(input, {
+              createObserveState(scope, {
                 thread: state.thread,
                 generating: true,
                 generationId: state.generationId,
@@ -438,7 +601,7 @@ export class ChatRuntime {
             }
 
             this.#emitSnapshot(
-              createObserveState(input, {
+              createObserveState(scope, {
                 thread: result.thread,
                 generating: false,
                 generationId: null,

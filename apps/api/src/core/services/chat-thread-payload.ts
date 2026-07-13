@@ -6,10 +6,21 @@ export const DEFAULT_CHAT_THREAD_SETTINGS: ChatThreadSettings = {
   editingEnabled: false,
 }
 
-export interface ChatThreadPayloadV1 {
+export interface ChatTreeNode {
+  id: string
+  role: 'user' | 'assistant'
+  parts: unknown[]
+  parentId: string | null
+  childIds: string[]
+  selectedChildId: string | null
+}
+
+export interface ChatThreadPayload {
   v: 1
   settings: ChatThreadSettings
-  messages: unknown[]
+  nodes: Record<string, ChatTreeNode>
+  rootChildIds: string[]
+  selectedRootChildId: string | null
 }
 
 export class ChatThreadPayloadError extends Error {
@@ -28,23 +39,45 @@ function isChatThreadSettings(value: unknown): value is ChatThreadSettings {
   return typeof value.editingEnabled === 'boolean'
 }
 
-export function isChatThreadPayloadV1(value: unknown): value is ChatThreadPayloadV1 {
+function isChatTreeNode(value: unknown): value is ChatTreeNode {
   if (!isRecord(value)) return false
-  if (value.v !== 1) return false
-  if (!Array.isArray(value.messages)) return false
-  if (!isChatThreadSettings(value.settings)) return false
+  if (typeof value.id !== 'string') return false
+  if (value.role !== 'user' && value.role !== 'assistant') return false
+  if (!Array.isArray(value.parts)) return false
+  if (value.parentId !== null && typeof value.parentId !== 'string') return false
+  if (!Array.isArray(value.childIds)) return false
+  if (value.selectedChildId !== null && typeof value.selectedChildId !== 'string') return false
   return true
 }
 
-export function createEmptyChatThreadPayload(): ChatThreadPayloadV1 {
+export function isChatThreadPayload(value: unknown): value is ChatThreadPayload {
+  if (!isRecord(value)) return false
+  if (value.v !== 1) return false
+  if (!isChatThreadSettings(value.settings)) return false
+  if (!isRecord(value.nodes)) return false
+  if (!Array.isArray(value.rootChildIds)) return false
+  if (value.selectedRootChildId !== null && typeof value.selectedRootChildId !== 'string') {
+    return false
+  }
+
+  for (const node of Object.values(value.nodes)) {
+    if (!isChatTreeNode(node)) return false
+  }
+
+  return true
+}
+
+export function createEmptyChatThreadPayload(): ChatThreadPayload {
   return {
     v: 1,
     settings: { ...DEFAULT_CHAT_THREAD_SETTINGS },
-    messages: [],
+    nodes: {},
+    rootChildIds: [],
+    selectedRootChildId: null,
   }
 }
 
-export function parseThreadPayload(raw: string): ChatThreadPayloadV1 {
+export function parseThreadPayload(raw: string): ChatThreadPayload {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw) as unknown
@@ -52,15 +85,15 @@ export function parseThreadPayload(raw: string): ChatThreadPayloadV1 {
     throw new ChatThreadPayloadError('Chat thread payload is not valid JSON.')
   }
 
-  if (!isChatThreadPayloadV1(parsed)) {
+  if (!isChatThreadPayload(parsed)) {
     throw new ChatThreadPayloadError(
-      'Chat thread payload must be a v1 envelope with settings and messages.'
+      'Chat thread payload must be a v2 envelope with settings and tree nodes.'
     )
   }
 
   return parsed
 }
 
-export function serializeThreadPayload(payload: ChatThreadPayloadV1): string {
+export function serializeThreadPayload(payload: ChatThreadPayload): string {
   return JSON.stringify(payload)
 }

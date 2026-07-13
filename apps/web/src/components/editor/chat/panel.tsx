@@ -7,7 +7,8 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
-import { asUIMessageArray, canContinueConversation, getTrailingAssistantMessage } from './message-utils'
+import { asUIMessageArray, getTrailingAssistantMessage } from './message-utils'
+import { canContinueConversation, getBranchMeta, type ChatTreeSnapshot } from './tree'
 import type { ChatThreadSummary } from './types'
 import {
   ChatBubble,
@@ -28,6 +29,8 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const editorSelection = useEditorStore((s) => s.editorSelection)
   const utils = trpc.useUtils()
   const [messages, setMessages] = useState<UIMessage[]>([])
+  const [tree, setTree] = useState<ChatTreeSnapshot | null>(null)
+  const treeRef = useRef<ChatTreeSnapshot | null>(null)
   const [input, setInput] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [isThreadBrowserOpen, setIsThreadBrowserOpen] = useState(false)
@@ -69,7 +72,10 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const deleteThreadMutation = trpc.chat.deleteById.useMutation()
   const updateSettingsMutation = trpc.chat.updateSettings.useMutation()
   const updateMessageMutation = trpc.chat.updateMessageById.useMutation()
+  const editMessageAndGenerateMutation = trpc.chat.editMessageAndGenerate.useMutation()
   const deleteMessagesMutation = trpc.chat.deleteMessagesById.useMutation()
+  const selectBranchMutation = trpc.chat.selectBranch.useMutation()
+  const regenerateMutation = trpc.chat.regenerateFromMessage.useMutation()
   const generateMutation = trpc.chat.generateById.useMutation()
   const cancelGenerationMutation = trpc.chat.cancelGenerationById.useMutation()
 
@@ -106,6 +112,8 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       } = {}
     ) => {
       setMessages([])
+      setTree(null)
+      treeRef.current = null
       setIsGenerating(false)
       messagesRef.current = []
       isGeneratingRef.current = false
@@ -178,10 +186,13 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     queueMicrotask(() => {
       if (cancelled) return
       const nextMessages = asUIMessageArray(activeThreadQuery.data.messages)
+      const nextTree = activeThreadQuery.data.tree ?? null
       const nextGenerating = Boolean(activeThreadQuery.data.generating)
       messagesRef.current = nextMessages
+      treeRef.current = nextTree
       isGeneratingRef.current = nextGenerating
       setMessages(nextMessages)
+      setTree(nextTree)
       setIsGenerating(nextGenerating)
       if (!activeThreadQuery.data.generating) {
         stopStreamChunkPump()
@@ -217,7 +228,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           return
         }
 
-        if (event.deleted || !event.thread) {
+        if (event.deleted) {
           resetLocalChatState({ clearThread: true })
           utils.chat.listByDocument.setData({ projectId, documentId }, (previous) => {
             const current = previous?.threads ?? []
@@ -231,10 +242,15 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           return
         }
 
+        if (!event.thread) return
+
         const nextMessages = asUIMessageArray(event.thread.messages)
+        const nextTree = event.thread.tree ?? null
         messagesRef.current = nextMessages
+        treeRef.current = nextTree
         isGeneratingRef.current = event.generating
         setMessages(nextMessages)
+        setTree(nextTree)
         setIsGenerating(event.generating)
         const trailingAssistant = getTrailingAssistantMessage(nextMessages)
 
@@ -261,6 +277,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
             id: event.thread.id,
             title: event.thread.title,
             messages: nextMessages,
+            tree: nextTree,
             settings: event.thread.settings,
             createdAt: event.thread.createdAt,
             updatedAt: event.thread.updatedAt,
@@ -386,17 +403,21 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     ]
   )
 
-  const applyMessageRevision = useCallback(
+  const applyTreeUpdate = useCallback(
     (updated: {
       id: string
       messages: unknown[]
+      tree?: ChatTreeSnapshot
       settings: { editingEnabled: boolean }
       updatedAt: number
     }) => {
       if (!projectId || !documentId) return
       const nextMessages = asUIMessageArray(updated.messages)
+      const nextTree = updated.tree ?? treeRef.current
       messagesRef.current = nextMessages
+      treeRef.current = nextTree
       setMessages(nextMessages)
+      setTree(nextTree)
       utils.chat.getById.setData(
         { projectId, documentId, chatId: updated.id },
         (previous) =>
@@ -404,6 +425,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
             ? {
                 ...previous,
                 messages: nextMessages,
+                tree: nextTree ?? previous.tree,
                 settings: updated.settings,
                 updatedAt: updated.updatedAt,
               }
@@ -424,7 +446,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     [documentId, projectId, utils.chat.getById, utils.chat.listByDocument]
   )
 
-  const handleSaveMessage = useCallback(
+  const handleSaveMessageOnly = useCallback(
     async (messageId: string, text: string) => {
       if (!projectId || !documentId || !activeThreadId || isGenerating) return
       try {
@@ -435,7 +457,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           messageId,
           text,
         })
-        applyMessageRevision(updated)
+        applyTreeUpdate(updated)
         setEditingMessageId(null)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to edit message'
@@ -444,13 +466,49 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     },
     [
       activeThreadId,
-      applyMessageRevision,
+      applyTreeUpdate,
       documentId,
       isGenerating,
       projectId,
       updateMessageMutation,
     ]
   )
+
+  const handleSaveMessageAndGenerate = useCallback(
+    async (messageId: string, text: string) => {
+      if (!projectId || !documentId || !activeThreadId || isGenerating) return
+      try {
+        isGeneratingRef.current = true
+        setIsGenerating(true)
+        setEditingMessageId(null)
+        await editMessageAndGenerateMutation.mutateAsync({
+          projectId,
+          documentId,
+          chatId: activeThreadId,
+          messageId,
+          text,
+          selectionFrom: editorSelection?.from,
+          selectionTo: editorSelection?.to,
+        })
+      } catch (error) {
+        isGeneratingRef.current = false
+        setIsGenerating(false)
+        const message =
+          error instanceof Error ? error.message : 'Failed to save and generate response'
+        toast.error('AI Chat Error', { description: message })
+      }
+    },
+    [
+      activeThreadId,
+      documentId,
+      editMessageAndGenerateMutation,
+      editorSelection?.from,
+      editorSelection?.to,
+      isGenerating,
+      projectId,
+    ]
+  )
+
 
   const handleDeleteMessages = useCallback(
     async (messageId: string, mode: DeleteChatMessageMode) => {
@@ -463,7 +521,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           messageId,
           mode,
         })
-        applyMessageRevision(updated)
+        applyTreeUpdate(updated)
         setEditingMessageId(null)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to delete message'
@@ -472,11 +530,70 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     },
     [
       activeThreadId,
-      applyMessageRevision,
+      applyTreeUpdate,
       deleteMessagesMutation,
       documentId,
       isGenerating,
       projectId,
+    ]
+  )
+
+  const handleSelectBranch = useCallback(
+    async (nodeId: string) => {
+      if (!projectId || !documentId || !activeThreadId || isGenerating) return
+      try {
+        const updated = await selectBranchMutation.mutateAsync({
+          projectId,
+          documentId,
+          chatId: activeThreadId,
+          nodeId,
+        })
+        applyTreeUpdate(updated)
+        setEditingMessageId(null)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to switch branch'
+        toast.error('Failed to switch branch', { description: message })
+      }
+    },
+    [
+      activeThreadId,
+      applyTreeUpdate,
+      documentId,
+      isGenerating,
+      projectId,
+      selectBranchMutation,
+    ]
+  )
+
+  const handleRegenerate = useCallback(
+    async (messageId: string) => {
+      if (!projectId || !documentId || !activeThreadId || isGenerating) return
+      try {
+        isGeneratingRef.current = true
+        setIsGenerating(true)
+        await regenerateMutation.mutateAsync({
+          projectId,
+          documentId,
+          chatId: activeThreadId,
+          messageId,
+          selectionFrom: editorSelection?.from,
+          selectionTo: editorSelection?.to,
+        })
+      } catch (error) {
+        isGeneratingRef.current = false
+        setIsGenerating(false)
+        const message = error instanceof Error ? error.message : 'Failed to regenerate message'
+        toast.error('Failed to regenerate message', { description: message })
+      }
+    },
+    [
+      activeThreadId,
+      documentId,
+      editorSelection?.from,
+      editorSelection?.to,
+      isGenerating,
+      projectId,
+      regenerateMutation,
     ]
   )
 
@@ -507,9 +624,21 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
         queryEnabled &&
           !isGenerating &&
           !generateMutation.isPending &&
+          !selectBranchMutation.isPending &&
+          !regenerateMutation.isPending &&
+          !editMessageAndGenerateMutation.isPending &&
           (input.trim() || canContinue)
       ),
-    [queryEnabled, isGenerating, generateMutation.isPending, input, canContinue]
+    [
+      queryEnabled,
+      isGenerating,
+      generateMutation.isPending,
+      selectBranchMutation.isPending,
+      regenerateMutation.isPending,
+      editMessageAndGenerateMutation.isPending,
+      input,
+      canContinue,
+    ]
   )
 
   const handleSend = async () => {
@@ -522,6 +651,8 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       if (!activeThreadId) return
 
       try {
+        isGeneratingRef.current = true
+        setIsGenerating(true)
         await generateMutation.mutateAsync({
           projectId,
           documentId,
@@ -531,6 +662,8 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           selectionTo: editorSelection?.to,
         })
       } catch (error) {
+        isGeneratingRef.current = false
+        setIsGenerating(false)
         const message =
           error instanceof Error ? error.message : 'Failed to start AI response generation'
         toast.error('AI Chat Error', { description: message })
@@ -563,6 +696,11 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
                   id: newChatId,
                   title: 'New chat',
                   messages: [],
+                  tree: {
+                    nodes: {},
+                    rootChildIds: [],
+                    selectedRootChildId: null,
+                  },
                   settings: updated.settings,
                   createdAt: Date.now(),
                   updatedAt: updated.updatedAt,
@@ -583,13 +721,13 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           return
         }
       }
-
-      resetLocalChatState()
     }
 
     setInput('')
 
     try {
+      isGeneratingRef.current = true
+      setIsGenerating(true)
       await generateMutation.mutateAsync({
         projectId,
         documentId,
@@ -599,6 +737,8 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
         selectionTo: editorSelection?.to,
       })
     } catch (error) {
+      isGeneratingRef.current = false
+      setIsGenerating(false)
       setInput(trimmed)
       const message =
         error instanceof Error ? error.message : 'Failed to start AI response generation'
@@ -761,22 +901,40 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       >
         {messages.length === 0 && <EmptyChatState onSuggestionClick={setInput} />}
 
-        {messages.map((message) => (
+        {messages.map((message, messageIndex) => (
           <ChatBubble
             key={message.id}
             message={message}
+            isActivePathLeaf={messageIndex === messages.length - 1}
+            branchMeta={
+              tree ? getBranchMeta(tree, message.id) : { index: 0, count: 1, siblingIds: [message.id] }
+            }
             isStreaming={streamingAssistantMessageId === message.id}
             isEditing={editingMessageId === message.id}
             disabled={
-              isGenerating || updateMessageMutation.isPending || deleteMessagesMutation.isPending
+              isGenerating ||
+              updateMessageMutation.isPending ||
+              editMessageAndGenerateMutation.isPending ||
+              deleteMessagesMutation.isPending ||
+              selectBranchMutation.isPending ||
+              regenerateMutation.isPending
             }
             onStartEdit={setEditingMessageId}
             onCancelEdit={() => setEditingMessageId(null)}
-            onSaveEdit={(messageId, text) => {
-              void handleSaveMessage(messageId, text)
+            onSaveEditOnly={(messageId, text) => {
+              void handleSaveMessageOnly(messageId, text)
+            }}
+            onSaveEditAndGenerate={(messageId, text) => {
+              void handleSaveMessageAndGenerate(messageId, text)
             }}
             onDelete={(messageId, mode) => {
               void handleDeleteMessages(messageId, mode)
+            }}
+            onSelectBranch={(nodeId) => {
+              void handleSelectBranch(nodeId)
+            }}
+            onRegenerate={(messageId) => {
+              void handleRegenerate(messageId)
             }}
           />
         ))}

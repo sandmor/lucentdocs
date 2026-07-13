@@ -1331,7 +1331,7 @@ describe('buildEditTools', () => {
 })
 
 describe('chats service envelope', () => {
-  test('create initializes v1 payload and updateSettings persists editingEnabled', async () => {
+  test('create initializes v2 payload and updateSettings persists editingEnabled', async () => {
     const adapter = createTestAdapter()
     const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
     const document = await adapter.services.documents.createForProject(

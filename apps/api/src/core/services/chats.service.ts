@@ -6,17 +6,26 @@ import {
   createEmptyChatThreadPayload,
   parseThreadPayload,
   serializeThreadPayload,
-  type ChatThreadPayloadV1,
+  type ChatThreadPayload,
   type ChatThreadSettings,
 } from './chat-thread-payload.js'
 import {
-  deleteMessageAt,
-  normalizeMessages,
-  replaceMessageText,
+  deleteNode,
+  forkRegeneration,
+  pathToUIMessages,
+  replaceNodeText,
+  resolveActivePath,
+  selectBranch,
+  setAssistantOnActiveLeaf,
+  summarizeTitleFromPayload,
+  toTreeSnapshot,
+  type ChatTreeSnapshot,
   type DeleteChatMessageMode,
-} from '../../chat/utils.js'
+} from '../../chat/tree.js'
+import { normalizeMessages } from '../../chat/utils.js'
 
 export type { ChatThreadSettings } from './chat-thread-payload.js'
+export type { DeleteChatMessageMode } from '../../chat/tree.js'
 
 export interface ChatThread {
   id: string
@@ -24,6 +33,7 @@ export interface ChatThread {
   documentId: string
   title: string
   messages: unknown[]
+  tree: ChatTreeSnapshot
   settings: ChatThreadSettings
   createdAt: number
   updatedAt: number
@@ -41,11 +51,11 @@ export interface ChatsService {
   listForDocument(projectId: string, documentId: string): Promise<ChatThreadSummary[]>
   getById(projectId: string, documentId: string, chatId: string): Promise<ChatThread | null>
   create(projectId: string, documentId: string, title?: string): Promise<ChatThread | null>
-  save(
+  savePayload(
     projectId: string,
     documentId: string,
     chatId: string,
-    messages: unknown[]
+  payload: ChatThreadPayload
   ): Promise<ChatThread | null>
   updateMessageById(
     projectId: string,
@@ -61,6 +71,26 @@ export interface ChatsService {
     messageId: string,
     mode: DeleteChatMessageMode
   ): Promise<ChatThread | null>
+  selectBranchById(
+    projectId: string,
+    documentId: string,
+    chatId: string,
+    nodeId: string
+  ): Promise<ChatThread | null>
+  forkRegenerationById(
+    projectId: string,
+    documentId: string,
+    chatId: string,
+    messageId: string,
+    text?: string
+  ): Promise<{ thread: ChatThread; forkNodeId: string } | null>
+  attachAssistantToActiveLeaf(
+    projectId: string,
+    documentId: string,
+    chatId: string,
+    assistantId: string,
+    parts: unknown[]
+  ): Promise<ChatThread | null>
   updateSettings(
     projectId: string,
     documentId: string,
@@ -68,58 +98,6 @@ export interface ChatsService {
     settings: Partial<ChatThreadSettings>
   ): Promise<ChatThread | null>
   delete(projectId: string, documentId: string, chatId: string): Promise<boolean>
-}
-
-function countMessages(messages: unknown[]): number {
-  return messages.length
-}
-
-function summarizeTitle(messages: unknown[]): string {
-  for (const message of messages) {
-    if (typeof message !== 'object' || message === null || Array.isArray(message)) continue
-    const record = message as Record<string, unknown>
-    if (record.role !== 'user') continue
-    if (!Array.isArray(record.parts)) continue
-
-    const text = record.parts
-      .flatMap((part) => {
-        if (typeof part !== 'object' || part === null || Array.isArray(part)) return []
-        const partRecord = part as Record<string, unknown>
-        if (partRecord.type !== 'text') return []
-        return typeof partRecord.text === 'string' ? [partRecord.text] : []
-      })
-      .join('')
-      .trim()
-
-    if (!text) continue
-    return text.length > 80 ? `${text.slice(0, 80)}...` : text
-  }
-
-  return 'New chat'
-}
-
-function toChatThread(row: ChatThreadRow): ChatThread {
-  const payload = parseThreadPayload(row.messages)
-  return {
-    id: row.id,
-    projectId: row.projectId,
-    documentId: row.documentId,
-    title: row.title,
-    messages: payload.messages,
-    settings: payload.settings,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }
-}
-
-function toSummary(thread: ChatThread): ChatThreadSummary {
-  return {
-    id: thread.id,
-    title: thread.title,
-    createdAt: thread.createdAt,
-    updatedAt: thread.updatedAt,
-    messageCount: countMessages(thread.messages),
-  }
 }
 
 function mergeSettings(
@@ -132,12 +110,64 @@ function mergeSettings(
   }
 }
 
+async function payloadToThread(
+  row: ChatThreadRow,
+  payload: ChatThreadPayload
+): Promise<ChatThread> {
+  const path = resolveActivePath(payload)
+  const messages = pathToUIMessages(path)
+  await normalizeMessages(messages)
+
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    documentId: row.documentId,
+    title: row.title,
+    messages,
+    tree: toTreeSnapshot(payload),
+    settings: payload.settings,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+function toSummary(thread: ChatThread): ChatThreadSummary {
+  return {
+    id: thread.id,
+    title: thread.title,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    messageCount: thread.messages.length,
+  }
+}
+
+async function loadPayload(
+  repos: RepositorySet,
+  projectId: string,
+  documentId: string,
+  chatId: string
+): Promise<{ row: ChatThreadRow; payload: ChatThreadPayload } | null> {
+  const row = await repos.chats.findById(projectId, documentId, chatId)
+  if (!row) return null
+  return { row, payload: parseThreadPayload(row.messages) }
+}
+
 export function createChatsService(repos: RepositorySet): ChatsService {
   return {
     async listForDocument(projectId: string, documentId: string): Promise<ChatThreadSummary[]> {
       if (!isValidId(projectId) || !isValidId(documentId)) return []
       const rows = await repos.chats.listByDocument(projectId, documentId)
-      return rows.map((row: ChatThreadRow) => toSummary(toChatThread(row)))
+      const summaries: ChatThreadSummary[] = []
+      for (const row of rows) {
+        try {
+          const payload = parseThreadPayload(row.messages)
+          const thread = await payloadToThread(row, payload)
+          summaries.push(toSummary(thread))
+        } catch {
+          // Drop legacy or corrupt threads from listings.
+        }
+      }
+      return summaries
     },
 
     async getById(
@@ -146,8 +176,8 @@ export function createChatsService(repos: RepositorySet): ChatsService {
       chatId: string
     ): Promise<ChatThread | null> {
       if (!isValidId(projectId) || !isValidId(documentId) || !isValidId(chatId)) return null
-      const row = await repos.chats.findById(projectId, documentId, chatId)
-      return row ? toChatThread(row) : null
+      const loaded = await loadPayload(repos, projectId, documentId, chatId)
+      return loaded ? payloadToThread(loaded.row, loaded.payload) : null
     },
 
     async create(
@@ -176,50 +206,46 @@ export function createChatsService(repos: RepositorySet): ChatsService {
         projectId,
         documentId,
         title: normalizedTitle,
-        messages: payload.messages,
+        messages: [],
+        tree: toTreeSnapshot(payload),
         settings: payload.settings,
         createdAt: now,
         updatedAt: now,
       }
     },
 
-    async save(
+    async savePayload(
       projectId: string,
       documentId: string,
       chatId: string,
-      messages: unknown[]
+    payload: ChatThreadPayload
     ): Promise<ChatThread | null> {
       if (!isValidId(projectId) || !isValidId(documentId) || !isValidId(chatId)) return null
       const existing = await repos.chats.findById(projectId, documentId, chatId)
       if (!existing) return null
 
-      const currentPayload = parseThreadPayload(existing.messages)
-      const nextPayload: ChatThreadPayloadV1 = {
-        v: 1,
-        settings: currentPayload.settings,
-        messages,
-      }
+      const path = resolveActivePath(payload)
+      await normalizeMessages(pathToUIMessages(path))
 
       const updatedAt = Date.now()
       const nextTitle =
-        existing.title === 'New chat' ? summarizeTitle(messages) : existing.title
-      const updated = await repos.chats.update(projectId, documentId, chatId, {
+        existing.title === 'New chat' ? summarizeTitleFromPayload(payload) : existing.title
+      const saved = await repos.chats.update(projectId, documentId, chatId, {
         title: nextTitle,
-        messages: serializeThreadPayload(nextPayload),
+        messages: serializeThreadPayload(payload),
         updatedAt,
       })
-      if (!updated) return null
+      if (!saved) return null
 
-      return {
-        id: existing.id,
-        projectId: existing.projectId,
-        documentId: existing.documentId,
-        title: nextTitle,
-        messages,
-        settings: nextPayload.settings,
-        createdAt: existing.createdAt,
-        updatedAt,
-      }
+      return payloadToThread(
+        {
+          ...existing,
+          title: nextTitle,
+          messages: serializeThreadPayload(payload),
+          updatedAt,
+        },
+        payload
+      )
     },
 
     async updateMessageById(
@@ -229,12 +255,10 @@ export function createChatsService(repos: RepositorySet): ChatsService {
       messageId: string,
       text: string
     ): Promise<ChatThread | null> {
-      const thread = await this.getById(projectId, documentId, chatId)
-      if (!thread) return null
-      const messages = await normalizeMessages(thread.messages)
-      const updatedMessages = replaceMessageText(messages, messageId, text)
-      await normalizeMessages(updatedMessages)
-      return this.save(projectId, documentId, chatId, updatedMessages)
+      const loaded = await loadPayload(repos, projectId, documentId, chatId)
+      if (!loaded) return null
+      const nextPayload = replaceNodeText(loaded.payload, messageId, text)
+      return this.savePayload(projectId, documentId, chatId, nextPayload)
     },
 
     async deleteMessagesById(
@@ -244,12 +268,52 @@ export function createChatsService(repos: RepositorySet): ChatsService {
       messageId: string,
       mode: DeleteChatMessageMode
     ): Promise<ChatThread | null> {
-      const thread = await this.getById(projectId, documentId, chatId)
+      const loaded = await loadPayload(repos, projectId, documentId, chatId)
+      if (!loaded) return null
+      const nextPayload = deleteNode(loaded.payload, messageId, mode)
+      return this.savePayload(projectId, documentId, chatId, nextPayload)
+    },
+
+    async selectBranchById(
+      projectId: string,
+      documentId: string,
+      chatId: string,
+      nodeId: string
+    ): Promise<ChatThread | null> {
+      const loaded = await loadPayload(repos, projectId, documentId, chatId)
+      if (!loaded) return null
+      const nextPayload = selectBranch(loaded.payload, nodeId)
+      return this.savePayload(projectId, documentId, chatId, nextPayload)
+    },
+
+    async forkRegenerationById(
+      projectId: string,
+      documentId: string,
+      chatId: string,
+      messageId: string,
+      text?: string
+    ): Promise<{ thread: ChatThread; forkNodeId: string } | null> {
+      const loaded = await loadPayload(repos, projectId, documentId, chatId)
+      if (!loaded) return null
+      const { payload: nextPayload, forkNodeId } = forkRegeneration(loaded.payload, messageId, {
+        text,
+      })
+      const thread = await this.savePayload(projectId, documentId, chatId, nextPayload)
       if (!thread) return null
-      const messages = await normalizeMessages(thread.messages)
-      const updatedMessages = deleteMessageAt(messages, messageId, mode)
-      await normalizeMessages(updatedMessages)
-      return this.save(projectId, documentId, chatId, updatedMessages)
+      return { thread, forkNodeId }
+    },
+
+    async attachAssistantToActiveLeaf(
+      projectId: string,
+      documentId: string,
+      chatId: string,
+      assistantId: string,
+      parts: unknown[]
+    ): Promise<ChatThread | null> {
+      const loaded = await loadPayload(repos, projectId, documentId, chatId)
+      if (!loaded) return null
+      const nextPayload = setAssistantOnActiveLeaf(loaded.payload, assistantId, parts)
+      return this.savePayload(projectId, documentId, chatId, nextPayload)
     },
 
     async updateSettings(
@@ -259,33 +323,29 @@ export function createChatsService(repos: RepositorySet): ChatsService {
       settings: Partial<ChatThreadSettings>
     ): Promise<ChatThread | null> {
       if (!isValidId(projectId) || !isValidId(documentId) || !isValidId(chatId)) return null
-      const existing = await repos.chats.findById(projectId, documentId, chatId)
-      if (!existing) return null
+      const loaded = await loadPayload(repos, projectId, documentId, chatId)
+      if (!loaded) return null
 
-      const currentPayload = parseThreadPayload(existing.messages)
-      const nextPayload: ChatThreadPayloadV1 = {
-        v: 1,
-        settings: mergeSettings(currentPayload.settings, settings),
-        messages: currentPayload.messages,
+      const nextPayload: ChatThreadPayload = {
+        ...loaded.payload,
+        settings: mergeSettings(loaded.payload.settings, settings),
       }
 
       const updatedAt = Date.now()
-      const updated = await repos.chats.update(projectId, documentId, chatId, {
+      const saved = await repos.chats.update(projectId, documentId, chatId, {
         messages: serializeThreadPayload(nextPayload),
         updatedAt,
       })
-      if (!updated) return null
+      if (!saved) return null
 
-      return {
-        id: existing.id,
-        projectId: existing.projectId,
-        documentId: existing.documentId,
-        title: existing.title,
-        messages: nextPayload.messages,
-        settings: nextPayload.settings,
-        createdAt: existing.createdAt,
-        updatedAt,
-      }
+      return payloadToThread(
+        {
+          ...loaded.row,
+          messages: serializeThreadPayload(nextPayload),
+          updatedAt,
+        },
+        nextPayload
+      )
     },
 
     async delete(projectId: string, documentId: string, chatId: string): Promise<boolean> {

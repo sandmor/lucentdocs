@@ -3,7 +3,8 @@ import { LOCAL_DEFAULT_USER } from '../core/models/user.js'
 import { createTestAdapter } from '../testing/factory.js'
 import type { YjsRuntime } from '../yjs/runtime.js'
 import { ChatRuntime } from './runtime.js'
-import { createUserMessage } from './utils.js'
+import { appendUserMessage } from './tree.js'
+import { createEmptyChatThreadPayload } from '../core/services/chat-thread-payload.js'
 
 describe('ChatRuntime message revision guard', () => {
   test('rejects message changes while generation is active', async () => {
@@ -26,6 +27,12 @@ describe('ChatRuntime message revision guard', () => {
     await expect(runtime.deleteMessagesById(scope, 'missing-message', 'only')).rejects.toThrow(
       'Stop the current response before editing or deleting messages.'
     )
+    await expect(runtime.selectBranch(scope, 'missing-message')).rejects.toThrow(
+      'Stop the current response before editing or deleting messages.'
+    )
+    await expect(runtime.regenerateFromMessage(scope, 'missing-message')).rejects.toThrow(
+      'Stop the current response before editing or deleting messages.'
+    )
 
     runtime.cancelGeneration(scope)
   })
@@ -42,12 +49,14 @@ describe('ChatRuntime continue generation', () => {
     const thread = await adapter.services.chats.create(project.id, document.id)
     if (!thread) throw new Error('Expected a chat thread')
 
-    const userMessage = createUserMessage('Regenerate this reply')
-    const saved = await adapter.services.chats.save(
+    let payload = createEmptyChatThreadPayload()
+    const appended = appendUserMessage(payload, 'Regenerate this reply')
+    payload = appended.payload
+    const saved = await adapter.services.chats.savePayload(
       project.id,
       document.id,
       thread.id,
-      [userMessage]
+      payload
     )
     if (!saved) throw new Error('Expected saved chat thread')
 
@@ -77,5 +86,99 @@ describe('ChatRuntime continue generation', () => {
     await expect(runtime.startGeneration({ ...scope, message: '' })).rejects.toThrow(
       'Cannot continue an empty chat.'
     )
+  })
+})
+
+describe('ChatRuntime generation completion', () => {
+  test('completes test-mode generation and clears active state', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Generation complete', {
+      ownerUserId: LOCAL_DEFAULT_USER.id,
+    })
+    const document = await adapter.services.documents.createForProject(project.id, 'chapter.md')
+    if (!document) throw new Error('Expected a document')
+    const thread = await adapter.services.chats.create(project.id, document.id)
+    if (!thread) throw new Error('Expected a chat thread')
+
+    const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
+    const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
+    await runtime.startGeneration({ ...scope, message: 'Complete this response' })
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (!runtime.isGenerating(scope)) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    expect(runtime.isGenerating(scope)).toBe(false)
+
+    const persisted = await adapter.services.chats.getById(project.id, document.id, thread.id)
+    expect(persisted?.messages).toHaveLength(2)
+  })
+})
+
+describe('ChatRuntime branch selection', () => {
+  test('selectBranch publishes updated active path', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Branch select', {
+      ownerUserId: LOCAL_DEFAULT_USER.id,
+    })
+    const document = await adapter.services.documents.createForProject(project.id, 'chapter.md')
+    if (!document) throw new Error('Expected a document')
+    const thread = await adapter.services.chats.create(project.id, document.id)
+    if (!thread) throw new Error('Expected a chat thread')
+
+    let payload = createEmptyChatThreadPayload()
+    const user = appendUserMessage(payload, 'Hello')
+    payload = user.payload
+    await adapter.services.chats.savePayload(project.id, document.id, thread.id, payload)
+
+    const forked = await adapter.services.chats.forkRegenerationById(
+      project.id,
+      document.id,
+      thread.id,
+      user.nodeId
+    )
+    if (!forked) throw new Error('Expected forked thread')
+
+    const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
+    const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
+    const updated = await runtime.selectBranch(scope, user.nodeId)
+
+    expect(updated.messages).toHaveLength(1)
+    expect(updated.messages[0]).toMatchObject({ role: 'user', parts: [{ text: 'Hello' }] })
+  })
+})
+
+describe('ChatRuntime edit and generate', () => {
+  test('editMessageAndGenerate continues from an edited leaf user message', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Edit leaf generate', {
+      ownerUserId: LOCAL_DEFAULT_USER.id,
+    })
+    const document = await adapter.services.documents.createForProject(project.id, 'chapter.md')
+    if (!document) throw new Error('Expected a document')
+    const thread = await adapter.services.chats.create(project.id, document.id)
+    if (!thread) throw new Error('Expected a chat thread')
+
+    let payload = createEmptyChatThreadPayload()
+    const appended = appendUserMessage(payload, 'Original prompt')
+    payload = appended.payload
+    await adapter.services.chats.savePayload(project.id, document.id, thread.id, payload)
+
+    const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
+    const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
+    await runtime.editMessageAndGenerate(scope, appended.nodeId, 'Edited prompt')
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (!runtime.isGenerating(scope)) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    const persisted = await adapter.services.chats.getById(project.id, document.id, thread.id)
+    expect(persisted?.messages).toHaveLength(2)
+    expect(persisted?.messages[0]).toMatchObject({
+      role: 'user',
+      parts: [{ type: 'text', text: 'Edited prompt' }],
+    })
   })
 })

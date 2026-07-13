@@ -105,6 +105,7 @@ export const chatRouter = router({
         id: thread.id,
         title: thread.title,
         messages: thread.messages,
+        tree: thread.tree,
         settings: thread.settings,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
@@ -280,9 +281,98 @@ export const chatRouter = router({
         return {
           id: updated.id,
           messages: updated.messages,
+          tree: updated.tree,
           settings: updated.settings,
           updatedAt: updated.updatedAt,
         }
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
+  editMessageAndGenerate: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        chatId: idSchema,
+        messageId: idSchema,
+        text: z.string(),
+        selectionFrom: z.number().int().min(0).optional(),
+        selectionTo: z.number().int().min(0).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      const text = input.text.trim()
+      const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
+      if (text.length === 0 || text.length > maxChatMessageChars) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Message must be between 1 and ${maxChatMessageChars} characters`,
+        })
+      }
+
+      try {
+        const started = await ctx.chatRuntime.editMessageAndGenerate(input, input.messageId, text, {
+          selectionFrom: input.selectionFrom,
+          selectionTo: input.selectionTo,
+        })
+        return { accepted: true, generationId: started.generationId }
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
+  selectBranch: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        chatId: idSchema,
+        nodeId: idSchema,
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+
+      try {
+        const updated = await ctx.chatRuntime.selectBranch(input, input.nodeId)
+        return {
+          id: updated.id,
+          messages: updated.messages,
+          tree: updated.tree,
+          settings: updated.settings,
+          updatedAt: updated.updatedAt,
+        }
+      } catch (error) {
+        throw mapRuntimeError(error)
+      }
+    }),
+
+  regenerateFromMessage: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        chatId: idSchema,
+        messageId: idSchema,
+        selectionFrom: z.number().int().min(0).optional(),
+        selectionTo: z.number().int().min(0).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+
+      try {
+        const started = await ctx.chatRuntime.regenerateFromMessage(input, input.messageId, {
+          selectionFrom: input.selectionFrom,
+          selectionTo: input.selectionTo,
+        })
+        return { accepted: true, generationId: started.generationId }
       } catch (error) {
         throw mapRuntimeError(error)
       }
@@ -295,7 +385,7 @@ export const chatRouter = router({
         documentId: idSchema,
         chatId: idSchema,
         messageId: idSchema,
-        mode: z.enum(['only', 'from_here']),
+        mode: z.enum(['only', 'from_here', 'branch']),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -311,6 +401,7 @@ export const chatRouter = router({
         return {
           id: updated.id,
           messages: updated.messages,
+          tree: updated.tree,
           settings: updated.settings,
           updatedAt: updated.updatedAt,
         }

@@ -11,6 +11,7 @@ import { nanoid } from 'nanoid'
 import { safeValidateUIMessages, type UIMessage } from 'ai'
 import { configManager } from '../config/runtime.js'
 import type { ChatThread, ChatThreadSettings } from '../core/services/chats.service.js'
+import type { ChatTreeSnapshot, DeleteChatMessageMode } from './tree.js'
 import { parseDocumentNode } from '../core/services/documentContent.js'
 import {
   buildAnnotatedPromptContextExcerpt,
@@ -26,6 +27,7 @@ export interface PersistedChatThread {
   id: string
   title: string
   messages: unknown[]
+  tree: ChatTreeSnapshot
   settings: ChatThreadSettings
   createdAt: number
   updatedAt: number
@@ -56,6 +58,7 @@ export function toPersistedThread(thread: ChatThread | null): PersistedChatThrea
     id: thread.id,
     title: thread.title,
     messages: thread.messages,
+    tree: thread.tree,
     settings: thread.settings,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
@@ -94,6 +97,8 @@ export function buildThreadFromState(
     updatedAt,
   }
 }
+
+export type { DeleteChatMessageMode } from './tree.js'
 
 export function normalizeProjectPath(rawPath: string): string {
   const trimmed = rawPath.trim()
@@ -279,8 +284,6 @@ export function assertCanContinueConversation(messages: UIMessage[]): void {
     'Cannot continue unless the latest message is from the author.'
   )
 }
-
-export type DeleteChatMessageMode = 'only' | 'from_here'
 
 export function findMessageIndex(messages: UIMessage[], messageId: string): number {
   const index = messages.findIndex((message) => message.id === messageId)

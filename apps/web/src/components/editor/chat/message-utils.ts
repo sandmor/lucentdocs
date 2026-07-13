@@ -50,11 +50,6 @@ export function getTrailingAssistantMessage(messages: UIMessage[]): UIMessage | 
   return last?.role === 'assistant' ? last : null
 }
 
-export function canContinueConversation(messages: UIMessage[]): boolean {
-  if (messages.length === 0) return false
-  return messages[messages.length - 1]?.role === 'user'
-}
-
 export function extractMessageText(message: UIMessage): string {
   return extractMessageTextFromParts(getMessageParts(message))
 }

@@ -18,7 +18,6 @@ async function sendChatMessage(page: Page, message: string): Promise<void> {
 }
 
 async function waitForChatGenerationToStart(page: Page, timeout = 20_000): Promise<void> {
-  const chatPanel = page.locator('[data-chat-panel="true"]')
   const stopButton = page.locator('[data-chat-stop="true"]')
   const typingIndicator = page.getByLabel('Assistant is typing')
 
@@ -29,11 +28,7 @@ async function waitForChatGenerationToStart(page: Page, timeout = 20_000): Promi
           return true
         }
 
-        if ((await typingIndicator.count()) > 0) {
-          return true
-        }
-
-        return (await chatPanel.textContent())?.includes('spark') ?? false
+        return (await typingIndicator.count()) > 0
       },
       { timeout }
     )
@@ -146,6 +141,132 @@ test('sidebar chat can regenerate after deleting the latest assistant reply', as
   await expect(
     page.locator('[data-chat-message-id]').filter({ hasText: 'Continue after assistant delete' })
   ).toHaveCount(1)
+})
+
+test('sidebar chat root fork pager keeps multiple first-message regenerations', async ({ page }) => {
+  await createProject(page, 'Chat Root Fork Pager')
+
+  await sendChatMessage(page, 'Root fork prompt')
+  await expect(page.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 12_000 })
+
+  const userMessage = page
+    .locator('[data-chat-message-id]')
+    .filter({ hasText: 'Root fork prompt' })
+    .first()
+  const originalUserMessageId = await userMessage.getAttribute('data-chat-message-id')
+  if (!originalUserMessageId) throw new Error('Expected the user message id')
+
+  await userMessage.locator('[data-chat-message-actions]').click()
+  await page.locator(`[data-chat-message-regenerate="${originalUserMessageId}"]`).click()
+  await expect(page.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 12_000 })
+
+  const activeUserMessage = page
+    .locator('[data-chat-message-id]')
+    .filter({ hasText: 'Root fork prompt' })
+    .first()
+  const activeUserMessageId = await activeUserMessage.getAttribute('data-chat-message-id')
+  if (!activeUserMessageId) throw new Error('Expected the active user message id')
+
+  await expect(page.locator(`[data-chat-branch-pager="${activeUserMessageId}"]`)).toBeVisible()
+  await expect(page.locator(`[data-chat-branch-label="${activeUserMessageId}"]`)).toHaveText('2 / 2')
+
+  await page.locator(`[data-chat-branch-prev="${activeUserMessageId}"]`).click()
+  await expect(page.locator(`[data-chat-branch-label="${originalUserMessageId}"]`)).toHaveText('1 / 2')
+  await expect(page.locator('[data-chat-panel="true"]')).toContainText('spark')
+
+  await page.locator(`[data-chat-branch-next="${originalUserMessageId}"]`).click()
+  await expect(page.locator(`[data-chat-branch-label="${activeUserMessageId}"]`)).toHaveText('2 / 2')
+})
+
+test('sidebar chat branch pager keeps multiple assistant regenerations', async ({ page }) => {
+  await createProject(page, 'Chat Branch Pager')
+
+  await sendChatMessage(page, 'Branch pager prompt')
+  await expect(page.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 12_000 })
+
+  const assistantMessage = page
+    .locator('[data-chat-message-id]')
+    .filter({ hasText: 'Editorial Assistant' })
+    .last()
+  const originalAssistantMessageId = await assistantMessage.getAttribute('data-chat-message-id')
+  if (!originalAssistantMessageId) throw new Error('Expected the assistant message id')
+
+  await assistantMessage.locator('[data-chat-message-actions]').click()
+  await page.locator(`[data-chat-message-regenerate="${originalAssistantMessageId}"]`).click()
+  await expect(page.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 12_000 })
+
+  const activeAssistantMessage = page
+    .locator('[data-chat-message-id]')
+    .filter({ hasText: 'Editorial Assistant' })
+    .last()
+  const activeAssistantMessageId = await activeAssistantMessage.getAttribute('data-chat-message-id')
+  if (!activeAssistantMessageId) throw new Error('Expected the active assistant message id')
+
+  await expect(
+    page.locator(`[data-chat-branch-pager="${activeAssistantMessageId}"]`)
+  ).toBeVisible()
+  await expect(page.locator(`[data-chat-branch-label="${activeAssistantMessageId}"]`)).toHaveText(
+    '2 / 2'
+  )
+
+  await page.locator(`[data-chat-branch-prev="${activeAssistantMessageId}"]`).click()
+  await expect(page.locator(`[data-chat-branch-label="${originalAssistantMessageId}"]`)).toHaveText(
+    '1 / 2'
+  )
+  await expect(page.locator('[data-chat-panel="true"]')).toContainText('spark')
+
+  await page.locator(`[data-chat-branch-next="${originalAssistantMessageId}"]`).click()
+  await expect(page.locator(`[data-chat-branch-label="${activeAssistantMessageId}"]`)).toHaveText(
+    '2 / 2'
+  )
+})
+
+test('sidebar chat branch switch syncs to another connected client', async ({ browser, page }) => {
+  await createProject(page, 'Chat Branch Sync')
+  await sendChatMessage(page, 'Branch sync prompt')
+  await expect(page.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 12_000 })
+
+  const assistantMessage = page
+    .locator('[data-chat-message-id]')
+    .filter({ hasText: 'Editorial Assistant' })
+    .last()
+  const originalAssistantMessageId = await assistantMessage.getAttribute('data-chat-message-id')
+  if (!originalAssistantMessageId) throw new Error('Expected the assistant message id')
+
+  await assistantMessage.locator('[data-chat-message-actions]').click()
+  await page.locator(`[data-chat-message-regenerate="${originalAssistantMessageId}"]`).click()
+  await expect(page.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 12_000 })
+
+  const activeAssistantMessage = page
+    .locator('[data-chat-message-id]')
+    .filter({ hasText: 'Editorial Assistant' })
+    .last()
+  const activeAssistantMessageId = await activeAssistantMessage.getAttribute('data-chat-message-id')
+  if (!activeAssistantMessageId) throw new Error('Expected the active assistant message id')
+
+  const peerContext = await browser.newContext()
+  const peerPage = await peerContext.newPage()
+
+  try {
+    await peerPage.goto(page.url())
+    await waitForEditorConnected(peerPage)
+    await selectFirstChatThread(peerPage)
+    await expect(
+      peerPage.locator(`[data-chat-branch-label="${activeAssistantMessageId}"]`)
+    ).toHaveText('2 / 2')
+
+    await page.locator(`[data-chat-branch-prev="${activeAssistantMessageId}"]`).click()
+    await expect(
+      page.locator(`[data-chat-branch-label="${originalAssistantMessageId}"]`)
+    ).toHaveText('1 / 2')
+
+    await expect(
+      peerPage.locator(`[data-chat-branch-label="${originalAssistantMessageId}"]`)
+    ).toHaveText('1 / 2', { timeout: 8_000 })
+    await expect(peerPage.locator('[data-chat-panel="true"]')).toContainText('spark')
+  } finally {
+    await peerContext.close()
+  }
 })
 
 test('sidebar chat stop aborts an in-flight generation without saving assistant output', async ({

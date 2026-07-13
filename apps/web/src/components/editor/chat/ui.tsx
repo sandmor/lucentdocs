@@ -2,11 +2,14 @@ import { memo, useState } from 'react'
 import type { UIMessage } from 'ai'
 import {
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   MessageSquareQuote,
   MoreHorizontal,
   Pencil,
   PenTool,
+  RefreshCw,
   Search,
   Trash2,
   User,
@@ -32,9 +35,10 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { extractMessageText, extractToolParts } from './message-utils'
+import type { BranchMeta } from './tree'
 import type { ChatThreadSummary } from './types'
 
-export type DeleteChatMessageMode = 'only' | 'from_here'
+export type DeleteChatMessageMode = 'only' | 'from_here' | 'branch'
 
 export function ThreadRow({
   thread,
@@ -93,24 +97,34 @@ function ChatMarkdown({ children }: { children: string }) {
 
 interface ChatBubbleProps {
   message: UIMessage
+  branchMeta: BranchMeta
+  isActivePathLeaf: boolean
   isStreaming: boolean
   isEditing: boolean
   disabled: boolean
   onStartEdit: (messageId: string) => void
   onCancelEdit: () => void
-  onSaveEdit: (messageId: string, text: string) => void
+  onSaveEditOnly: (messageId: string, text: string) => void
+  onSaveEditAndGenerate: (messageId: string, text: string) => void
   onDelete: (messageId: string, mode: DeleteChatMessageMode) => void
+  onSelectBranch: (messageId: string) => void
+  onRegenerate: (messageId: string) => void
 }
 
 function ChatBubbleImpl({
   message,
+  branchMeta,
+  isActivePathLeaf,
   isStreaming,
   isEditing,
   disabled,
   onStartEdit,
   onCancelEdit,
-  onSaveEdit,
+  onSaveEditOnly,
+  onSaveEditAndGenerate,
   onDelete,
+  onSelectBranch,
+  onRegenerate,
 }: ChatBubbleProps) {
   const isUser = message.role === 'user'
   const text = extractMessageText(message)
@@ -119,6 +133,7 @@ function ChatBubbleImpl({
   const [deleteOpen, setDeleteOpen] = useState(false)
 
   const canEdit = toolParts.length === 0 && Boolean(text)
+  const generateSaveLabel = isUser && isActivePathLeaf ? 'Send' : 'Regenerate'
 
   return (
     <>
@@ -177,6 +192,13 @@ function ChatBubbleImpl({
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem
+                    data-chat-message-regenerate={message.id}
+                    onClick={() => onRegenerate(message.id)}
+                  >
+                    <RefreshCw />
+                    Regenerate
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
                     variant="destructive"
                     data-chat-message-delete={message.id}
                     onClick={() => setDeleteOpen(true)}
@@ -203,23 +225,33 @@ function ChatBubbleImpl({
                   }
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault()
-                    if (draft.trim()) onSaveEdit(message.id, draft)
+                    if (draft.trim()) onSaveEditAndGenerate(message.id, draft)
                   }
                 }}
                 className="min-h-20 max-h-48 resize-y text-sm"
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="ghost" size="sm" onClick={onCancelEdit}>
                   Cancel
                 </Button>
                 <Button
                   type="button"
+                  variant="outline"
                   size="sm"
                   data-chat-message-edit-save={message.id}
                   disabled={!draft.trim() || disabled}
-                  onClick={() => onSaveEdit(message.id, draft)}
+                  onClick={() => onSaveEditOnly(message.id, draft)}
                 >
-                  Save
+                  Save only
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  data-chat-message-edit-generate={message.id}
+                  disabled={!draft.trim() || disabled}
+                  onClick={() => onSaveEditAndGenerate(message.id, draft)}
+                >
+                  {generateSaveLabel}
                 </Button>
               </div>
             </div>
@@ -251,6 +283,45 @@ function ChatBubbleImpl({
               ))}
             </div>
           )}
+
+          {branchMeta.count > 1 && !isEditing && (
+            <div
+              className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground"
+              data-chat-branch-pager={message.id}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-chat-branch-prev={message.id}
+                disabled={disabled || branchMeta.index <= 0}
+                onClick={() => {
+                  const previousId = branchMeta.siblingIds[branchMeta.index - 1]
+                  if (previousId) onSelectBranch(previousId)
+                }}
+                aria-label="Previous branch"
+              >
+                <ChevronLeft className="size-3.5" />
+              </Button>
+              <span data-chat-branch-label={message.id}>
+                {branchMeta.index + 1} / {branchMeta.count}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-chat-branch-next={message.id}
+                disabled={disabled || branchMeta.index >= branchMeta.count - 1}
+                onClick={() => {
+                  const nextId = branchMeta.siblingIds[branchMeta.index + 1]
+                  if (nextId) onSelectBranch(nextId)
+                }}
+                aria-label="Next branch"
+              >
+                <ChevronRight className="size-3.5" />
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -259,7 +330,7 @@ function ChatBubbleImpl({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete message?</AlertDialogTitle>
             <AlertDialogDescription>
-              Choose whether to remove only this message or rewind the conversation from here.
+              Choose how this message should be removed from the conversation.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="sm:flex-col">
@@ -270,6 +341,14 @@ function ChatBubbleImpl({
             >
               Delete this message
             </AlertDialogAction>
+            {branchMeta.count > 1 && (
+              <AlertDialogAction
+                data-chat-message-delete-branch={message.id}
+                onClick={() => onDelete(message.id, 'branch')}
+              >
+                Delete this regeneration
+              </AlertDialogAction>
+            )}
             <AlertDialogAction
               data-chat-message-delete-from={message.id}
               onClick={() => onDelete(message.id, 'from_here')}
@@ -277,6 +356,22 @@ function ChatBubbleImpl({
               Delete this and everything after
             </AlertDialogAction>
           </AlertDialogFooter>
+          <div className="space-y-2 px-1 pb-1 text-xs text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Delete this message</span> removes the
+              turn and any alternate replies beneath it, while keeping the active continuation.
+            </p>
+            {branchMeta.count > 1 && (
+              <p>
+                <span className="font-medium text-foreground">Delete this regeneration</span>{' '}
+                removes only this alternative and its branch. Other regenerations stay available.
+              </p>
+            )}
+            <p>
+              <span className="font-medium text-foreground">Delete this and everything after</span>{' '}
+              permanently removes this message and all following turns, including branches.
+            </p>
+          </div>
         </AlertDialogContent>
       </AlertDialog>
     </>
@@ -292,8 +387,11 @@ export const ChatBubble = memo(
     previous.message === next.message &&
     previous.onStartEdit === next.onStartEdit &&
     previous.onCancelEdit === next.onCancelEdit &&
-    previous.onSaveEdit === next.onSaveEdit &&
-    previous.onDelete === next.onDelete
+    previous.onSaveEditOnly === next.onSaveEditOnly &&
+    previous.onSaveEditAndGenerate === next.onSaveEditAndGenerate &&
+    previous.isActivePathLeaf === next.isActivePathLeaf &&
+    previous.onDelete === next.onDelete &&
+    previous.branchMeta === next.branchMeta
 )
 
 function TypingIndicator({ compact = false }: { compact?: boolean }) {

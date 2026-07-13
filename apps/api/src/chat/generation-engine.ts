@@ -10,9 +10,16 @@ import { normalizeDocumentPath } from '@lucentdocs/shared'
 import { getLanguageModel } from '../ai/index.js'
 import { assertPromptProtocolMode, resolveChatPrompt } from '../ai/prompt-engine.js'
 import { configManager } from '../config/runtime.js'
+import type { ChatThreadPayload } from '../core/services/chat-thread-payload.js'
 import type { ServiceSet } from '../core/services/types.js'
 import type { YjsRuntime } from '../yjs/runtime.js'
 import { projectSyncBus } from '../trpc/project-sync.js'
+import {
+  pathToUIMessages,
+  resolveActivePath,
+  setAssistantOnActiveLeaf,
+  toTreeSnapshot,
+} from './tree.js'
 import { buildEditTools, buildReadTools } from './tools.js'
 import { DocumentEditSession } from './tools/document-edit-session.js'
 import {
@@ -21,6 +28,7 @@ import {
   readResponseError,
   serializeConversationForPrompt,
   toModelMessages,
+  toPersistedThread,
   type PersistedChatThread,
 } from './utils.js'
 
@@ -33,13 +41,14 @@ export interface ChatScope {
 export interface GenerationOptions {
   scope: ChatScope
   baseThread: PersistedChatThread
-  baseMessages: UIMessage[]
+  promptMessages: UIMessage[]
   rollbackThread: PersistedChatThread
-  rollbackMessages: UIMessage[]
+  abortRestoreThread: PersistedChatThread
   selectionFrom?: number
   selectionTo?: number
   editingEnabled: boolean
   generationId: string
+  assistantNodeId: string
   abortController: AbortController
 }
 
@@ -51,7 +60,7 @@ export interface GenerationCallbacks {
     generationId: string | null
   }) => void
   onComplete: (result: {
-    thread: PersistedChatThread | null
+    thread: PersistedChatThread
     generating: boolean
     generationId: string | null
     error: string | null
@@ -115,6 +124,50 @@ async function waitForAbortableDelay(controller: AbortController, delayMs: numbe
   })
 }
 
+function threadToPayload(thread: PersistedChatThread): ChatThreadPayload {
+  return {
+    v: 1,
+    settings: thread.settings,
+    nodes: thread.tree.nodes,
+    rootChildIds: thread.tree.rootChildIds,
+    selectedRootChildId: thread.tree.selectedRootChildId,
+  }
+}
+
+function buildProgressThread(
+  baseThread: PersistedChatThread,
+  assistantNodeId: string,
+  assistantMessage: UIMessage | null
+): PersistedChatThread {
+  let payload = threadToPayload(baseThread)
+  if (assistantMessage) {
+    payload = setAssistantOnActiveLeaf(
+      payload,
+      assistantNodeId,
+      assistantMessage.parts as unknown[]
+    )
+  }
+
+  const path = resolveActivePath(payload)
+  return {
+    ...baseThread,
+    messages: pathToUIMessages(path),
+    tree: toTreeSnapshot(payload),
+    updatedAt: Date.now(),
+  }
+}
+
+function extractAssistantParts(message: UIMessage | null): unknown[] {
+  if (!message) return [{ type: 'text', text: '' }]
+  return message.parts as unknown[]
+}
+
+function toPersistedFromService(
+  saved: NonNullable<Awaited<ReturnType<ServiceSet['chats']['getById']>>>
+): PersistedChatThread {
+  return toPersistedThread(saved)!
+}
+
 export class GenerationEngine {
   #services: ServiceSet
   #yjsRuntime: YjsRuntime
@@ -124,29 +177,51 @@ export class GenerationEngine {
     this.#yjsRuntime = yjsRuntime
   }
 
-  /**
-   * Streams a single chat response and always attempts to persist the terminal
-   * thread state, including partial assistant output on abort.
-   */
+  async #resolveFinalThread(
+    scope: ChatScope,
+    options: {
+      saved: Awaited<ReturnType<ServiceSet['chats']['getById']>> | null
+      rollbackThread: PersistedChatThread
+      baseThread: PersistedChatThread
+    }
+  ): Promise<PersistedChatThread> {
+    if (options.saved) {
+      return toPersistedFromService(options.saved)
+    }
+
+    const reloaded = await this.#services.chats.getById(
+      scope.projectId,
+      scope.documentId,
+      scope.chatId
+    )
+    if (reloaded) {
+      return toPersistedFromService(reloaded)
+    }
+
+    return options.rollbackThread ?? options.baseThread
+  }
+
   async runGeneration(options: GenerationOptions, callbacks: GenerationCallbacks): Promise<void> {
     const {
       scope,
       baseThread,
-      baseMessages,
+      promptMessages,
       rollbackThread,
-      rollbackMessages,
+      abortRestoreThread,
       selectionFrom,
       selectionTo,
       editingEnabled,
       generationId,
+      assistantNodeId,
       abortController,
     } = options
 
     let latestAssistantMessage: UIMessage | null = null
-    let finalMessages = baseMessages
     let completionError: string | null = null
     let chunkForwardTask: Promise<void> | null = null
     let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null = null
+    let shouldPersistAssistant = false
+    const wasAborted = () => abortController.signal.aborted
 
     try {
       const currentDocument = await this.#services.documents.getForProject(
@@ -163,16 +238,16 @@ export class GenerationEngine {
       if (isTestRuntime()) {
         const delayMs = resolveTestChatDelayMs()
         await waitForAbortableDelay(abortController, delayMs)
-        if (!abortController.signal.aborted) {
-          const promptSeed = extractMessageText(baseMessages[baseMessages.length - 1])
-          const assistantMessage: UIMessage = {
-            id: `assistant-${generationId}`,
+        if (!wasAborted()) {
+          const promptSeed = extractMessageText(promptMessages[promptMessages.length - 1])
+          latestAssistantMessage = {
+            id: assistantNodeId,
             role: 'assistant',
             parts: [{ type: 'text', text: resolveTestChatResponse(promptSeed) }],
           }
-          finalMessages = [...baseMessages, assistantMessage]
+          shouldPersistAssistant = true
           callbacks.onProgress({
-            thread: { ...baseThread, messages: finalMessages, updatedAt: Date.now() },
+            thread: buildProgressThread(baseThread, assistantNodeId, latestAssistantMessage),
             generating: true,
             generationId,
           })
@@ -192,7 +267,7 @@ export class GenerationEngine {
       const rendered = resolveChatPrompt(
         currentFilePath,
         fileContext.parts,
-        serializeConversationForPrompt(baseMessages),
+        serializeConversationForPrompt(promptMessages),
         fileContext.annotationContent,
         editingEnabled
       )
@@ -202,7 +277,7 @@ export class GenerationEngine {
         projectId: scope.projectId,
         documentId: scope.documentId,
       })
-      const modelMessages = await convertToModelMessages(toModelMessages(baseMessages))
+      const modelMessages = await convertToModelMessages(toModelMessages(promptMessages))
       const runtimeLimits = configManager.getConfig().limits
 
       const result = streamText({
@@ -223,8 +298,6 @@ export class GenerationEngine {
         },
       })
 
-      // One branch forwards raw UI chunks to observers while the other branch is
-      // consumed into normalized assistant messages for persistence.
       const [chunkStream, messageStream] = uiMessageStream.tee()
       chunkReader = chunkStream.getReader()
       chunkForwardTask = (async () => {
@@ -243,7 +316,7 @@ export class GenerationEngine {
             }
           }
         } catch (error) {
-          if (!isAbortError(error) && !abortController.signal.aborted) {
+          if (!isAbortError(error) && !wasAborted()) {
             console.error('Chat UI chunk forwarding failed', error)
           }
         } finally {
@@ -255,34 +328,24 @@ export class GenerationEngine {
         stream: messageStream,
         terminateOnError: true,
       })) {
-        const normalizedAssistant: UIMessage = {
+        latestAssistantMessage = {
           ...assistantMessage,
-          id: `assistant-${generationId}`,
+          id: assistantNodeId,
         }
-        latestAssistantMessage = normalizedAssistant
-        finalMessages = [...baseMessages, normalizedAssistant]
+        shouldPersistAssistant = true
 
         callbacks.onProgress({
-          thread: { ...baseThread, messages: finalMessages, updatedAt: Date.now() },
+          thread: buildProgressThread(baseThread, assistantNodeId, latestAssistantMessage),
           generating: true,
           generationId,
         })
       }
-
-      finalMessages = latestAssistantMessage
-        ? [...baseMessages, latestAssistantMessage]
-        : baseMessages
     } catch (error) {
-      if (!isAbortError(error) && !abortController.signal.aborted) {
+      if (!isAbortError(error) && !wasAborted()) {
         completionError = error instanceof Error ? error.message : 'Failed to get AI response'
         console.error('AI chat generation failed', error)
-        finalMessages = rollbackMessages
-      } else {
-        // Aborts intentionally keep any assistant text that was already emitted.
-        finalMessages = latestAssistantMessage
-          ? [...baseMessages, latestAssistantMessage]
-          : baseMessages
       }
+      shouldPersistAssistant = false
     } finally {
       if (chunkReader) {
         try {
@@ -300,21 +363,38 @@ export class GenerationEngine {
       }
 
       try {
-        const saved = await this.#services.chats.save(
-          scope.projectId,
-          scope.documentId,
-          scope.chatId,
-          finalMessages
-        )
+        let saved: Awaited<ReturnType<ServiceSet['chats']['attachAssistantToActiveLeaf']>> = null
 
-        if (!saved) {
-          callbacks.onComplete({
-            thread: null,
-            generating: false,
-            generationId: null,
-            error: completionError,
-          })
+        if (shouldPersistAssistant && latestAssistantMessage) {
+          saved = await this.#services.chats.attachAssistantToActiveLeaf(
+            scope.projectId,
+            scope.documentId,
+            scope.chatId,
+            assistantNodeId,
+            extractAssistantParts(latestAssistantMessage)
+          )
+        } else if (wasAborted()) {
+          saved = await this.#services.chats.savePayload(
+            scope.projectId,
+            scope.documentId,
+            scope.chatId,
+            threadToPayload(abortRestoreThread)
+          )
         } else {
+          saved = await this.#services.chats.getById(
+            scope.projectId,
+            scope.documentId,
+            scope.chatId
+          )
+        }
+
+        const finalThread = await this.#resolveFinalThread(scope, {
+          saved,
+          rollbackThread,
+          baseThread,
+        })
+
+        if (saved) {
           projectSyncBus.publish({
             type: 'chats.changed',
             projectId: scope.projectId,
@@ -323,30 +403,19 @@ export class GenerationEngine {
             changedChatIds: [saved.id],
             deletedChatIds: [],
           })
-
-          callbacks.onComplete({
-            thread: {
-              id: saved.id,
-              title: saved.title,
-              messages: saved.messages,
-              settings: saved.settings,
-              createdAt: saved.createdAt,
-              updatedAt: saved.updatedAt,
-            },
-            generating: false,
-            generationId: null,
-            error: completionError,
-          })
         }
+
+        callbacks.onComplete({
+          thread: finalThread,
+          generating: false,
+          generationId: null,
+          error: completionError,
+        })
       } catch (error) {
         console.error('Failed to finalize chat generation', error)
 
         callbacks.onComplete({
-          thread: {
-            ...(completionError ? rollbackThread : baseThread),
-            messages: finalMessages,
-            updatedAt: Date.now(),
-          },
+          thread: rollbackThread ?? baseThread,
           generating: false,
           generationId: null,
           error: completionError,
