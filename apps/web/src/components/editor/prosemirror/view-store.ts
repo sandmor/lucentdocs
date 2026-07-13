@@ -31,3 +31,7 @@ export function subscribeEditorView(view: EditorView, listener: EditorViewListen
     }
   }
 }
+
+if (import.meta.hot) {
+  import.meta.hot.accept()
+}

@@ -528,17 +528,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       bubblePresenceRef.current?.destroy()
       bubblePresenceRef.current = null
 
-      if (providerRef.current) {
-        providerRef.current.disconnect()
-        providerRef.current = null
-      }
-
       view.dom.removeEventListener('focusin', handleViewFocusIn)
       view.dom.removeEventListener('focusout', handleViewFocusOut)
       document.removeEventListener('selectionchange', syncSelectionFromDOM)
       view.dom.removeEventListener('mouseup', syncSelectionFromDOM)
       view.destroy()
       viewRef.current = null
+
+      if (providerRef.current) {
+        providerRef.current.disconnect()
+        providerRef.current = null
+      }
       setPresenceAwareness(null)
       setNotesMap(null)
       notesMapRef.current = null

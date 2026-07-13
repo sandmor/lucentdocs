@@ -28,3 +28,7 @@ export function subscribeAIState(view: EditorView, cb: AIStateListener) {
 export function getAIStateSnapshot(view: EditorView): AIWriterState | null {
   return aiWriterPluginKey.getState(view.state) ?? null
 }
+
+if (import.meta.hot) {
+  import.meta.hot.accept()
+}

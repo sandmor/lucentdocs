@@ -166,3 +166,7 @@ export const blockDragPlugin = new Plugin({
     },
   },
 })
+
+if (import.meta.hot) {
+  import.meta.hot.accept()
+}

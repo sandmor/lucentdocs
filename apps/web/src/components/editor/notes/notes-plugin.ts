@@ -66,3 +66,7 @@ export function updateNoteDecorations(
   lastDecorationKeys.set(view, cacheKey)
   view.dispatch(view.state.tr.setMeta(notesPluginKey, decorations).setMeta('addToHistory', false))
 }
+
+if (import.meta.hot) {
+  import.meta.hot.accept()
+}

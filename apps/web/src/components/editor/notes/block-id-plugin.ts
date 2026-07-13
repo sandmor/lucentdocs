@@ -53,3 +53,7 @@ export function getBlockIdAtPos(doc: PMNode, pos: number): string | null {
   const id = block.attrs.id
   return typeof id === 'string' && id.length > 0 ? id : null
 }
+
+if (import.meta.hot) {
+  import.meta.hot.accept()
+}

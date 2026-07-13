@@ -157,3 +157,7 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
 export function finalizeCollaborationState(state: EditorState): void {
   installYjsSelectionPatch(state)
 }
+
+if (import.meta.hot) {
+  import.meta.hot.accept()
+}

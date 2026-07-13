@@ -638,3 +638,7 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
     },
   })
 }
+
+if (import.meta.hot) {
+  import.meta.hot.accept()
+}
