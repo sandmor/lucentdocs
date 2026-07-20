@@ -246,7 +246,7 @@ export function applyDocumentManuscriptEdits(
 }
 
 export function assertMarkerAnchorsPreserved(
-  beforeDoc: ProseMirrorNode,
+  _beforeDoc: ProseMirrorNode,
   afterDoc: ProseMirrorNode,
   markerAnchoredIds: ReadonlySet<string>
 ) {

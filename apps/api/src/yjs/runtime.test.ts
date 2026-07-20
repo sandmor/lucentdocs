@@ -7,6 +7,7 @@ import { createYjsRuntime, type YjsRuntime } from './runtime.js'
 import { createTestAdapter, type TestAdapter } from '../testing/factory.js'
 import type { DocumentsService } from '../core/services/documents.service.js'
 import { nanoid } from 'nanoid'
+import { hydrateNotesMap, notesMapToRecords } from './document-notes.js'
 
 const makeDoc = (text: string) => ({
   type: 'doc',
@@ -66,6 +67,33 @@ describe('YjsRuntime', () => {
     expect(content).toBeTruthy()
     const parsed = JSON.parse(content)
     expect(JSON.stringify(parsed)).toContain('persisted')
+  })
+
+  test('clears document notes in the same transform when requested', async () => {
+    const doc = await documentsService.create('clear-notes.md')
+    await yjsRuntime.ensureDocumentLoaded(doc.id)
+    const liveDoc = docs.get(doc.id)
+    if (!liveDoc) throw new Error('Expected live Yjs document.')
+
+    hydrateNotesMap(liveDoc, [
+      {
+        id: 'note-clear',
+        documentId: doc.id,
+        anchorKind: 'block',
+        anchorId: 'block-clear',
+        content: JSON.stringify({ type: 'doc', content: [{ type: 'paragraph' }] }),
+        authorUserId: 'user-1',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    await yjsRuntime.applyProsemirrorTransform(doc.id, {
+      clearNotes: true,
+      transform: (currentDoc) => ({ changed: true, nextDoc: currentDoc, result: null }),
+    })
+
+    expect(notesMapToRecords(doc.id, liveDoc)).toHaveLength(0)
   })
 
   test('initialization is idempotent for new docs', async () => {

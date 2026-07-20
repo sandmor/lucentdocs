@@ -1,0 +1,10 @@
+Creates a project document or writes an entire document manuscript.
+
+Usage:
+- Use write when creating a missing file, filling an empty file, or when the user explicitly requests a complete rewrite.
+- For an existing file, you MUST call read on the same path first. Writes fail if the document changed since that read.
+- For a non-empty or annotated existing file, set overwrite=true. This replaces all manuscript text and removes its author annotations.
+- Use edit instead for targeted replacements in existing text.
+- path is project-relative with no leading slash. Missing parent directories are created implicitly by the project document tree.
+- content is manuscript Markdown only. Do not include LucentDocs annotation or tool markup tags.
+- A new path must not collide with an existing file, directory, or ancestor file. Paths are never auto-renamed.

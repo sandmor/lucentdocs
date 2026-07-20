@@ -43,6 +43,7 @@ const documentsChangedEventSchema = eventBaseSchema.extend({
     'documents.delete-directory',
     'documents.set-default',
     'chat.edit',
+    'chat.write',
   ]),
 })
 

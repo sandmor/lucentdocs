@@ -6,6 +6,7 @@ import type { BuildEditToolsContext, BuildReadToolsContext, ToolScope } from './
 
 export { buildInlineZoneWriteTools } from './write.js'
 export { buildEditTools } from './edit.js'
+export { buildWriteTools } from './project-write.js'
 export type { BuildEditToolsContext, BuildReadToolsContext, ToolScope }
 
 export function buildReadTools(context: BuildReadToolsContext) {

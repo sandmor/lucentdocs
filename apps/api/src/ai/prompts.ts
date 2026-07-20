@@ -255,7 +255,7 @@ export function createDefaultPromptDefinitions(
         },
         defaults: {
           temperature: continueTemp,
-          maxOutputTokens: 2048,
+          maxOutputTokens: defaultMaxTokens,
         },
       },
       true
@@ -415,7 +415,7 @@ export function buildChatVariables(
     : 'Use search (active file by default), whole_project search, grep, glob, or read when you need to inspect documents or find specific content.'
 
   const editingInstruction = editingEnabled
-    ? ' Editing is enabled for this chat. Use read on a path before calling edit. Match manuscript text only in edit (no line-number prefixes, no <annotation> tags, no annotation bodies). Text inside <annotation> wrappers in read output is still manuscript and editable. Unicode punctuation differences such as curly quotes and dashes are normalized automatically when matching. Prefer edit over describing changes in prose.'
+    ? ' Editing is enabled for this chat. Use read on an existing path before calling edit or write. Use edit for targeted replacements and write to create a missing document, populate an empty document, or intentionally rewrite a whole document (set overwrite=true for a non-empty or annotated document). Match manuscript text only in edit (no line-number prefixes, no <annotation> tags, no annotation bodies). Text inside <annotation> wrappers in read output is still manuscript and editable. Unicode punctuation differences such as curly quotes and dashes are normalized automatically when matching. Prefer the appropriate write tool over describing changes in prose.'
     : ''
 
   const chatInstruction = `${baseInstruction}${editingInstruction}`

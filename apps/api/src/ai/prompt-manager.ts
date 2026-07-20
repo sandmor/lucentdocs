@@ -97,13 +97,25 @@ function normalizeStore(store: PromptStore): PromptStore {
 function ensureDefaultPromptsAndBindings(store: PromptStore): PromptStore {
   const defaults = createDefaultPromptBindings()
   const prompts = [...store.prompts]
+  const nowIso = new Date().toISOString()
 
-  for (const systemPrompt of createDefaultPromptDefinitions(
-    new Date().toISOString(),
-    getAiDefaults()
-  )) {
-    if (!prompts.some((prompt) => prompt.id === systemPrompt.id)) {
+  for (const systemPrompt of createDefaultPromptDefinitions(nowIso, getAiDefaults())) {
+    const existingIndex = prompts.findIndex((prompt) => prompt.id === systemPrompt.id)
+    if (existingIndex < 0) {
       prompts.push(systemPrompt)
+      continue
+    }
+
+    const existing = prompts[existingIndex]
+    if (existing.isSystem) {
+      const updatedAt = promptEqualsEditable(existing, systemPrompt)
+        ? existing.updatedAt
+        : nowIso
+      prompts[existingIndex] = {
+        ...systemPrompt,
+        createdAt: existing.createdAt,
+        updatedAt,
+      }
     }
   }
 

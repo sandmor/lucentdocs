@@ -1,6 +1,7 @@
 export {
   buildEditTools,
   buildInlineZoneWriteTools,
+  buildWriteTools,
   buildReadTools,
   hasValidToolScope,
   type BuildEditToolsContext,

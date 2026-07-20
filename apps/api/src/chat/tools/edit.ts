@@ -8,6 +8,7 @@ import {
 } from './document-edit-plan.js'
 import { hashManuscriptText, projectDocumentManuscript } from './document-manuscript.js'
 import { EditGuardError } from './document-edit-session.js'
+import { withDocumentLock } from './document-lock.js'
 import { EditToolError } from './edit-errors.js'
 import { normalizeEditNeedle, validateEditReplacement } from './edit-input.js'
 import { matchManuscript } from './manuscript-edit-match.js'
@@ -20,28 +21,6 @@ import {
 } from './structured-output.js'
 import { loadProjectFileIndex, resolveNormalizedPath, suggestPaths } from './paths.js'
 import type { BuildEditToolsContext } from './types.js'
-
-const documentLocks = new Map<string, Promise<void>>()
-
-async function withDocumentLock<T>(documentId: string, task: () => Promise<T>): Promise<T> {
-  const previous = documentLocks.get(documentId) ?? Promise.resolve()
-  let release!: () => void
-  const gate = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  const chain = previous.then(() => gate)
-  documentLocks.set(documentId, chain)
-  await previous
-
-  try {
-    return await task()
-  } finally {
-    release()
-    if (documentLocks.get(documentId) === chain) {
-      documentLocks.delete(documentId)
-    }
-  }
-}
 
 function formatEditOutput(options: {
   path: string
@@ -123,8 +102,8 @@ export function createEditTool(context: BuildEditToolsContext) {
       if (normalizedNeedle.text.length === 0) {
         throw new EditToolError(
           'not_found',
-          'old_string is empty after removing annotation markup. Provide exact manuscript text from read output.',
-          { hint: 'Copy manuscript text only, without line numbers or <annotation> tags.' }
+          'old_string is empty after removing annotation markup. Use write to populate an empty document or replace a whole document.',
+          { hint: 'Use write with content; use overwrite=true for an existing non-empty document.' }
         )
       }
 

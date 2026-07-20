@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { docs } from '@y/websocket-server/utils'
 import {
   INLINE_AI_MAX_ZONE_CHOICES,
   parseContent,
@@ -20,15 +21,18 @@ import {
   EDIT_DESCRIPTION,
   READ_DESCRIPTION,
   SEARCH_DESCRIPTION,
+  WRITE_DESCRIPTION,
 } from './tools/descriptions/index.js'
 import {
   buildEditTools,
   buildInlineZoneWriteTools,
   buildReadTools,
+  buildWriteTools,
   hasValidToolScope,
 } from './tools.js'
 import { DocumentEditSession } from './tools/document-edit-session.js'
 import { createYjsRuntime, type YjsRuntime } from '../yjs/runtime.js'
+import { hydrateNotesMap, notesMapToRecords } from '../yjs/document-notes.js'
 import {
   createEmptyChatThreadPayload,
   serializeThreadPayload,
@@ -1327,6 +1331,117 @@ describe('buildEditTools', () => {
     expect(result.replacements).toBe(1)
     const json = await yjsRuntime.getDocumentProsemirrorJson(document.id)
     expect(JSON.stringify(json)).toContain('Goodbye world.')
+  })
+})
+
+describe('buildWriteTools', () => {
+  test('write creates a missing project document', async () => {
+    const adapter = createTestAdapter()
+    const yjsRuntime = createTestYjsRuntime(adapter)
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const active = await adapter.services.documents.createForProject(
+      project.id,
+      'Chapter 1',
+      toEditorContent('Existing chapter.')
+    )
+    if (!active) throw new Error('Expected active document.')
+
+    const writeExecute = buildWriteTools(
+      createEditContext(adapter, project.id, active.id, yjsRuntime)
+    ).write.execute as
+      | ((input: { path: string; content: string; overwrite?: boolean }) => Promise<{ action: string }>)
+      | undefined
+    expect(writeExecute).toBeDefined()
+    if (!writeExecute) return
+
+    const result = await writeExecute({ path: 'chapters/Chapter 2', content: 'The storm returned.' })
+    expect(result.action).toBe('created')
+
+    const documents = await adapter.services.documents.listForProject(project.id)
+    const created = documents.find((document) => document.title === 'chapters/Chapter 2')
+    expect(created).toBeDefined()
+    if (!created) return
+    const stored = await adapter.services.documents.getForProject(project.id, created.id)
+    expect(stored?.content).toContain('The storm returned.')
+  })
+
+  test('write populates a read empty document and requires overwrite for existing content', async () => {
+    const adapter = createTestAdapter()
+    const yjsRuntime = createTestYjsRuntime(adapter)
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'Chapter 2',
+      toEditorContent('')
+    )
+    if (!document) throw new Error('Expected test document.')
+
+    const context = createEditContext(adapter, project.id, document.id, yjsRuntime)
+    const readExecute = buildReadTools(context).read.execute as
+      | ((input: { path: string }) => Promise<unknown>)
+      | undefined
+    const writeExecute = buildWriteTools(context).write.execute as
+      | ((input: { path: string; content: string; overwrite?: boolean }) => Promise<{ action: string }>)
+      | undefined
+    expect(readExecute).toBeDefined()
+    expect(writeExecute).toBeDefined()
+    if (!readExecute || !writeExecute) return
+
+    await readExecute({ path: 'Chapter 2' })
+    await expect(writeExecute({ path: 'Chapter 2', content: 'A new beginning.' })).resolves.toMatchObject({
+      action: 'populated',
+    })
+    await expect(writeExecute({ path: 'Chapter 2', content: 'A complete rewrite.' })).rejects.toThrow(
+      /overwrite=true/
+    )
+    await expect(
+      writeExecute({ path: 'Chapter 2', content: 'A complete rewrite.', overwrite: true })
+    ).resolves.toMatchObject({ action: 'overwritten' })
+
+    const updated = await adapter.services.documents.getForProject(project.id, document.id)
+    expect(updated?.content).toContain('A complete rewrite.')
+  })
+
+  test('write protects unflushed live annotations and reports their deletion', async () => {
+    const adapter = createTestAdapter()
+    const yjsRuntime = createTestYjsRuntime(adapter)
+    const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
+    const document = await adapter.services.documents.createForProject(project.id, 'Chapter 2', toEditorContent(''))
+    if (!document) throw new Error('Expected test document.')
+
+    await yjsRuntime.ensureDocumentLoaded(document.id)
+    const liveDoc = docs.get(document.id)
+    if (!liveDoc) throw new Error('Expected live Yjs document.')
+    hydrateNotesMap(liveDoc, [
+      {
+        id: 'unflushed-note',
+        documentId: document.id,
+        anchorKind: 'block',
+        anchorId: 'block-1',
+        content: JSON.stringify({ type: 'doc', content: [{ type: 'paragraph' }] }),
+        authorUserId: 'user-1',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    expect(await adapter.services.documentNotes.listByDocumentId(document.id)).toHaveLength(0)
+
+    const context = createEditContext(adapter, project.id, document.id, yjsRuntime)
+    const readExecute = buildReadTools(context).read.execute as ((input: { path: string }) => Promise<unknown>)
+    const writeExecute = buildWriteTools(context).write.execute as unknown as (
+      input: { path: string; content: string; overwrite?: boolean }
+    ) => Promise<{ annotationsDeleted: number }>
+    await readExecute({ path: 'Chapter 2' })
+
+    await expect(writeExecute({ path: 'Chapter 2', content: 'Fresh prose.' })).rejects.toThrow(/overwrite=true/)
+    const result = await writeExecute({ path: 'Chapter 2', content: 'Fresh prose.', overwrite: true })
+    expect(result.annotationsDeleted).toBe(1)
+    expect(notesMapToRecords(document.id, liveDoc)).toHaveLength(0)
+  })
+
+  test('write description and edit guidance cover empty-document writes', () => {
+    expect(WRITE_DESCRIPTION).toContain('empty file')
+    expect(EDIT_DESCRIPTION).toContain('Use write, not edit')
   })
 })
 

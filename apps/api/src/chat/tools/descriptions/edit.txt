@@ -14,6 +14,7 @@ Usage:
 - The edit fails if old_string matches multiple times unless you provide more surrounding context or set replace_all=true.
 - Use replace_all when renaming a term across the whole file.
 - After a successful edit, call read again if you need to verify the updated passage or annotations.
+- Use write, not edit, to populate an empty document, create a new document, or intentionally replace a whole document.
 
 Sibling tools:
 - Use read to load exact manuscript text and annotation markers before editing.

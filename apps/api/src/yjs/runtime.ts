@@ -26,6 +26,8 @@ import {
   reconcileNotesAfterDocumentEdit,
   snapshotsFromRecords,
   getNotesMap,
+  serializeNotesMap,
+  type SerializedNoteFromYjs,
 } from './document-notes.js'
 
 export { setupWSConnection }
@@ -50,6 +52,10 @@ interface ProsemirrorTransformResult<T> {
   changed: boolean
   nextDoc: ProseMirrorNode
   result: T
+}
+
+interface ProsemirrorTransformContext {
+  notes: readonly SerializedNoteFromYjs[]
 }
 
 export interface YjsDocumentVersion {
@@ -184,7 +190,11 @@ export class YjsRuntime {
     documentName: string,
     options: {
       origin?: unknown
-      transform: (currentDoc: ProseMirrorNode) => ProsemirrorTransformResult<T>
+      clearNotes?: boolean
+      transform: (
+        currentDoc: ProseMirrorNode,
+        context: ProsemirrorTransformContext
+      ) => ProsemirrorTransformResult<T>
     }
   ): Promise<ProsemirrorTransformResult<T>> {
     this.#ensurePersistenceInitialized()
@@ -196,7 +206,7 @@ export class YjsRuntime {
     liveDoc.transact(() => {
       const root = liveDoc.getXmlFragment('prosemirror')
       const currentDoc = yXmlFragmentToProseMirrorRootNode(root, schema)
-      transformed = options.transform(currentDoc)
+      transformed = options.transform(currentDoc, { notes: serializeNotesMap(liveDoc) })
       if (!transformed.changed) {
         return
       }
@@ -205,6 +215,10 @@ export class YjsRuntime {
         mapping: new Map(),
         isOMark: new Map(),
       })
+      if (options.clearNotes) {
+        const notes = getNotesMap(liveDoc)
+        for (const noteId of notes.keys()) notes.delete(noteId)
+      }
     }, options.origin)
 
     if (!transformed) {

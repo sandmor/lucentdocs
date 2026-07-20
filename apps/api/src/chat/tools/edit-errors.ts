@@ -6,6 +6,10 @@ export type EditErrorCode =
   | 'input_too_large'
   | 'reserved_markup'
   | 'no_changes'
+  | 'invalid_path'
+  | 'path_conflict'
+  | 'overwrite_required'
+  | 'markdown_parse_failed'
 
 export class EditToolError extends Error {
   readonly code: EditErrorCode

@@ -20,7 +20,7 @@ import {
   setAssistantOnActiveLeaf,
   toTreeSnapshot,
 } from './tree.js'
-import { buildEditTools, buildReadTools } from './tools.js'
+import { buildEditTools, buildReadTools, buildWriteTools } from './tools.js'
 import { DocumentEditSession } from './tools/document-edit-session.js'
 import {
   buildCurrentFileContextWithAnnotations,
@@ -437,6 +437,7 @@ export class GenerationEngine {
     return {
       ...tools,
       ...buildEditTools(context),
+      ...buildWriteTools(context),
     }
   }
 }
