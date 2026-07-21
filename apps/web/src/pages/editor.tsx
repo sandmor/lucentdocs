@@ -869,6 +869,7 @@ export function EditorPage() {
       utils.documents.get,
       utils.documents.list,
       utils.documents.versions,
+      utils.chat.getById,
       utils.chat.listByDocument,
       utils.projects.get,
     ]

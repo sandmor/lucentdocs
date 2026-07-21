@@ -502,8 +502,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       activeThreadId,
       documentId,
       editMessageAndGenerateMutation,
-      editorSelection?.from,
-      editorSelection?.to,
+      editorSelection,
       isGenerating,
       projectId,
     ]
@@ -589,8 +588,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     [
       activeThreadId,
       documentId,
-      editorSelection?.from,
-      editorSelection?.to,
+      editorSelection,
       isGenerating,
       projectId,
       regenerateMutation,

@@ -119,7 +119,7 @@ export function InlineAIControls({
       if (dismissedRestoreSessionIds[sessionId]) return []
       return [{ sessionId, session }]
     })
-  }, [dismissedRestoreSessionIds, sessionsById, view, state?.zones])
+  }, [dismissedRestoreSessionIds, sessionsById, view])
 
   if (!view) return null
 

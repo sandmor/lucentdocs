@@ -205,8 +205,6 @@ fn create_memory_temp_db() -> StorageResult<tempfile::NamedTempFile> {
 fn resolve_sqlite_url(db_path: &str) -> String {
   if db_path.starts_with("sqlite:") {
     db_path.to_string()
-  } else if Path::new(db_path).is_absolute() {
-    format!("sqlite://{}", db_path)
   } else {
     format!("sqlite://{}", db_path)
   }

@@ -150,8 +150,7 @@ fn build_type_filter(types: Option<&[String]>) -> (String, Vec<String>) {
   match types {
     None | Some([]) => (String::new(), Vec::new()),
     Some(values) => {
-      let placeholders = std::iter::repeat("?")
-        .take(values.len())
+      let placeholders = std::iter::repeat_n("?", values.len())
         .collect::<Vec<_>>()
         .join(", ");
       (format!(" AND type IN ({placeholders})"), values.to_vec())
@@ -586,8 +585,7 @@ pub async fn get_by_type_and_dedupe_keys(
     return Ok(Vec::new());
   }
 
-  let placeholders = std::iter::repeat("?")
-    .take(dedupe_keys.len())
+  let placeholders = std::iter::repeat_n("?", dedupe_keys.len())
     .collect::<Vec<_>>()
     .join(", ");
   let sql = format!(
@@ -641,8 +639,7 @@ pub async fn delete_queued_by_type_and_dedupe_keys(
   }
 
   with_lock_retry(|| async {
-    let placeholders = std::iter::repeat("?")
-      .take(dedupe_keys.len())
+    let placeholders = std::iter::repeat_n("?", dedupe_keys.len())
       .collect::<Vec<_>>()
       .join(", ");
     let sql = format!(
