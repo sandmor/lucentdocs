@@ -10,6 +10,7 @@ import { authRouter } from './routers/auth.js'
 import { indexingRouter } from './routers/indexing.js'
 import { aiModelSelectionRouter } from './routers/aiModelSelection.js'
 import { embeddingModelSelectionRouter } from './routers/embeddingModelSelection.js'
+import { editorPreferencesRouter } from './routers/editorPreferences.js'
 
 export const appRouter = router({
   projects: projectsRouter,
@@ -23,6 +24,7 @@ export const appRouter = router({
   indexing: indexingRouter,
   aiModelSelection: aiModelSelectionRouter,
   embeddingModelSelection: embeddingModelSelectionRouter,
+  editorPreferences: editorPreferencesRouter,
 })
 
 export type AppRouter = typeof appRouter

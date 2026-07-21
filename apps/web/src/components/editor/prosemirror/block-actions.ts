@@ -80,6 +80,18 @@ export function handleBlockAction(
       insertAfter(codeBlock.create())
       break
     }
+    case 'insert-divider': {
+      const divider = schema.nodes.horizontal_rule
+      const paragraph = schema.nodes.paragraph
+      if (!divider || !paragraph) return
+      const insertPos = pos + node.nodeSize
+      const tr = state.tr.insert(insertPos, [divider.create(), paragraph.create()])
+      tr.setSelection(TextSelection.create(tr.doc, insertPos + 2))
+      tr.scrollIntoView()
+      dispatch(tr)
+      view.focus()
+      break
+    }
     case 'insert-unordered-list':
       insertListAfterBlock(view, pos, node, 'bullet')
       break

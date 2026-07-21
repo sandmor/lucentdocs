@@ -8,6 +8,7 @@ import type { EmbeddingIndexService } from './embeddingIndex.service.js'
 import type { AuthService } from './auth.service.js'
 import type { IndexingSettingsService } from './indexingSettings.service.js'
 import type { DocumentNotesService } from './documentNotes.service.js'
+import { createEditorPreferencesService } from './editorPreferences.service.js'
 
 export interface ServiceSet {
   projects: ProjectsService
@@ -20,4 +21,5 @@ export interface ServiceSet {
   indexingSettings: IndexingSettingsService
   embeddingIndex: EmbeddingIndexService
   auth: AuthService
+  editorPreferences: ReturnType<typeof createEditorPreferencesService>
 }

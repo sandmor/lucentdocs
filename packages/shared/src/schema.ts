@@ -160,6 +160,14 @@ const nodesWithBlockIds = listNodes
   .update('list_item', withBlockId(listNodes.get('list_item')!))
 
 const extendedNodes = nodesWithBlockIds
+  .update('horizontal_rule', {
+    ...nodesWithBlockIds.get('horizontal_rule')!,
+    // A divider is a structural block, not a text-editable replacement target.
+    // This keeps a click from producing a NodeSelection whose next keystroke
+    // would replace the divider with a paragraph.
+    atom: true,
+    selectable: false,
+  })
   .update('code_block', {
     content: 'text*',
     marks: '',

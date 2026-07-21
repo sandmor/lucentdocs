@@ -12,6 +12,7 @@ import type { AuthDataRepositoryPort } from './authData.port.js'
 import type { IndexingSettingsRepositoryPort } from './indexingSettings.port.js'
 import type { DocumentContentRepositoryPort } from './documentContent.port.js'
 import type { DocumentNotesRepositoryPort } from './documentNotes.port.js'
+import type { AppConfigRepositoryPort } from './appConfig.port.js'
 
 export interface RepositorySet {
   projects: ProjectsRepositoryPort
@@ -28,4 +29,5 @@ export interface RepositorySet {
   embeddingIndexQueue: EmbeddingIndexQueueRepositoryPort
   documentEmbeddings: DocumentEmbeddingsRepositoryPort
   authData: AuthDataRepositoryPort
+  appConfig: AppConfigRepositoryPort
 }

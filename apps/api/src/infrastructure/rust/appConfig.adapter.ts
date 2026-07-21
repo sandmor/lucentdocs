@@ -27,4 +27,12 @@ export class RustAppConfigRepository implements AppConfigRepositoryPort {
 
     this.engine.appConfigUpsertManySync(null, entries, updatedAt)
   }
+
+  readEntries(): Array<{ key: string; value: string }> {
+    return this.engine.appConfigReadAllSync()
+  }
+
+  upsertEntries(entries: Array<{ key: string; value: string }>, updatedAt: number): void {
+    if (entries.length) this.engine.appConfigUpsertManySync(null, entries, updatedAt)
+  }
 }

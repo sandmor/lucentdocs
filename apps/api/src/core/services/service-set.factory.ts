@@ -17,6 +17,7 @@ import {
 } from './embeddingIndex.service.js'
 import { createDocumentDeleteCleanupScheduler } from './document-delete-cleanup-scheduler.js'
 import { createAuthService } from './auth.service.js'
+import { createEditorPreferencesService } from './editorPreferences.service.js'
 import type { ServiceSet } from './types.js'
 
 export function createCoreServiceSet(dependencies: {
@@ -73,5 +74,6 @@ export function createCoreServiceSet(dependencies: {
     indexingSettings,
     embeddingIndex,
     auth: createAuthService(dependencies.repositories, dependencies.transaction),
+    editorPreferences: createEditorPreferencesService(dependencies.repositories),
   }
 }

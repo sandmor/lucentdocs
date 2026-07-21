@@ -1,4 +1,12 @@
-import { useRef, useEffect, forwardRef, useImperativeHandle, useState, useCallback, useMemo } from 'react'
+import {
+  useRef,
+  useEffect,
+  forwardRef,
+  useImperativeHandle,
+  useState,
+  useCallback,
+  useMemo,
+} from 'react'
 import type * as Y from 'yjs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EditorState, TextSelection } from 'prosemirror-state'
@@ -31,11 +39,7 @@ import { selectionTouchesCodeBlock, shouldShowSelectionCompose } from './inline/
 import { useInlineSessions } from './inline/use-sessions'
 import { useInlineSessionObserver } from './inline/use-inline-session-observer'
 import { resolveObservedInlineSessionIds } from './inline/resolve-observed-inline-session-ids'
-import {
-  aiWriterPluginKey,
-  getAIZones,
-  sessionIdsWithEndedZoneStreaming,
-} from './ai/writer-plugin'
+import { aiWriterPluginKey, getAIZones, sessionIdsWithEndedZoneStreaming } from './ai/writer-plugin'
 import { emitEditorViewChange } from './prosemirror/view-store'
 import {
   getLocalPresenceUser,
@@ -45,6 +49,10 @@ import {
 import { createYjsProvider, type ConnectionStatus } from '@/lib/yjs-provider'
 import { useEditorStore } from '@/lib/editor-store'
 import { trpc } from '@/lib/trpc'
+import {
+  DEFAULT_QUOTE_TYPING_PREFERENCES,
+  type QuoteTypingPreferences,
+} from './prosemirror/quote-typing-plugin'
 
 export interface EditorHandle {
   startAIContinuation: (at_doc_end: boolean) => void
@@ -174,6 +182,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [editorShell, setEditorShell] = useState<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const quoteTypingPreferencesRef = useRef<QuoteTypingPreferences>(DEFAULT_QUOTE_TYPING_PREFERENCES)
   const selectionToolbarInteractingRef = useRef(false)
   const inlineAIControlsInteractingRef = useRef(false)
   const aiControllerRef = useRef<AIWriterController | null>(null)
@@ -189,13 +198,24 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const setStoreIsEditorFocused = useEditorStore((s) => s.setIsEditorFocused)
 
   const [editorView, setEditorView] = useState<EditorView | null>(null)
+  const editorPreferencesQuery = trpc.editorPreferences.getDocument.useQuery(
+    { projectId: projectId ?? '', id: documentId },
+    { enabled: Boolean(projectId && documentId) }
+  )
+  useEffect(() => {
+    if (editorPreferencesQuery.data) {
+      quoteTypingPreferencesRef.current = editorPreferencesQuery.data.resolved
+    }
+  }, [editorPreferencesQuery.data])
   const [isLoading, setIsLoading] = useState(true)
   const [providerSessionKey, setProviderSessionKey] = useState(0)
   const [presenceAwareness, setPresenceAwareness] = useState<
     ReturnType<typeof createYjsProvider>['awareness'] | null
   >(null)
   const [notesMap, setNotesMap] = useState<Y.Map<unknown> | null>(null)
-  const [justCreatedNote, setJustCreatedNote] = useState<{ id: string; anchorId: string } | null>(null)
+  const [justCreatedNote, setJustCreatedNote] = useState<{ id: string; anchorId: string } | null>(
+    null
+  )
   const notesMapRef = useRef<Y.Map<unknown> | null>(null)
 
   // Selection range also needed as local state for overlay components
@@ -346,6 +366,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     const state = EditorState.create({
       doc: pmDoc,
       plugins: buildPlugins({
+        getQuoteTypingPreferences: () => quoteTypingPreferencesRef.current,
         getNotesMap: () => notesMapRef.current,
         collaboration: {
           yjsFragment: type,
@@ -703,15 +724,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         }}
         onUndoTurn={(zoneId) => {
           if (!viewRef.current || !aiControllerRef.current || !zoneId) return
-          const sessionId = getAIZones(viewRef.current).find((zone) => zone.id === zoneId)
-            ?.sessionId
+          const sessionId = getAIZones(viewRef.current).find(
+            (zone) => zone.id === zoneId
+          )?.sessionId
           if (!sessionId) return
           void aiControllerRef.current.undoSessionTurn(viewRef.current, sessionId)
         }}
         onRedoTurn={(zoneId) => {
           if (!viewRef.current || !aiControllerRef.current || !zoneId) return
-          const sessionId = getAIZones(viewRef.current).find((zone) => zone.id === zoneId)
-            ?.sessionId
+          const sessionId = getAIZones(viewRef.current).find(
+            (zone) => zone.id === zoneId
+          )?.sessionId
           if (!sessionId) return
           void aiControllerRef.current.redoSessionTurn(viewRef.current, sessionId)
         }}

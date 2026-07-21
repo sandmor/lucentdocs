@@ -1,6 +1,7 @@
 import {
   Check,
   Code2,
+  Minus,
   Copy,
   List,
   ListChecks,
@@ -57,6 +58,11 @@ export const insertBlockMenuItems: BlockMenuItem[] = [
     id: 'insert-code',
     label: 'Code block',
     icon: Code2,
+  },
+  {
+    id: 'insert-divider',
+    label: 'Divider',
+    icon: Minus,
   },
   {
     id: 'insert-unordered-list',
@@ -142,7 +148,10 @@ export const moreBlockMenuItems: BlockMenuItem[] = [
 ]
 
 export function getTurnIntoBlockMenuItems(info: ActiveBlockInfo): BlockMenuItem[] {
-  return isListBlockType(info.node.type.name) ? listTurnIntoBlockMenuItems : turnIntoBlockMenuItems
+  const items = isListBlockType(info.node.type.name)
+    ? listTurnIntoBlockMenuItems
+    : turnIntoBlockMenuItems
+  return items.filter((item) => item.isEnabled?.(info) ?? true)
 }
 
 export function isProtectedBlockAction(action: BlockActionId): boolean {

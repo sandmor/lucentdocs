@@ -23,6 +23,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
+import { TypographySettingsForm } from '@/components/editor/typography-settings-form'
 
 import type {
   AiDraftState,
@@ -80,6 +81,7 @@ export function AdminConfigPage() {
   const globalIndexingQuery = trpc.indexing.getGlobal.useQuery()
   const globalAiModelQuery = trpc.aiModelSelection.getGlobal.useQuery()
   const globalEmbeddingModelQuery = trpc.embeddingModelSelection.getGlobal.useQuery()
+  const globalTypographyQuery = trpc.editorPreferences.getGlobal.useQuery()
   const modelCatalogQuery = trpc.config.modelCatalog.useQuery()
   const aiSettingsQuery = trpc.config.aiSettings.useQuery()
 
@@ -87,6 +89,7 @@ export function AdminConfigPage() {
   const updateGlobalIndexingMutation = trpc.indexing.updateGlobal.useMutation()
   const updateGlobalAiModelMutation = trpc.aiModelSelection.updateGlobal.useMutation()
   const updateGlobalEmbeddingModelMutation = trpc.embeddingModelSelection.updateGlobal.useMutation()
+  const updateGlobalTypographyMutation = trpc.editorPreferences.updateGlobal.useMutation()
   const updateProvidersMutation = trpc.config.updateProviders.useMutation()
   const createAiKeyMutation = trpc.config.createAiApiKey.useMutation()
   const updateAiKeyMutation = trpc.config.updateAiApiKey.useMutation()
@@ -930,6 +933,47 @@ export function AdminConfigPage() {
               updateProvidersMutation.isPending &&
               updateProvidersMutation.variables?.usage === 'embedding',
           })}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Global typography</CardTitle>
+              <CardDescription>
+                Sets the default quote behavior for typing. Paste and AI content are not rewritten.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {globalTypographyQuery.data ? (
+                <TypographySettingsForm
+                  direct={globalTypographyQuery.data.global}
+                  resolved={globalTypographyQuery.data.resolved}
+                  allowInherit={false}
+                  isSaving={updateGlobalTypographyMutation.isPending}
+                  onSave={(overrides) =>
+                    updateGlobalTypographyMutation.mutate(
+                      { overrides },
+                      {
+                        onSuccess: async () => {
+                          await Promise.all([
+                            utils.editorPreferences.getGlobal.invalidate(),
+                            utils.editorPreferences.getUser.invalidate(),
+                            utils.editorPreferences.getProject.invalidate(),
+                            utils.editorPreferences.getDocument.invalidate(),
+                          ])
+                          toast.success('Global typography updated')
+                        },
+                        onError: (error) =>
+                          toast.error('Failed to update global typography', {
+                            description: error.message,
+                          }),
+                      }
+                    )
+                  }
+                />
+              ) : (
+                <div className="text-muted-foreground text-sm">Loading typography settings…</div>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

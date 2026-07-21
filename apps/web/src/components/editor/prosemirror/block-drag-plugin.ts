@@ -11,6 +11,7 @@ export const blockDragPluginKey = new PluginKey('block-drag')
 
 let draggedBlockPos: number | null = null
 let draggedBlockNode: PMNode | null = null
+let dragScrollCleanup: (() => void) | null = null
 
 export function setDraggedBlock(pos: number | null, node: PMNode | null): void {
   draggedBlockPos = pos
@@ -25,6 +26,61 @@ export function getDraggedBlock(): { pos: number; node: PMNode } | null {
 export function clearDraggedBlock(): void {
   draggedBlockPos = null
   draggedBlockNode = null
+  dragScrollCleanup?.()
+  dragScrollCleanup = null
+}
+
+function scrollParentFor(view: import('prosemirror-view').EditorView): HTMLElement | null {
+  let current: HTMLElement | null = view.dom.parentElement
+  while (current) {
+    const style = window.getComputedStyle(current)
+    if (
+      (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+      current.scrollHeight > current.clientHeight
+    )
+      return current
+    current = current.parentElement
+  }
+  return null
+}
+
+export function startDraggedBlockScrolling(view: import('prosemirror-view').EditorView): void {
+  dragScrollCleanup?.()
+  const parent = scrollParentFor(view)
+  if (!parent) return
+  let lastY: number | null = null
+  let raf = 0
+  const edge = 56
+  const tick = () => {
+    if (lastY === null || !draggedBlockNode) return
+    const rect = parent.getBoundingClientRect()
+    const topDistance = lastY - rect.top
+    const bottomDistance = rect.bottom - lastY
+    const delta =
+      topDistance < edge
+        ? -Math.ceil((edge - topDistance) / 5)
+        : bottomDistance < edge
+          ? Math.ceil((edge - bottomDistance) / 5)
+          : 0
+    if (delta) parent.scrollTop += delta
+    raf = requestAnimationFrame(tick)
+  }
+  const onDragOver = (event: DragEvent) => {
+    lastY = event.clientY
+    if (!raf) raf = requestAnimationFrame(tick)
+  }
+  const onWheel = (event: WheelEvent) => {
+    if (!draggedBlockNode) return
+    event.preventDefault()
+    parent.scrollTop += event.deltaY
+  }
+  document.addEventListener('dragover', onDragOver, true)
+  document.addEventListener('wheel', onWheel, { capture: true, passive: false })
+  dragScrollCleanup = () => {
+    cancelAnimationFrame(raf)
+    document.removeEventListener('dragover', onDragOver, true)
+    document.removeEventListener('wheel', onWheel, true)
+  }
 }
 
 function resolveInsertPos(
@@ -138,9 +194,7 @@ export const blockDragPlugin = new Plugin({
           return true
         }
 
-        if (
-          rangeOverlapsProtectedZone(getProtectedZoneRanges(view), insertPos, insertPos + 1)
-        ) {
+        if (rangeOverlapsProtectedZone(getProtectedZoneRanges(view), insertPos, insertPos + 1)) {
           clearDraggedBlock()
           return true
         }

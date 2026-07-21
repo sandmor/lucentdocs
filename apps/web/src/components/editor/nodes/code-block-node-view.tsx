@@ -3,8 +3,15 @@ import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import type { EditorView, NodeView, ViewMutationRecord } from 'prosemirror-view'
 import { getHighlightedHTMLAsync } from '../prosemirror/syntax-highlighter'
 
+// Highlighting replaces the overlay HTML for the whole block. Keep it off the
+// typing path; the editable code layer remains immediately responsive.
 const HIGHLIGHT_DEBOUNCE_MS = 75
 import { CodeBlockCopyButton, CodeBlockLanguageSelector } from './code-block-node-view-controls'
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+  cancelIdleCallback?: (id: number) => void
+}
 
 export class CodeBlockNodeView implements NodeView {
   node: ProseMirrorNode
@@ -22,6 +29,7 @@ export class CodeBlockNodeView implements NodeView {
   private highlightPre: HTMLElement
   private highlightCode: HTMLElement
   private highlightFrame: number | null = null
+  private highlightIdleCallback: number | null = null
   private highlightDebounceTimer: ReturnType<typeof setTimeout> | null = null
   private highlightGeneration = 0
   private syncHighlightScroll = () => {
@@ -118,8 +126,18 @@ export class CodeBlockNodeView implements NodeView {
   }
 
   private updateHighlighting() {
+    const generation = ++this.highlightGeneration
     if (this.highlightDebounceTimer !== null) {
       clearTimeout(this.highlightDebounceTimer)
+    }
+    if (this.highlightIdleCallback !== null) {
+      const idleWindow = window as IdleWindow
+      if (idleWindow.cancelIdleCallback) {
+        idleWindow.cancelIdleCallback(this.highlightIdleCallback)
+      } else {
+        clearTimeout(this.highlightIdleCallback)
+      }
+      this.highlightIdleCallback = null
     }
 
     this.highlightDebounceTimer = setTimeout(() => {
@@ -130,13 +148,19 @@ export class CodeBlockNodeView implements NodeView {
 
       this.highlightFrame = requestAnimationFrame(() => {
         this.highlightFrame = null
-        void this.runHighlighting()
+        const run = () => {
+          this.highlightIdleCallback = null
+          void this.runHighlighting(generation)
+        }
+        const idleWindow = window as IdleWindow
+        this.highlightIdleCallback = idleWindow.requestIdleCallback
+          ? idleWindow.requestIdleCallback(run, { timeout: 750 })
+          : window.setTimeout(run, 0)
       })
     }, HIGHLIGHT_DEBOUNCE_MS)
   }
 
-  private async runHighlighting() {
-    const generation = ++this.highlightGeneration
+  private async runHighlighting(generation: number) {
     const language = this.node.attrs.language || ''
     const content = this.node.textContent
     const html = await getHighlightedHTMLAsync(content, language)
@@ -201,6 +225,15 @@ export class CodeBlockNodeView implements NodeView {
     if (this.highlightFrame !== null) {
       cancelAnimationFrame(this.highlightFrame)
       this.highlightFrame = null
+    }
+    if (this.highlightIdleCallback !== null) {
+      const idleWindow = window as IdleWindow
+      if (idleWindow.cancelIdleCallback) {
+        idleWindow.cancelIdleCallback(this.highlightIdleCallback)
+      } else {
+        clearTimeout(this.highlightIdleCallback)
+      }
+      this.highlightIdleCallback = null
     }
     this.highlightGeneration++
     if (this.reactRoot) {

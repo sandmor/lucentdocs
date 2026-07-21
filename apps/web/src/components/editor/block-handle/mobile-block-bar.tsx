@@ -161,18 +161,20 @@ export function MobileBlockBar({
       <div className="ai-inline-mobile-block-bar__row">
         <span className="ai-inline-mobile-block-bar__label">Block</span>
         <div className="ai-inline-mobile-block-bar__actions">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="ai-inline-mobile-block-bar__btn"
-            aria-label="Move block up"
-            disabled={!canMoveUp}
-            onPointerDown={preventFocusSteal}
-            onClick={() => runAction('move-up')}
-          >
-            <ArrowUp className="size-4" />
-          </Button>
+          {getTurnIntoBlockMenuItems(activeBlock).length > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="ai-inline-mobile-block-bar__btn"
+              aria-label="Move block up"
+              disabled={!canMoveUp}
+              onPointerDown={preventFocusSteal}
+              onClick={() => runAction('move-up')}
+            >
+              <ArrowUp className="size-4" />
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="ghost"

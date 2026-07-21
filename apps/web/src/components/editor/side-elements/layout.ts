@@ -59,6 +59,15 @@ export function computeBlockHandleLayout(
   const editorRect = view.dom.getBoundingClientRect()
   const left = computeLeftGutterContainerX(editorRect, containerRect, BLOCK_HANDLE_WIDTH)
 
+  if (block.node.isAtom) {
+    const blockRect = block.dom.getBoundingClientRect()
+    return {
+      left,
+      top: blockRect.top - containerRect.top - (BLOCK_HANDLE_BUTTON_HEIGHT - blockRect.height) / 2,
+      height: BLOCK_HANDLE_BUTTON_HEIGHT,
+    }
+  }
+
   // List and quote containers start above their first editable line. Descend
   // through their first child so gutter controls align with the first marker /
   // text line rather than the container's top margin.

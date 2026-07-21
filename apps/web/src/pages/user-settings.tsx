@@ -7,6 +7,7 @@ import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
 import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 import { trpc } from '@/lib/trpc'
 import { PageLoader } from '@/components/ui/page-loader'
+import { TypographySettingsForm } from '@/components/editor/typography-settings-form'
 
 export function UserSettingsPage() {
   const navigate = useNavigate()
@@ -16,6 +17,14 @@ export function UserSettingsPage() {
   const embeddingModelQuery = trpc.embeddingModelSelection.getUser.useQuery()
   const aiProvidersQuery = trpc.aiModelSelection.availableProviders.useQuery()
   const embeddingProvidersQuery = trpc.embeddingModelSelection.availableProviders.useQuery()
+  const typographyQuery = trpc.editorPreferences.getUser.useQuery()
+  const typographyMutation = trpc.editorPreferences.updateUser.useMutation({
+    onSuccess: () => {
+      utils.editorPreferences.getUser.invalidate()
+      utils.editorPreferences.getDocument.invalidate()
+      toast.success('Typography settings updated')
+    },
+  })
 
   const mutation = trpc.indexing.updateUser.useMutation({
     onSuccess: async () => {
@@ -95,6 +104,28 @@ export function UserSettingsPage() {
           <PageLoader variant="inline" message="Loading settings…" />
         ) : (
           <div className="grid gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Typography</CardTitle>
+                <CardDescription>
+                  Controls quote normalization while you type. Paste and AI text are unchanged.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {typographyQuery.data ? (
+                  <TypographySettingsForm
+                    key={JSON.stringify(typographyQuery.data.user)}
+                    direct={typographyQuery.data.user}
+                    resolved={typographyQuery.data.resolved}
+                    allowInherit
+                    onSave={(overrides) => typographyMutation.mutate({ overrides })}
+                    isSaving={typographyMutation.isPending}
+                  />
+                ) : (
+                  <PageLoader variant="inline" message="Loading typography…" />
+                )}
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader>
                 <CardTitle>AI model</CardTitle>

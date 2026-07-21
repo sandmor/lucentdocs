@@ -3,10 +3,26 @@ export type { Document } from './document.js'
 export type { JsonObject, JsonValue } from './json.js'
 export { computeDocumentCounters, type DocumentCounters } from './document-counters.js'
 export { isJsonObject } from './json.js'
+export {
+  QUOTE_STYLES,
+  quoteStyleSchema,
+  editorPreferencesSchema,
+  editorPreferenceOverridesSchema,
+  DEFAULT_EDITOR_PREFERENCES,
+  type QuoteStyle,
+  type EditorPreferences,
+  type EditorPreferenceOverrides,
+} from './editor-preferences.js'
 export { isValidId, authPasswordSchema } from './validators.js'
 export { schema } from './schema.js'
 export { noteSchema } from './note-schema.js'
-export { parseContent, createDefaultContent, parseVersionSnapshotBundle, parseVersionSnapshotBundleStrict, serializeVersionSnapshotBundle } from './content.js'
+export {
+  parseContent,
+  createDefaultContent,
+  parseVersionSnapshotBundle,
+  parseVersionSnapshotBundleStrict,
+  serializeVersionSnapshotBundle,
+} from './content.js'
 export {
   ensureBlockIds,
   BLOCK_ID_ATTR,
@@ -183,7 +199,11 @@ export type {
   InlineTurnCheckpoint,
   InlineZoneSession,
 } from './inline-ai-session.js'
-export { normalizeInlineZoneSession, normalizeInlineZoneSessionMap, canUndoSessionTurn } from './inline-ai-session.js'
+export {
+  normalizeInlineZoneSession,
+  normalizeInlineZoneSessionMap,
+  canUndoSessionTurn,
+} from './inline-ai-session.js'
 export type { AIZoneAttrs } from './ai-zone-utils.js'
 export {
   readTrimmedString,

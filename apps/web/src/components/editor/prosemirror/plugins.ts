@@ -1,6 +1,6 @@
 import { Plugin, type Command, type EditorState } from 'prosemirror-state'
 import { keymap } from 'prosemirror-keymap'
-import { baseKeymap, chainCommands, toggleMark } from 'prosemirror-commands'
+import { baseKeymap, chainCommands, newlineInCode, toggleMark } from 'prosemirror-commands'
 import { history, undo, redo } from 'prosemirror-history'
 import { inputRules, wrappingInputRule, textblockTypeInputRule } from 'prosemirror-inputrules'
 import { gapCursor } from 'prosemirror-gapcursor'
@@ -14,6 +14,12 @@ import { buildAIZoneUndoCommands } from '../ai/ai-zone-undo-keymap'
 import type { AIWriterController } from '../ai/writer/types'
 import { isInCodeBlock } from '../inline/utils'
 import { buildCodeBlockKeymapCommand } from './code-block-keymap'
+import { buildMarkdownTypingRules, undoMarkdownTypingRule } from './typing-rules'
+import {
+  createQuoteTypingPlugin,
+  DEFAULT_QUOTE_TYPING_PREFERENCES,
+  type QuoteTypingPreferences,
+} from './quote-typing-plugin'
 import { installYjsSelectionPatch } from './yjs-selection-patch'
 import { blockDragPlugin } from './block-drag-plugin'
 import { createBlockIdPlugin } from '../notes/block-id-plugin'
@@ -37,8 +43,8 @@ interface CollaborationOptions {
   yjsMapping: ProsemirrorMapping
 }
 
-function buildInputRules() {
-  const rules = []
+function buildBlockInputRules() {
+  const rules: import('prosemirror-inputrules').InputRule[] = []
 
   if (schema.nodes.blockquote) {
     rules.push(wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote))
@@ -73,7 +79,7 @@ function buildInputRules() {
     )
   }
 
-  return inputRules({ rules })
+  return rules
 }
 
 interface BuildPluginsOptions {
@@ -81,6 +87,7 @@ interface BuildPluginsOptions {
   aiWriterController?: AIWriterController
   collaboration?: CollaborationOptions
   getNotesMap?: () => Y.Map<unknown> | null
+  getQuoteTypingPreferences?: () => QuoteTypingPreferences
 }
 
 function buildCollaborationPlugins(options: CollaborationOptions): Plugin[] {
@@ -127,6 +134,25 @@ function buildListKeymap() {
   })
 }
 
+function insertHardBreak(
+  state: EditorState,
+  dispatch?: (tr: import('prosemirror-state').Transaction) => void
+) {
+  const hardBreak = schema.nodes.hard_break
+  if (
+    !hardBreak ||
+    !state.selection.$from.parent.canReplaceWith(
+      state.selection.$from.index(),
+      state.selection.$from.index(),
+      hardBreak
+    )
+  ) {
+    return newlineInCode(state, dispatch)
+  }
+  if (dispatch) dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView())
+  return true
+}
+
 export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   const { aiHandlers, aiWriterController, collaboration, getNotesMap } = options
 
@@ -151,7 +177,12 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   plugins.push(createListClipboardPlugin())
   plugins.push(createAIWriterPlugin(effectiveHandlers))
   plugins.push(createTaskListNormalizationPlugin())
-  plugins.push(buildInputRules())
+  plugins.push(
+    createQuoteTypingPlugin(
+      options.getQuoteTypingPreferences ?? (() => DEFAULT_QUOTE_TYPING_PREFERENCES)
+    )
+  )
+  plugins.push(inputRules({ rules: [...buildBlockInputRules(), ...buildMarkdownTypingRules()] }))
 
   if (collaboration) {
     plugins.push(yUndoPlugin())
@@ -178,7 +209,9 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   }
 
   plugins.push(buildFormatKeymap())
+  plugins.push(keymap({ Backspace: undoMarkdownTypingRule }))
   plugins.push(buildListKeymap())
+  plugins.push(keymap({ 'Shift-Enter': insertHardBreak }))
   plugins.push(keymap(buildCodeBlockKeymapCommand()))
   plugins.push(keymap(baseKeymap))
   plugins.push(blockDragPlugin)

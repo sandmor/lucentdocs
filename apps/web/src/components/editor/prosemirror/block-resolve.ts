@@ -10,6 +10,7 @@ export interface ActiveBlockInfo {
 export type BlockActionId =
   | 'insert-paragraph'
   | 'insert-code'
+  | 'insert-divider'
   | 'insert-unordered-list'
   | 'insert-ordered-list'
   | 'insert-task-list'
@@ -76,6 +77,18 @@ function getBlockVerticalBounds(
   nodeSize: number
 ): { top: number; bottom: number } | null {
   const doc = view.state.doc
+  const node = doc.nodeAt(blockPos)
+
+  // Atom blocks (notably dividers) do not have a meaningful text caret inside
+  // them. Measuring their DOM element keeps the hover gutter anchored to the
+  // visible block rather than to the following paragraph.
+  if (node?.isAtom) {
+    const dom = resolveBlockDom(view, blockPos)
+    if (!dom || typeof dom.getBoundingClientRect !== 'function') return null
+    const rect = dom.getBoundingClientRect()
+    return { top: rect.top, bottom: rect.bottom }
+  }
+
   const startPos = Math.min(blockPos + 1, doc.content.size)
   const endPos = Math.min(blockPos + nodeSize - 1, doc.content.size)
 
@@ -179,7 +192,10 @@ export function supportsListTurnInto(node: PMNode): boolean {
 
 export function isActiveBlockInDoc(view: EditorView, info: ActiveBlockInfo): boolean {
   if (!info.dom.isConnected) return false
-  const resolved = resolveBlockAtPos(view, info.pos + 1)
+  // `pos + 1` is inside textblocks but already *after* an atom such as a
+  // horizontal_rule. Probe the node boundary for atoms so divider handles do
+  // not get discarded as soon as hover resolution succeeds.
+  const resolved = resolveBlockAtPos(view, info.node.isAtom ? info.pos : info.pos + 1)
   if (!resolved || resolved.pos !== info.pos) return false
   if (resolved.dom !== info.dom) return false
   return view.state.doc.nodeAt(info.pos)?.type === info.node.type
@@ -190,5 +206,5 @@ export function refreshActiveBlock(
   info: ActiveBlockInfo
 ): ActiveBlockInfo | null {
   if (!isActiveBlockInDoc(view, info)) return null
-  return resolveBlockAtPos(view, info.pos + 1)
+  return resolveBlockAtPos(view, info.node.isAtom ? info.pos : info.pos + 1)
 }

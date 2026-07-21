@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
 import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 import { trpc } from '@/lib/trpc'
+import { TypographySettingsForm } from './typography-settings-form'
 
 interface ProjectSettings {
   projectId: string
@@ -22,6 +23,14 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
   const embeddingModelQuery = trpc.embeddingModelSelection.getProject.useQuery({ projectId })
   const aiProvidersQuery = trpc.aiModelSelection.availableProviders.useQuery()
   const embeddingProvidersQuery = trpc.embeddingModelSelection.availableProviders.useQuery()
+  const typographyQuery = trpc.editorPreferences.getProject.useQuery({ projectId })
+  const typographyMutation = trpc.editorPreferences.updateProject.useMutation({
+    onSuccess: () => {
+      utils.editorPreferences.getProject.invalidate({ projectId })
+      utils.editorPreferences.getDocument.invalidate()
+      toast.success('Project typography updated')
+    },
+  })
   const [ownerEmail, setOwnerEmail] = useState('')
 
   const isCurrentUserOwner = meQuery.data?.id === projectQuery.data?.ownerUserId
@@ -100,7 +109,29 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
   const isOwnerDirty = ownerEmail.trim().length > 0
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 [&>*]:shrink-0">
+      <Card>
+        <CardHeader>
+          <CardTitle>Typography</CardTitle>
+          <CardDescription>
+            Set quote behavior for typing in this project. Document settings can override it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {typographyQuery.data ? (
+            <TypographySettingsForm
+              key={JSON.stringify(typographyQuery.data.project)}
+              direct={typographyQuery.data.project}
+              resolved={typographyQuery.data.resolved}
+              allowInherit
+              onSave={(overrides) => typographyMutation.mutate({ projectId, overrides })}
+              isSaving={typographyMutation.isPending}
+            />
+          ) : (
+            <div className="text-muted-foreground text-sm">Loading typography…</div>
+          )}
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>Project ownership</CardTitle>

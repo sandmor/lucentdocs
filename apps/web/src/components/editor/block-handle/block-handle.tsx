@@ -22,7 +22,11 @@ import {
 } from '../prosemirror/block-resolve'
 import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import { handleBlockAction } from '../prosemirror/block-actions'
-import { setDraggedBlock, clearDraggedBlock } from '../prosemirror/block-drag-plugin'
+import {
+  setDraggedBlock,
+  clearDraggedBlock,
+  startDraggedBlockScrolling,
+} from '../prosemirror/block-drag-plugin'
 import { subscribeEditorView } from '../prosemirror/view-store'
 import { useIsCoarsePointer } from '../inline/hooks'
 import { emitAIZoneControlLayoutChange } from '../inline/layout-events'
@@ -391,6 +395,7 @@ export function BlockHandle({
     const sel = NodeSelection.create(view.state.doc, effectiveBlock.pos)
     view.dispatch(tr.setSelection(sel))
     setDraggedBlock(effectiveBlock.pos, effectiveBlock.node)
+    startDraggedBlockScrolling(view)
 
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', effectiveBlock.node.textContent)
@@ -538,7 +543,7 @@ function BlockHandleMenu({
         <DropdownMenuTrigger render={<span className="inline-flex">{trigger}</span>} />
       ) : null}
       <DropdownMenuContent align="start" side="bottom" anchor={anchor}>
-        {showTurnIntoLabel ? (
+        {showTurnIntoLabel && turnIntoItems.length > 0 ? (
           <>
             <DropdownMenuGroup>
               <DropdownMenuLabel>Turn into</DropdownMenuLabel>
