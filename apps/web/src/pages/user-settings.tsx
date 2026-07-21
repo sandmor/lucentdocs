@@ -8,6 +8,7 @@ import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 import { trpc } from '@/lib/trpc'
 import { PageLoader } from '@/components/ui/page-loader'
 import { TypographySettingsForm } from '@/components/editor/typography-settings-form'
+import { AssistantSettingsForm } from '@/components/editor/assistant-settings-form'
 
 export function UserSettingsPage() {
   const navigate = useNavigate()
@@ -23,6 +24,14 @@ export function UserSettingsPage() {
       utils.editorPreferences.getUser.invalidate()
       utils.editorPreferences.getDocument.invalidate()
       toast.success('Typography settings updated')
+    },
+  })
+  const assistantQuery = trpc.assistantPreferences.getUser.useQuery()
+  const assistantMutation = trpc.assistantPreferences.updateUser.useMutation({
+    onSuccess: () => {
+      utils.assistantPreferences.getUser.invalidate()
+      utils.assistantPreferences.getProject.invalidate()
+      toast.success('Assistant defaults updated')
     },
   })
 
@@ -104,6 +113,24 @@ export function UserSettingsPage() {
           <PageLoader variant="inline" message="Loading settings…" />
         ) : (
           <div className="grid gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Project Assistant</CardTitle>
+                <CardDescription>Choose how new project conversations start. You can still switch mode in each chat.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {assistantQuery.data ? (
+                  <AssistantSettingsForm
+                    key={JSON.stringify(assistantQuery.data.user)}
+                    direct={assistantQuery.data.user}
+                    resolved={assistantQuery.data.resolved}
+                    allowInherit
+                    onSave={(overrides) => assistantMutation.mutate({ overrides })}
+                    isSaving={assistantMutation.isPending}
+                  />
+                ) : <PageLoader variant="inline" message="Loading assistant defaults…" />}
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader>
                 <CardTitle>Typography</CardTitle>

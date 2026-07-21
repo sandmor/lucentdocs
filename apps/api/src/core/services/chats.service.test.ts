@@ -60,7 +60,7 @@ const conversation: UIMessage[] = [
 ]
 
 describe('ChatsService tree operations', () => {
-  test('lists project conversations across their originating documents', async () => {
+  test('lists project-owned conversations without a document owner', async () => {
     const adapter = createTestAdapter()
     const project = await adapter.services.projects.create('Project assistant', {
       ownerUserId: LOCAL_DEFAULT_USER.id,
@@ -74,9 +74,7 @@ describe('ChatsService tree operations', () => {
 
     const threads = await adapter.services.chats.listForProject(project.id)
     expect(threads).toHaveLength(2)
-    expect(new Set(threads.map((thread) => thread.documentId))).toEqual(
-      new Set([first.id, second.id])
-    )
+    expect(new Set(threads.map((thread) => thread.documentId))).toEqual(new Set(['']))
   })
 
   test('edits plain assistant text without removing later messages', async () => {

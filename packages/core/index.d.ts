@@ -46,12 +46,15 @@ export declare class NativeStorageEngine {
   authDataDeleteSessionByToken(txId: string | undefined | null, token: string): Promise<void>
   authDataDeleteSessionsByUserId(txId: string | undefined | null, userId: string): Promise<void>
   authDataDeleteExpiredSessions(txId: string | undefined | null, now: number): Promise<void>
-  chatsFindById(txId: string | undefined | null, projectId: string, documentId: string, id: string): Promise<ChatThreadDto | null>
-  chatsListByDocument(txId: string | undefined | null, projectId: string, documentId: string): Promise<Array<ChatThreadDto>>
-  chatsListByProject(txId: string | undefined | null, projectId: string): Promise<Array<ChatThreadDto>>
-  chatsInsert(txId: string | undefined | null, row: ChatThreadDto): Promise<void>
-  chatsUpdate(txId: string | undefined | null, projectId: string, documentId: string, id: string, data: UpdateChatThreadDataDto): Promise<boolean>
-  chatsDeleteById(txId: string | undefined | null, projectId: string, documentId: string, id: string): Promise<boolean>
+  assistantFindThread(txId: string | undefined | null, projectId: string, id: string): Promise<AssistantThreadDto | null>
+  assistantListThreads(txId: string | undefined | null, projectId: string): Promise<Array<AssistantThreadDto>>
+  assistantInsertThread(txId: string | undefined | null, row: AssistantThreadDto): Promise<void>
+  assistantUpdateThread(txId: string | undefined | null, projectId: string, id: string, data: UpdateAssistantThreadDataDto): Promise<boolean>
+  assistantDeleteThread(txId: string | undefined | null, projectId: string, id: string): Promise<boolean>
+  assistantListMessages(txId: string | undefined | null, threadId: string): Promise<Array<AssistantMessageDto>>
+  assistantReplaceMessages(txId: string | undefined | null, threadId: string, messages: Array<AssistantMessageDto>): Promise<void>
+  assistantGetPreference(txId: string | undefined | null, scopeType: string, scopeId: string): Promise<AssistantPreferenceSettingDto | null>
+  assistantUpsertPreference(txId: string | undefined | null, input: AssistantPreferenceSettingDto): Promise<void>
   documentContentFindByDocumentId(txId: string | undefined | null, documentId: string): Promise<DocumentContentDto | null>
   documentContentUpsert(txId: string | undefined | null, documentId: string, contentJson: string, updatedAt: number): Promise<void>
   documentContentDelete(txId: string | undefined | null, documentId: string): Promise<void>
@@ -165,6 +168,37 @@ export interface AppConfigEntryDto {
   value: string
 }
 
+export interface AssistantMessageDto {
+  id: string
+  threadId: string
+  parentId?: string
+  role: string
+  partsJson: string
+  branchOrdinal: number
+  selectedChildId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AssistantPreferenceSettingDto {
+  scopeType: string
+  scopeId: string
+  overridesJson: string
+  updatedAt: number
+}
+
+export interface AssistantThreadDto {
+  id: string
+  projectId: string
+  createdByUserId: string
+  title: string
+  mode: string
+  selectedRootMessageId?: string
+  revision: number
+  createdAt: number
+  updatedAt: number
+}
+
 export interface AuthInvitationDto {
   id: string
   token: string
@@ -194,16 +228,6 @@ export interface AuthUserDto {
   createdAt: number
   updatedAt: number
   lastLoginAt?: number
-}
-
-export interface ChatThreadDto {
-  id: string
-  projectId: string
-  documentId: string
-  title: string
-  messages: string
-  createdAt: number
-  updatedAt: number
 }
 
 export interface CompleteLeasedJobInputDto {
@@ -533,9 +557,11 @@ export interface UpdateAiApiKeyDataDto {
   updatedAt: number
 }
 
-export interface UpdateChatThreadDataDto {
+export interface UpdateAssistantThreadDataDto {
   title?: string
-  messages?: string
+  mode?: string
+  selectedRootMessageId?: string
+  revision: number
   updatedAt: number
 }
 

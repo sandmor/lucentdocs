@@ -15,7 +15,6 @@ import type {
   AuthInvitationDto,
   AuthSessionDto,
   AuthUserDto,
-  ChatThreadDto,
   DocumentContentDto,
   DocumentDto,
   DocumentEmbeddingDto,
@@ -35,7 +34,6 @@ import type {
   ReplaceEmbeddingMetadataChunkDto,
   SearchDocumentEmbeddingsInputDto,
   UpdateAiApiKeyDataDto,
-  UpdateChatThreadDataDto,
   UpdateDocumentDataDto,
   UpdateProjectDataDto,
   UpsertAiModelSelectionDto,
@@ -50,10 +48,6 @@ import type { Project, Document, DocumentNoteRecord } from '@lucentdocs/shared'
 import type { UpdateProjectData } from '../../core/ports/projects.port.js'
 import type { UpdateDocumentData } from '../../core/ports/documents.port.js'
 import type { ProjectDocumentRow } from '../../core/ports/projectDocuments.port.js'
-import type {
-  ChatThreadRow,
-  UpdateChatThreadData,
-} from '../../core/ports/chats.port.js'
 import type {
   VersionSnapshotRow,
   VersionSnapshotMetaRow,
@@ -289,38 +283,6 @@ export function versionSnapshotCursorFromDto(
     content: dto.content,
     createdAt: dto.createdAt,
     rowId: dto.rowId,
-  }
-}
-
-export function chatThreadFromDto(dto: ChatThreadDto): ChatThreadRow {
-  return {
-    id: dto.id,
-    projectId: dto.projectId,
-    documentId: dto.documentId,
-    title: dto.title,
-    messages: dto.messages,
-    createdAt: dto.createdAt,
-    updatedAt: dto.updatedAt,
-  }
-}
-
-export function chatThreadToDto(row: ChatThreadRow): ChatThreadDto {
-  return {
-    id: row.id,
-    projectId: row.projectId,
-    documentId: row.documentId,
-    title: row.title,
-    messages: row.messages,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }
-}
-
-export function updateChatThreadToDto(data: UpdateChatThreadData): UpdateChatThreadDataDto {
-  return {
-    title: data.title,
-    messages: data.messages,
-    updatedAt: data.updatedAt,
   }
 }
 

@@ -18,6 +18,7 @@ import {
 import { createDocumentDeleteCleanupScheduler } from './document-delete-cleanup-scheduler.js'
 import { createAuthService } from './auth.service.js'
 import { createEditorPreferencesService } from './editorPreferences.service.js'
+import { createAssistantPreferencesService } from './assistantPreferences.service.js'
 import type { ServiceSet } from './types.js'
 
 export function createCoreServiceSet(dependencies: {
@@ -75,5 +76,6 @@ export function createCoreServiceSet(dependencies: {
     embeddingIndex,
     auth: createAuthService(dependencies.repositories, dependencies.transaction),
     editorPreferences: createEditorPreferencesService(dependencies.repositories),
+    assistantPreferences: createAssistantPreferencesService(dependencies.repositories),
   }
 }

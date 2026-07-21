@@ -26,6 +26,7 @@ import { EmbeddingIndexQueueRepository } from './embeddingIndexQueue.adapter.js'
 import { AuthDataRepository } from './authData.adapter.js'
 import { RustDocumentEmbeddingMetadataStore } from './documentEmbeddingMetadataStore.adapter.js'
 import { RustAppConfigRepository } from './appConfig.adapter.js'
+import { AssistantPreferencesRepository } from './assistantPreferences.adapter.js'
 
 export interface RustAdapter {
   engine: NativeStorageEngine
@@ -72,6 +73,7 @@ export function createRustAdapterFromEngine(
     documentEmbeddings,
     authData: new AuthDataRepository(engine),
     appConfig: new RustAppConfigRepository(engine),
+    assistantPreferences: new AssistantPreferencesRepository(engine),
   }
 
   const services = createCoreServiceSet({

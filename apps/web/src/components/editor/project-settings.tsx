@@ -9,6 +9,7 @@ import { IndexingStrategyForm } from '@/components/indexing/strategy-form'
 import { AiModelSelectionForm } from '@/components/ai-model-selection/form'
 import { trpc } from '@/lib/trpc'
 import { TypographySettingsForm } from './typography-settings-form'
+import { AssistantSettingsForm } from './assistant-settings-form'
 
 interface ProjectSettings {
   projectId: string
@@ -29,6 +30,13 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
       utils.editorPreferences.getProject.invalidate({ projectId })
       utils.editorPreferences.getDocument.invalidate()
       toast.success('Project typography updated')
+    },
+  })
+  const assistantQuery = trpc.assistantPreferences.getProject.useQuery({ projectId })
+  const assistantMutation = trpc.assistantPreferences.updateProject.useMutation({
+    onSuccess: () => {
+      utils.assistantPreferences.getProject.invalidate({ projectId })
+      toast.success('Project Assistant defaults updated')
     },
   })
   const [ownerEmail, setOwnerEmail] = useState('')
@@ -110,6 +118,24 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 [&>*]:shrink-0">
+      <Card>
+        <CardHeader>
+          <CardTitle>Project Assistant</CardTitle>
+          <CardDescription>Set the default mode for new shared project conversations.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {assistantQuery.data ? (
+            <AssistantSettingsForm
+              key={JSON.stringify(assistantQuery.data.project)}
+              direct={assistantQuery.data.project}
+              resolved={assistantQuery.data.resolved}
+              allowInherit
+              onSave={(overrides) => assistantMutation.mutate({ projectId, overrides })}
+              isSaving={assistantMutation.isPending}
+            />
+          ) : <div className="text-muted-foreground text-sm">Loading assistant defaults…</div>}
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>Typography</CardTitle>

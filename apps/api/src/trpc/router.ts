@@ -11,6 +11,7 @@ import { indexingRouter } from './routers/indexing.js'
 import { aiModelSelectionRouter } from './routers/aiModelSelection.js'
 import { embeddingModelSelectionRouter } from './routers/embeddingModelSelection.js'
 import { editorPreferencesRouter } from './routers/editorPreferences.js'
+import { assistantPreferencesRouter } from './routers/assistantPreferences.js'
 
 export const appRouter = router({
   projects: projectsRouter,
@@ -19,12 +20,14 @@ export const appRouter = router({
   prompts: promptsRouter,
   sync: syncRouter,
   chat: chatRouter,
+  assistant: chatRouter,
   inline: inlineRouter,
   auth: authRouter,
   indexing: indexingRouter,
   aiModelSelection: aiModelSelectionRouter,
   embeddingModelSelection: embeddingModelSelectionRouter,
   editorPreferences: editorPreferencesRouter,
+  assistantPreferences: assistantPreferencesRouter,
 })
 
 export type AppRouter = typeof appRouter

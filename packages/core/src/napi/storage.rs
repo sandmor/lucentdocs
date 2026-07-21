@@ -7,21 +7,21 @@ use tokio::runtime::Runtime;
 
 use crate::import::MassImportRequest;
 use crate::storage::adapters::{
-  ai_model_selection, ai_settings, app_config, auth_data, chats, document_content,
+  ai_model_selection, ai_settings, app_config, assistant, auth_data, document_content,
   document_embedding_metadata, document_embeddings, document_notes, documents,
   indexing_settings, job_queue, persist_bundle, project_documents, projects,
   version_snapshots, yjs_documents,
 };
 use crate::storage::dto::{
   AiApiKeyDto, AiModelSelectionDto, AiProviderConfigDto, AppConfigEntryDto, AuthInvitationDto,
-  AuthSessionDto, AuthUserDto, ChatThreadDto, CompleteLeasedJobInputDto, DocumentContentDto,
+  AssistantMessageDto, AssistantPreferenceSettingDto, AssistantThreadDto, AuthSessionDto, AuthUserDto, CompleteLeasedJobInputDto, DocumentContentDto,
   DocumentDto, DocumentEmbeddingDto, DocumentNoteDto, DocumentVectorPayloadContextDto,
   EmbeddingSearchMatchDto, EmbeddingSearchMetadataDto, EmbeddingVectorReferenceDto,
   EnqueueJobInputDto, FailLeasedJobInputDto, IndexingSettingsDto, JobQueueTypeStatsDto,
   LeaseJobsInputDto, PersistBundleInputDto, ProjectDocumentDto, ProjectDto, QueueJobDto,
   ReplaceDocumentEmbeddingsInputDto, ReplaceDocumentEmbeddingsResultDto,
   ReplaceEmbeddingMetadataChunkDto, SearchDocumentEmbeddingsInputDto, UpdateAiApiKeyDataDto,
-  UpdateChatThreadDataDto, UpdateDocumentDataDto, UpdateProjectDataDto,
+  UpdateAssistantThreadDataDto, UpdateDocumentDataDto, UpdateProjectDataDto,
   UpsertAiModelSelectionDto, UpsertAiProviderConfigDto, UpsertIndexingSettingsDto,
   UpsertUniqueJobInputDto, VersionSnapshotCursorDto, VersionSnapshotDto, VersionSnapshotMetaDto,
 };
@@ -543,71 +543,98 @@ impl NativeStorageEngine {
       .map_err(to_napi_err)
   }
   #[napi]
-  pub async fn chats_find_by_id(
+  pub async fn assistant_find_thread(
     &self,
     tx_id: Option<String>,
     project_id: String,
-    document_id: String,
     id: String,
-  ) -> Result<Option<ChatThreadDto>> {
-    chats::find_by_id(&self.engine, tx_id.as_deref(), &project_id, &document_id, &id)
+  ) -> Result<Option<AssistantThreadDto>> {
+    assistant::find_thread(&self.engine, tx_id.as_deref(), &project_id, &id)
       .await
       .map_err(to_napi_err)
   }
   #[napi]
-  pub async fn chats_list_by_document(
+  pub async fn assistant_list_threads(
     &self,
     tx_id: Option<String>,
     project_id: String,
-    document_id: String,
-  ) -> Result<Vec<ChatThreadDto>> {
-    chats::list_by_document(&self.engine, tx_id.as_deref(), &project_id, &document_id)
-      .await
-      .map_err(to_napi_err)
-  }
-
-  #[napi]
-  pub async fn chats_list_by_project(
-    &self,
-    tx_id: Option<String>,
-    project_id: String,
-  ) -> Result<Vec<ChatThreadDto>> {
-    chats::list_by_project(&self.engine, tx_id.as_deref(), &project_id)
+  ) -> Result<Vec<AssistantThreadDto>> {
+    assistant::list_threads(&self.engine, tx_id.as_deref(), &project_id)
       .await
       .map_err(to_napi_err)
   }
   #[napi]
-  pub async fn chats_insert(
+  pub async fn assistant_insert_thread(
     &self,
     tx_id: Option<String>,
-    row: ChatThreadDto,
+    row: AssistantThreadDto,
   ) -> Result<()> {
-    chats::insert(&self.engine, tx_id.as_deref(), &row)
+    assistant::insert_thread(&self.engine, tx_id.as_deref(), &row)
       .await
       .map_err(to_napi_err)
   }
   #[napi]
-  pub async fn chats_update(
+  pub async fn assistant_update_thread(
     &self,
     tx_id: Option<String>,
     project_id: String,
-    document_id: String,
     id: String,
-    data: UpdateChatThreadDataDto,
+    data: UpdateAssistantThreadDataDto,
   ) -> Result<bool> {
-    chats::update(&self.engine, tx_id.as_deref(), &project_id, &document_id, &id, &data)
+    assistant::update_thread(&self.engine, tx_id.as_deref(), &project_id, &id, &data)
       .await
       .map_err(to_napi_err)
   }
   #[napi]
-  pub async fn chats_delete_by_id(
+  pub async fn assistant_delete_thread(
     &self,
     tx_id: Option<String>,
     project_id: String,
-    document_id: String,
     id: String,
   ) -> Result<bool> {
-    chats::delete_by_id(&self.engine, tx_id.as_deref(), &project_id, &document_id, &id)
+    assistant::delete_thread(&self.engine, tx_id.as_deref(), &project_id, &id)
+      .await
+      .map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn assistant_list_messages(
+    &self,
+    tx_id: Option<String>,
+    thread_id: String,
+  ) -> Result<Vec<AssistantMessageDto>> {
+    assistant::list_messages(&self.engine, tx_id.as_deref(), &thread_id)
+      .await
+      .map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn assistant_replace_messages(
+    &self,
+    tx_id: Option<String>,
+    thread_id: String,
+    messages: Vec<AssistantMessageDto>,
+  ) -> Result<()> {
+    assistant::replace_messages(&self.engine, tx_id.as_deref(), &thread_id, &messages)
+      .await
+      .map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn assistant_get_preference(
+    &self,
+    tx_id: Option<String>,
+    scope_type: String,
+    scope_id: String,
+  ) -> Result<Option<AssistantPreferenceSettingDto>> {
+    assistant::get_preference(&self.engine, tx_id.as_deref(), &scope_type, &scope_id)
+      .await
+      .map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn assistant_upsert_preference(
+    &self,
+    tx_id: Option<String>,
+    input: AssistantPreferenceSettingDto,
+  ) -> Result<()> {
+    assistant::upsert_preference(&self.engine, tx_id.as_deref(), &input)
       .await
       .map_err(to_napi_err)
   }

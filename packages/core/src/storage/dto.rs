@@ -100,21 +100,48 @@ pub struct VersionSnapshotCursorDto {
 
 #[napi(object)]
 #[derive(Clone, Debug)]
-pub struct ChatThreadDto {
+pub struct AssistantThreadDto {
   pub id: String,
   pub project_id: String,
-  pub document_id: String,
+  pub created_by_user_id: String,
   pub title: String,
-  pub messages: String,
+  pub mode: String,
+  pub selected_root_message_id: Option<String>,
+  pub revision: i64,
   pub created_at: i64,
   pub updated_at: i64,
 }
 
 #[napi(object)]
 #[derive(Clone, Debug)]
-pub struct UpdateChatThreadDataDto {
+pub struct UpdateAssistantThreadDataDto {
   pub title: Option<String>,
-  pub messages: Option<String>,
+  pub mode: Option<String>,
+  pub selected_root_message_id: Option<String>,
+  pub revision: i64,
+  pub updated_at: i64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct AssistantMessageDto {
+  pub id: String,
+  pub thread_id: String,
+  pub parent_id: Option<String>,
+  pub role: String,
+  pub parts_json: String,
+  pub branch_ordinal: i64,
+  pub selected_child_id: Option<String>,
+  pub created_at: i64,
+  pub updated_at: i64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct AssistantPreferenceSettingDto {
+  pub scope_type: String,
+  pub scope_id: String,
+  pub overrides_json: String,
   pub updated_at: i64,
 }
 

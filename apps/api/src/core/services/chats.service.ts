@@ -52,7 +52,7 @@ export interface ChatsService {
   listForProject(projectId: string): Promise<ChatThreadSummary[]>
   listForDocument(projectId: string, documentId: string): Promise<ChatThreadSummary[]>
   getById(projectId: string, documentId: string, chatId: string): Promise<ChatThread | null>
-  create(projectId: string, documentId: string, title?: string): Promise<ChatThread | null>
+  create(projectId: string, documentId: string, title?: string, editingEnabled?: boolean): Promise<ChatThread | null>
   savePayload(
     projectId: string,
     documentId: string,
@@ -206,7 +206,8 @@ export function createChatsService(repos: RepositorySet): ChatsService {
     async create(
       projectId: string,
       documentId: string,
-      title = 'New chat'
+      title = 'New chat',
+      editingEnabled
     ): Promise<ChatThread | null> {
       if (!isValidId(projectId) || !isValidId(documentId)) return null
 
@@ -214,6 +215,7 @@ export function createChatsService(repos: RepositorySet): ChatsService {
       const id = nanoid()
       const normalizedTitle = title.trim() || 'New chat'
       const payload = createEmptyChatThreadPayload()
+      if (typeof editingEnabled === 'boolean') payload.settings.editingEnabled = editingEnabled
       await repos.chats.insert({
         id,
         projectId,

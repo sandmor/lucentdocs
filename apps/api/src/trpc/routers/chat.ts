@@ -187,6 +187,7 @@ export const chatRouter = router({
         projectId: idSchema,
         documentId: idSchema,
         title: z.string().trim().min(1).max(160).optional(),
+        editingEnabled: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -195,7 +196,8 @@ export const chatRouter = router({
       const created = await ctx.services.chats.create(
         input.projectId,
         input.documentId,
-        input.title
+        input.title,
+        input.editingEnabled
       )
       if (!created) {
         throw new TRPCError({

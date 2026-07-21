@@ -13,6 +13,16 @@ export {
   type EditorPreferences,
   type EditorPreferenceOverrides,
 } from './editor-preferences.js'
+export {
+  ASSISTANT_MODES,
+  assistantModeSchema,
+  assistantPreferencesSchema,
+  assistantPreferenceOverridesSchema,
+  DEFAULT_ASSISTANT_PREFERENCES,
+  type AssistantMode,
+  type AssistantPreferences,
+  type AssistantPreferenceOverrides,
+} from './assistant-preferences.js'
 export { isValidId, authPasswordSchema } from './validators.js'
 export { schema } from './schema.js'
 export { noteSchema } from './note-schema.js'

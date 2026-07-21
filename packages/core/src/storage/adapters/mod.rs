@@ -1,8 +1,8 @@
 pub mod ai_model_selection;
 pub mod ai_settings;
+pub mod assistant;
 pub mod app_config;
 pub mod auth_data;
-pub mod chats;
 pub mod document_content;
 pub mod document_embedding_metadata;
 pub mod document_embeddings;

@@ -78,21 +78,114 @@ CREATE TABLE IF NOT EXISTS version_snapshots (
 CREATE INDEX IF NOT EXISTS idx_version_snapshots_document ON version_snapshots(documentId);
 -- ;;
 
-CREATE TABLE IF NOT EXISTS chat_threads (
+-- Assistant storage is deliberately project-owned. This destructive alpha
+-- cutover drops the document-owned v1 table; no conversation data is migrated.
+DROP TABLE IF EXISTS chat_threads;
+-- ;;
+
+CREATE TABLE IF NOT EXISTS assistant_threads (
   id TEXT PRIMARY KEY,
   projectId TEXT NOT NULL,
-  documentId TEXT NOT NULL,
+  createdByUserId TEXT NOT NULL,
   title TEXT NOT NULL,
-  messages TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('ask', 'agent')),
+  selectedRootMessageId TEXT,
+  revision INTEGER NOT NULL DEFAULT 0,
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL,
-  FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE,
-  FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+  FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
 );
 -- ;;
 
-CREATE INDEX IF NOT EXISTS idx_chat_threads_document_updated
-  ON chat_threads(projectId, documentId, updatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_assistant_threads_project_updated
+  ON assistant_threads(projectId, updatedAt DESC, createdAt DESC);
+-- ;;
+
+CREATE TABLE IF NOT EXISTS assistant_messages (
+  id TEXT PRIMARY KEY,
+  threadId TEXT NOT NULL,
+  parentId TEXT,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  partsJson TEXT NOT NULL,
+  branchOrdinal INTEGER NOT NULL DEFAULT 0,
+  selectedChildId TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  FOREIGN KEY (threadId) REFERENCES assistant_threads(id) ON DELETE CASCADE,
+  FOREIGN KEY (parentId) REFERENCES assistant_messages(id) ON DELETE CASCADE
+);
+-- ;;
+
+CREATE INDEX IF NOT EXISTS idx_assistant_messages_thread_parent
+  ON assistant_messages(threadId, parentId, branchOrdinal ASC, createdAt ASC);
+-- ;;
+
+CREATE TABLE IF NOT EXISTS assistant_thread_documents (
+  id TEXT PRIMARY KEY,
+  threadId TEXT NOT NULL,
+  documentId TEXT,
+  titleSnapshot TEXT NOT NULL,
+  addedByUserId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (threadId) REFERENCES assistant_threads(id) ON DELETE CASCADE,
+  FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE SET NULL
+);
+-- ;;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_thread_documents_unique
+  ON assistant_thread_documents(threadId, documentId)
+  WHERE documentId IS NOT NULL;
+-- ;;
+
+CREATE TABLE IF NOT EXISTS assistant_message_documents (
+  id TEXT PRIMARY KEY,
+  messageId TEXT NOT NULL,
+  documentId TEXT,
+  kind TEXT NOT NULL CHECK (kind IN ('active', 'attachment')),
+  titleSnapshot TEXT NOT NULL,
+  selectionFrom INTEGER,
+  selectionTo INTEGER,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (messageId) REFERENCES assistant_messages(id) ON DELETE CASCADE,
+  FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE SET NULL
+);
+-- ;;
+
+CREATE INDEX IF NOT EXISTS idx_assistant_message_documents_message
+  ON assistant_message_documents(messageId, kind);
+-- ;;
+
+CREATE TABLE IF NOT EXISTS assistant_runs (
+  id TEXT PRIMARY KEY,
+  threadId TEXT NOT NULL,
+  userMessageId TEXT,
+  assistantMessageId TEXT,
+  createdByUserId TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('ask', 'agent')),
+  providerConfigId TEXT,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+  error TEXT,
+  startedAt INTEGER,
+  finishedAt INTEGER,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (threadId) REFERENCES assistant_threads(id) ON DELETE CASCADE,
+  FOREIGN KEY (userMessageId) REFERENCES assistant_messages(id) ON DELETE SET NULL,
+  FOREIGN KEY (assistantMessageId) REFERENCES assistant_messages(id) ON DELETE SET NULL
+);
+-- ;;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_runs_one_active_per_thread
+  ON assistant_runs(threadId)
+  WHERE status IN ('queued', 'running');
+-- ;;
+
+CREATE TABLE IF NOT EXISTS assistant_preference_settings (
+  scopeType TEXT NOT NULL CHECK (scopeType IN ('global', 'user', 'project')),
+  scopeId TEXT NOT NULL,
+  overridesJson TEXT NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  PRIMARY KEY (scopeType, scopeId)
+);
 -- ;;
 
 CREATE TABLE IF NOT EXISTS ai_provider_configs (

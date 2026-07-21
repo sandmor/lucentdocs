@@ -1458,7 +1458,7 @@ describe('chats service envelope', () => {
 
     const created = await adapter.services.chats.create(project.id, document.id)
     if (!created) throw new Error('Expected chat thread to be created.')
-    expect(created.settings.editingEnabled).toBe(false)
+    expect(created.settings.editingEnabled).toBe(true)
 
     const row = await adapter.repositories.chats.findById(project.id, document.id, created.id)
     expect(row?.messages).toBe(serializeThreadPayload(createEmptyChatThreadPayload()))

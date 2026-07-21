@@ -51,10 +51,15 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const messagesRef = useRef<UIMessage[]>([])
   const isGeneratingRef = useRef(false)
   const lastGenerationErrorRef = useRef<string | null>(null)
+  const preferenceSeededProjectRef = useRef<string | null>(null)
 
   const queryEnabled = Boolean(projectId)
 
   const threadsQuery = trpc.chat.listByProject.useQuery(
+    { projectId: projectId ?? '' },
+    { enabled: queryEnabled }
+  )
+  const assistantPreferencesQuery = trpc.assistantPreferences.getProject.useQuery(
     { projectId: projectId ?? '' },
     { enabled: queryEnabled }
   )
@@ -84,7 +89,9 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     if (!query) return threads
     return threads.filter((thread) => thread.title.toLocaleLowerCase().includes(query))
   }, [historyFilter, threads])
-  const activeThreadDocumentId = activeThread?.documentId ?? documentId
+  // Threads are project-owned. The active editor document is only the current
+  // tool/context target, so project history has no persistent document owner.
+  const activeThreadDocumentId = activeThread?.documentId || documentId
   const operationDocumentId = activeThreadDocumentId
 
   const activeThreadQuery = trpc.chat.getById.useQuery(
@@ -112,6 +119,17 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const editingEnabled = hasActiveThreadId
     ? (activeThreadQuery.data?.settings.editingEnabled ?? false)
     : draftEditingEnabled
+
+  useEffect(() => {
+    if (
+      !hasActiveThreadId &&
+      assistantPreferencesQuery.data &&
+      preferenceSeededProjectRef.current !== projectId
+    ) {
+      setDraftEditingEnabled(assistantPreferencesQuery.data.resolved.defaultMode === 'agent')
+      preferenceSeededProjectRef.current = projectId ?? null
+    }
+  }, [assistantPreferencesQuery.data, hasActiveThreadId, projectId])
 
   const { streamGenerationIdRef, enqueueStreamChunk, stopStreamChunkPump, startStreamChunkPump } =
     useChatStreamPump({
@@ -357,7 +375,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const createThread = useCallback(async () => {
     if (!projectId || !documentId) return null
     try {
-      const created = await createThreadMutation.mutateAsync({ projectId, documentId })
+      const created = await createThreadMutation.mutateAsync({ projectId, documentId, editingEnabled: draftEditingEnabled })
       utils.chat.listByProject.setData({ projectId }, (previous) => {
         const existing = previous?.threads ?? []
         return {
@@ -380,7 +398,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       toast.error('Chat Error', { description: message })
       return null
     }
-  }, [createThreadMutation, documentId, projectId, utils.chat.listByProject])
+  }, [createThreadMutation, documentId, draftEditingEnabled, projectId, utils.chat.listByProject])
 
   const deleteThread = useCallback(
     async (threadId: string) => {
