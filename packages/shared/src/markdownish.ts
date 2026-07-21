@@ -14,11 +14,102 @@ const markdownIt = new MarkdownIt('commonmark', {
   breaks: true,
 })
 
+/**
+ * markdown-it's CommonMark preset intentionally doesn't implement GFM task
+ * lists. Keep the small normalization here so AI insertion and plain-text
+ * paste share exactly the same list representation as imports and export.
+ */
+markdownIt.core.ruler.after('inline', 'lucent-task-lists', (state) => {
+  type ListRecord = {
+    open: (typeof state.tokens)[number]
+    close: (typeof state.tokens)[number] | null
+    items: Array<{ open: (typeof state.tokens)[number]; checked: boolean | null }>
+  }
+
+  const lists: ListRecord[] = []
+  const items: Array<{
+    record: ListRecord
+    item: ListRecord['items'][number]
+    seenInline: boolean
+  }> = []
+
+  for (const token of state.tokens) {
+    if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') {
+      lists.push({ open: token, close: null, items: [] })
+      continue
+    }
+
+    if (token.type === 'list_item_open') {
+      const record = lists.at(-1)
+      if (!record) continue
+      const item = { open: token, checked: null }
+      record.items.push(item)
+      items.push({ record, item, seenInline: false })
+      continue
+    }
+
+    if (token.type === 'inline') {
+      const active = items.at(-1)
+      if (!active || active.seenInline) continue
+      active.seenInline = true
+
+      const marker = /^\[([ xX])\][ \t]+/
+      const match = token.content.match(marker)
+      if (!match) continue
+
+      active.item.checked = match[1].toLowerCase() === 'x'
+      token.content = token.content.slice(match[0].length)
+      const firstChild = token.children?.[0]
+      if (firstChild?.type === 'text') {
+        firstChild.content = firstChild.content.replace(marker, '')
+      }
+      continue
+    }
+
+    if (token.type === 'list_item_close') {
+      items.pop()
+      continue
+    }
+
+    if (token.type === 'bullet_list_close' || token.type === 'ordered_list_close') {
+      const record = lists.pop()
+      if (!record) continue
+      record.close = token
+      if (!record.items.some((item) => item.checked !== null)) continue
+
+      // Lucent currently has one checklist presentation, so ordered task
+      // markers normalize to the supported unordered checklist type.
+      record.open.type = 'bullet_list_open'
+      record.open.tag = 'ul'
+      record.open.attrSet('data-list-kind', 'task')
+      record.close.type = 'bullet_list_close'
+      record.close.tag = 'ul'
+
+      for (const item of record.items) {
+        item.open.attrSet('data-checked', String(item.checked ?? false))
+      }
+    }
+  }
+
+  return true
+})
+
 const markdownParser = new MarkdownParser(schema, markdownIt, {
   blockquote: { block: 'blockquote' },
   paragraph: { block: 'paragraph' },
-  list_item: { block: 'list_item' },
-  bullet_list: { block: 'bullet_list' },
+  list_item: {
+    block: 'list_item',
+    getAttrs(token) {
+      const checked = token.attrGet('data-checked')
+      return { checked: checked === null ? null : checked === 'true' }
+    },
+  },
+  bullet_list: {
+    block: 'bullet_list',
+    getAttrs(token) {
+      return { kind: token.attrGet('data-list-kind') === 'task' ? 'task' : 'bullet' }
+    },
+  },
   ordered_list: {
     block: 'ordered_list',
     getAttrs(token) {

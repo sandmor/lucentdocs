@@ -46,9 +46,22 @@ function serializeAiZone(state: MarkdownSerializerState, node: Node) {
   state.renderContent(node)
 }
 
+function serializeBulletList(state: MarkdownSerializerState, node: Node) {
+  if (node.attrs.kind === 'task') {
+    state.renderList(node, '  ', (index) => {
+      const item = node.child(index)
+      return item.attrs.checked === true ? '- [x] ' : '- [ ] '
+    })
+    return
+  }
+
+  state.renderList(node, '  ', () => '- ')
+}
+
 export const lucentMarkdownSerializer = new MarkdownSerializer(
   {
     ...defaultMarkdownSerializer.nodes,
+    bullet_list: serializeBulletList,
     code_block: serializeCodeBlock,
     note_marker: serializeNoteMarker,
   },

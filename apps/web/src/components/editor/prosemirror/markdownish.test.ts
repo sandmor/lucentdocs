@@ -41,6 +41,60 @@ function findTextPos(doc: ProseMirrorNode, text: string): number {
 }
 
 describe('parseMarkdownishToSlice', () => {
+  test('parses nested GFM task items into the shared task-list attributes', () => {
+    const slice = parseMarkdownishToSlice(
+      ['- [x] shipped', '  - [ ] write tests', '- plain item'].join('\n')
+    )
+
+    expect(slice.content.toJSON()).toEqual([
+      {
+        type: 'bullet_list',
+        attrs: { kind: 'task', id: null },
+        content: [
+          {
+            type: 'list_item',
+            attrs: { checked: true },
+            content: [
+              {
+                type: 'paragraph',
+                attrs: { id: null },
+                content: [{ type: 'text', text: 'shipped' }],
+              },
+              {
+                type: 'bullet_list',
+                attrs: { kind: 'task', id: null },
+                content: [
+                  {
+                    type: 'list_item',
+                    attrs: { checked: false },
+                    content: [
+                      {
+                        type: 'paragraph',
+                        attrs: { id: null },
+                        content: [{ type: 'text', text: 'write tests' }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'list_item',
+            attrs: { checked: false },
+            content: [
+              {
+                type: 'paragraph',
+                attrs: { id: null },
+                content: [{ type: 'text', text: 'plain item' }],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+  })
+
   test('does not create a new paragraph for plain inline continuation', () => {
     const doc = createParagraphDoc('ripe apple')
     const cursorPos = findTextPos(doc, 'apple')

@@ -671,8 +671,111 @@
   margin: 0.75em 0;
 }
 
+.ProseMirror ul {
+  list-style-type: disc;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+}
+
 .ProseMirror li {
   margin-bottom: 0.25em;
+}
+
+.ProseMirror li > p {
+  margin-bottom: 0;
+}
+
+.ProseMirror li > [data-task-content] > p {
+  margin-bottom: 0;
+}
+
+.ProseMirror li::marker {
+  color: color-mix(in oklch, var(--foreground) 68%, var(--muted-foreground));
+}
+
+.ProseMirror li > ul,
+.ProseMirror li > ol {
+  margin: 0.3em 0 0.15em;
+}
+
+.ProseMirror li > [data-task-content] > ul,
+.ProseMirror li > [data-task-content] > ol {
+  margin: 0.3em 0 0.15em;
+}
+
+.ProseMirror ul[data-list-kind='task'] {
+  list-style: none;
+  padding-left: 0.2rem;
+}
+
+.ProseMirror li[data-checked] {
+  list-style: none;
+  min-height: 1.85em;
+  padding-left: 1.75rem;
+  position: relative;
+}
+
+.ProseMirror li[data-checked] > input[type='checkbox'] {
+  appearance: none;
+  background-color: color-mix(in oklch, var(--card) 84%, var(--background));
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 0.72rem;
+  border: 1px solid color-mix(in oklch, var(--foreground) 32%, var(--border));
+  block-size: 1rem;
+  border-radius: 0.28rem;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, var(--background) 70%, transparent),
+    0 1px 1px color-mix(in oklch, var(--foreground) 10%, transparent);
+  cursor: pointer;
+  inline-size: 1rem;
+  left: 0.15rem;
+  margin: 0;
+  position: absolute;
+  top: 0.48em;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.ProseMirror li[data-checked] > input[type='checkbox']:hover {
+  background-color: color-mix(in oklch, var(--accent) 15%, var(--card));
+  border-color: color-mix(in oklch, var(--accent) 60%, var(--border));
+}
+
+.ProseMirror li[data-checked] > input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ProseMirror li[data-checked] > input[type='checkbox']:checked {
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m3.5 8 2.8 2.8 6.2-6.1' stroke='%23251e16' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  border-color: color-mix(in oklch, var(--accent) 80%, var(--foreground));
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--accent) 36%, transparent);
+  transform: scale(1.04);
+}
+
+.ProseMirror li[data-checked='true'] > [data-task-content] > p {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
+  text-decoration-thickness: 1px;
+}
+
+@media (max-width: 639px) {
+  .ProseMirror ul,
+  .ProseMirror ol {
+    padding-left: 1.25rem;
+  }
+
+  .ProseMirror ul[data-list-kind='task'] {
+    padding-left: 0;
+  }
 }
 
 .ProseMirror hr {

@@ -17,7 +17,11 @@ function mergeDomAttrs(output: unknown, blockId: string | null | undefined): DOM
 
   // If index 1 is already a plain attrs object, merge into it.
   if (typeof second === 'object' && second !== null && !Array.isArray(second)) {
-    return [tag, mergeBlockIdIntoDomAttrs(second as Record<string, string>, blockId), ...rest] as DOMOutputSpec
+    return [
+      tag,
+      mergeBlockIdIntoDomAttrs(second as Record<string, string>, blockId),
+      ...rest,
+    ] as DOMOutputSpec
   }
 
   // Otherwise (index 1 is 0 content hole, or missing), insert attrs at position 1 and preserve the rest.
@@ -66,7 +70,83 @@ function withBlockId(spec: NodeSpec): NodeSpec {
   }
 }
 
-const listNodes = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block')
+const baseListNodes = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block')
+
+const listNodes = baseListNodes
+  .update('bullet_list', {
+    ...baseListNodes.get('bullet_list')!,
+    attrs: {
+      ...(baseListNodes.get('bullet_list')!.attrs ?? {}),
+      /** `task` is rendered and serialized as a GFM checklist. */
+      kind: { default: 'bullet' },
+    },
+    parseDOM: [
+      {
+        tag: 'ul',
+        getAttrs(dom) {
+          const el = dom as HTMLElement
+          const isTaskList =
+            el.getAttribute('data-list-kind') === 'task' ||
+            el.classList.contains('task-list') ||
+            el.classList.contains('contains-task-list') ||
+            Boolean(el.querySelector(':scope > li > input[type="checkbox"]'))
+          return { kind: isTaskList ? 'task' : 'bullet' }
+        },
+      },
+    ],
+    toDOM(node) {
+      if (node.attrs.kind === 'task') {
+        return ['ul', { class: 'task-list', 'data-list-kind': 'task' }, 0]
+      }
+      return ['ul', 0]
+    },
+  })
+  .update('list_item', {
+    ...baseListNodes.get('list_item')!,
+    attrs: {
+      ...(baseListNodes.get('list_item')!.attrs ?? {}),
+      /** Null means a regular list item; booleans are checklist state. */
+      checked: { default: null },
+    },
+    parseDOM: [
+      {
+        tag: 'li[data-checked]',
+        contentElement: '[data-task-content]',
+        getAttrs(dom) {
+          const input = (dom as HTMLElement).querySelector(':scope > input[type="checkbox"]')
+          return { checked: input instanceof HTMLInputElement ? input.checked : false }
+        },
+      },
+      {
+        tag: 'li',
+        getAttrs(dom) {
+          const input = (dom as HTMLElement).querySelector(':scope > input[type="checkbox"]')
+          if (!input) return { checked: null }
+          return { checked: (input as HTMLInputElement).checked }
+        },
+      },
+    ],
+    toDOM(node) {
+      const checked = node.attrs.checked
+      if (typeof checked !== 'boolean') return ['li', 0]
+
+      return [
+        'li',
+        { 'data-checked': String(checked) },
+        [
+          'input',
+          {
+            type: 'checkbox',
+            checked: checked ? 'checked' : undefined,
+            contenteditable: 'false',
+            tabindex: '-1',
+            'aria-label': checked ? 'Mark task incomplete' : 'Mark task complete',
+          },
+        ],
+        ['div', { 'data-task-content': 'true' }, 0],
+      ]
+    },
+  })
 
 const nodesWithBlockIds = listNodes
   .update('code_block', withBlockId(listNodes.get('code_block')!))

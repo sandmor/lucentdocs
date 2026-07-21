@@ -35,4 +35,18 @@ describe('block id toDOM', () => {
     expect((withId[1] as Record<string, unknown>)['data-block-id']).toBe('test-block-id')
     expect(withoutId[1] === 0 || withoutId[1] === undefined).toBe(true)
   })
+
+  test('renders task-item content inside a dedicated wrapper', () => {
+    const spec = schema.nodes.list_item.spec.toDOM!(
+      schema.nodes.list_item.create(
+        { checked: false },
+        schema.nodes.paragraph.create(null, schema.text('Plan release'))
+      )
+    ) as unknown as unknown[]
+
+    expect(spec[0]).toBe('li')
+    expect((spec[2] as unknown[])[0]).toBe('input')
+    expect((spec[3] as unknown[])[0]).toBe('div')
+    expect(findContentHole(spec[3])).toBe(true)
+  })
 })

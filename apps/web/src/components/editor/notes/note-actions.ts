@@ -1,7 +1,6 @@
 import type { EditorView } from 'prosemirror-view'
 import type * as Y from 'yjs'
 import type { ActiveBlockInfo } from '../prosemirror/block-resolve'
-import { isListBlockType } from '../prosemirror/block-resolve'
 import { createNoteInMap } from './notes-store'
 import { getBlockIdAtPos } from './block-id-plugin'
 import type { NoteAnchorKind } from '@lucentdocs/shared'
@@ -18,13 +17,10 @@ export function addNoteForBlock(
   notesMap: Y.Map<unknown>,
   authorUserId: string
 ): { id: string; anchorId: string } | null {
-  if (isListBlockType(info.node.type.name)) return null
-
   const anchorId = resolveAnchorId(view, info)
   if (!anchorId) return null
 
-  const anchorKind: NoteAnchorKind =
-    info.node.type.name === 'note_marker' ? 'marker' : 'block'
+  const anchorKind: NoteAnchorKind = info.node.type.name === 'note_marker' ? 'marker' : 'block'
 
   const note = createNoteInMap(notesMap, {
     anchorKind,

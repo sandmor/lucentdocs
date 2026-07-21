@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EditorView } from 'prosemirror-view'
-import { ArrowDown, ArrowUp, Check } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -14,15 +14,22 @@ import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import { handleBlockAction } from '../prosemirror/block-actions'
 import {
   insertBlockMenuItems,
+  getTurnIntoBlockMenuItems,
   isBlockMenuItemChecked,
   isBlockMenuItemEnabled,
   mobilePrimaryIcons,
   moreBlockMenuItems,
-  turnIntoBlockMenuItems,
   type BlockMenuItem,
 } from './block-menu-config'
 import { addNoteForBlock } from '../notes/note-actions'
 import { turnBlockIntoNote } from '../notes/note-transforms'
+import {
+  canIndentListItem,
+  canOutdentListItem,
+  indentListItem,
+  isSelectionInList,
+  outdentListItem,
+} from '../prosemirror/list-commands'
 import type * as Y from 'yjs'
 
 type ExpandPanel = 'insert' | 'turn-into' | null
@@ -62,6 +69,16 @@ export function MobileBlockBar({
   const canMoveUp = !blockProtected && canMoveBlockUp(doc, activeBlock.pos)
   const canMoveDown =
     !blockProtected && canMoveBlockDown(doc, activeBlock.pos, activeBlock.node.nodeSize)
+  const isInList = isSelectionInList(view.state)
+  const canIndent = !blockProtected && canIndentListItem(view.state)
+  const canOutdent = !blockProtected && canOutdentListItem(view.state)
+
+  const runListCommand = useCallback(
+    (command: typeof indentListItem) => {
+      if (command(view.state, view.dispatch)) view.focus()
+    },
+    [view]
+  )
 
   const runAction = useCallback(
     (action: BlockActionId) => {
@@ -233,6 +250,38 @@ export function MobileBlockBar({
         </div>
       </div>
 
+      {isInList ? (
+        <div className="ai-inline-mobile-block-bar__row ai-inline-mobile-block-bar__row--list">
+          <span className="ai-inline-mobile-block-bar__label">List item</span>
+          <div className="ai-inline-mobile-block-bar__actions">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="ai-inline-mobile-block-bar__btn"
+              aria-label="Outdent list item"
+              disabled={!canOutdent}
+              onPointerDown={preventFocusSteal}
+              onClick={() => runListCommand(outdentListItem)}
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="ai-inline-mobile-block-bar__btn"
+              aria-label="Indent list item"
+              disabled={!canIndent}
+              onPointerDown={preventFocusSteal}
+              onClick={() => runListCommand(indentListItem)}
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {expandPanel === 'insert' ? (
         <MobileBlockExpandPanel
           title="Insert below"
@@ -246,7 +295,7 @@ export function MobileBlockBar({
       {expandPanel === 'turn-into' ? (
         <MobileBlockExpandPanel
           title="Turn into"
-          items={turnIntoBlockMenuItems}
+          items={getTurnIntoBlockMenuItems(activeBlock)}
           block={activeBlock}
           view={view}
           onAction={runAction}

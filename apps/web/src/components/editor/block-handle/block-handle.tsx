@@ -28,10 +28,10 @@ import { useIsCoarsePointer } from '../inline/hooks'
 import { emitAIZoneControlLayoutChange } from '../inline/layout-events'
 import {
   insertBlockMenuItems,
+  getTurnIntoBlockMenuItems,
   isBlockMenuItemChecked,
   isBlockMenuItemEnabled,
   moreBlockMenuItems,
-  turnIntoBlockMenuItems,
   type BlockMenuItem,
 } from './block-menu-config'
 import { addNoteForBlock } from '../notes/note-actions'
@@ -53,7 +53,13 @@ interface HandleSnapshot {
   height: number
 }
 
-export function BlockHandle({ view, container, notesMap, noteCreatorUserId, onNoteCreated }: BlockHandleProps) {
+export function BlockHandle({
+  view,
+  container,
+  notesMap,
+  noteCreatorUserId,
+  onNoteCreated,
+}: BlockHandleProps) {
   const isCoarsePointer = useIsCoarsePointer()
   const [activeBlock, setActiveBlock] = useState<ActiveBlockInfo | null>(null)
   const [lastActiveBlock, setLastActiveBlock] = useState<ActiveBlockInfo | null>(null)
@@ -371,9 +377,7 @@ export function BlockHandle({ view, container, notesMap, noteCreatorUserId, onNo
 
   const onDragStart = (event: React.DragEvent) => {
     if (!view || !effectiveBlock) return
-    if (
-      blockOverlapsProtectedZone(view, effectiveBlock.pos, effectiveBlock.node.nodeSize)
-    ) {
+    if (blockOverlapsProtectedZone(view, effectiveBlock.pos, effectiveBlock.node.nodeSize)) {
       event.preventDefault()
       return
     }
@@ -492,7 +496,7 @@ export function BlockHandle({ view, container, notesMap, noteCreatorUserId, onNo
         open={menuOpen === 'actions'}
         onOpenChange={(open) => handleMenuOpenChange('actions', open)}
         anchor={gripRef}
-        items={[...turnIntoBlockMenuItems, ...moreBlockMenuItems]}
+        items={[...getTurnIntoBlockMenuItems(effectiveBlock), ...moreBlockMenuItems]}
         block={effectiveBlock}
         view={view}
         onAction={runAction}
@@ -525,7 +529,7 @@ function BlockHandleMenu({
   onAction,
   showTurnIntoLabel = false,
 }: BlockHandleMenuProps) {
-  const turnIntoItems = turnIntoBlockMenuItems
+  const turnIntoItems = getTurnIntoBlockMenuItems(block)
   const moreItems = moreBlockMenuItems
 
   return (

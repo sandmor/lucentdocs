@@ -59,7 +59,16 @@ export function computeBlockHandleLayout(
   const editorRect = view.dom.getBoundingClientRect()
   const left = computeLeftGutterContainerX(editorRect, containerRect, BLOCK_HANDLE_WIDTH)
 
-  const contentPos = Math.min(block.pos + 1, view.state.doc.content.size)
+  // List and quote containers start above their first editable line. Descend
+  // through their first child so gutter controls align with the first marker /
+  // text line rather than the container's top margin.
+  let anchorNode = block.node
+  let anchorPos = block.pos
+  while (!anchorNode.isTextblock && anchorNode.firstChild) {
+    anchorNode = anchorNode.firstChild
+    anchorPos += 1
+  }
+  const contentPos = Math.min(anchorPos + 1, view.state.doc.content.size)
   try {
     const coords = view.coordsAtPos(contentPos)
     const lineHeight = Math.max(1, coords.bottom - coords.top)
@@ -122,7 +131,10 @@ export function stackSideElements(
   let cursor = Number.NEGATIVE_INFINITY
 
   for (const item of sorted) {
-    const top = Math.max(item.desiredTop, cursor === Number.NEGATIVE_INFINITY ? item.desiredTop : cursor + gap)
+    const top = Math.max(
+      item.desiredTop,
+      cursor === Number.NEGATIVE_INFINITY ? item.desiredTop : cursor + gap
+    )
     positions.set(item.id, top)
     cursor = top + item.height
   }

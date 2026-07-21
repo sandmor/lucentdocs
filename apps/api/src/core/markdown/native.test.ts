@@ -6,11 +6,7 @@ import * as Y from 'yjs'
 import { yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
 import { schema } from '@lucentdocs/shared'
 import { createTestAdapter } from '../../testing/factory.js'
-import {
-  markdownToProseMirrorDoc,
-  planMarkdownImport,
-  runNativeMassImport,
-} from './native.js'
+import { markdownToProseMirrorDoc, planMarkdownImport, runNativeMassImport } from './native.js'
 
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: unknown }): T {
   if (!result.ok) throw result.error
@@ -34,7 +30,11 @@ function normalizePmJson(value: unknown): unknown {
     const normalizedChild = normalizePmJson(child)
 
     if (key === 'attrs') {
-      if (normalizedChild && typeof normalizedChild === 'object' && !Array.isArray(normalizedChild)) {
+      if (
+        normalizedChild &&
+        typeof normalizedChild === 'object' &&
+        !Array.isArray(normalizedChild)
+      ) {
         const attrs = { ...(normalizedChild as Record<string, unknown>) }
         if (attrs.tight === true) delete attrs.tight
         const filtered = Object.fromEntries(
@@ -181,6 +181,51 @@ describe('planMarkdownImport', () => {
   })
 })
 
+describe('markdownToProseMirrorDoc', () => {
+  test('parses nested GFM checklists into task-list attributes', () => {
+    const result = markdownToProseMirrorDoc('- [x] Done\n  - [ ] Follow up\n- Plain')
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        type: 'doc',
+        content: [
+          {
+            type: 'bullet_list',
+            attrs: { kind: 'task', tight: true },
+            content: [
+              {
+                type: 'list_item',
+                attrs: { checked: true },
+                content: [
+                  { type: 'paragraph', content: [{ type: 'text', text: 'Done' }] },
+                  {
+                    type: 'bullet_list',
+                    attrs: { kind: 'task', tight: true },
+                    content: [
+                      {
+                        type: 'list_item',
+                        attrs: { checked: false },
+                        content: [
+                          { type: 'paragraph', content: [{ type: 'text', text: 'Follow up' }] },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                type: 'list_item',
+                attrs: { checked: false },
+                content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Plain' }] }],
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+})
+
 describe('runNativeMassImport', () => {
   test('persists Yjs content that y-prosemirror can decode to parser-equivalent JSON', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lucentdocs-native-import-yjs-'))
@@ -229,7 +274,10 @@ describe('runNativeMassImport', () => {
       const ydoc = new Y.Doc()
       try {
         Y.applyUpdate(ydoc, new Uint8Array(persisted))
-        const fromYjs = yXmlFragmentToProseMirrorRootNode(ydoc.getXmlFragment('prosemirror'), schema).toJSON()
+        const fromYjs = yXmlFragmentToProseMirrorRootNode(
+          ydoc.getXmlFragment('prosemirror'),
+          schema
+        ).toJSON()
         expect(normalizePmJson(fromYjs)).toEqual(normalizePmJson(parsed.value))
       } finally {
         ydoc.destroy()
@@ -276,7 +324,10 @@ describe('runNativeMassImport', () => {
       const ydoc = new Y.Doc()
       try {
         Y.applyUpdate(ydoc, new Uint8Array(persisted))
-        const fromYjs = yXmlFragmentToProseMirrorRootNode(ydoc.getXmlFragment('prosemirror'), schema).toJSON()
+        const fromYjs = yXmlFragmentToProseMirrorRootNode(
+          ydoc.getXmlFragment('prosemirror'),
+          schema
+        ).toJSON()
         expect(normalizePmJson(fromYjs)).toEqual(normalizePmJson(parsed.value))
       } finally {
         ydoc.destroy()

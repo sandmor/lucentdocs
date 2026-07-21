@@ -12,7 +12,6 @@ export const BLOCK_ID_NODE_TYPES = new Set([
   'image',
   'bullet_list',
   'ordered_list',
-  'list_item',
   'note_marker',
 ])
 

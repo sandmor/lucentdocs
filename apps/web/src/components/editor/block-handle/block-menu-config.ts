@@ -2,6 +2,9 @@ import {
   Check,
   Code2,
   Copy,
+  List,
+  ListChecks,
+  ListOrdered,
   MessageSquareText,
   MoreHorizontal,
   Pilcrow,
@@ -12,12 +15,19 @@ import {
 import type { EditorView } from 'prosemirror-view'
 import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import type { ActiveBlockInfo, BlockActionId } from '../prosemirror/block-resolve'
-import { supportsTurnInto } from '../prosemirror/block-resolve'
+import {
+  isListBlockType,
+  supportsListTurnInto,
+  supportsTurnInto,
+} from '../prosemirror/block-resolve'
 import { supportsTurnIntoNote } from '../notes/note-transforms'
 
 const PROTECTED_BLOCK_ACTIONS = new Set<BlockActionId>([
   'turn-into-paragraph',
   'turn-into-code',
+  'turn-into-unordered-list',
+  'turn-into-ordered-list',
+  'turn-into-task-list',
   'turn-into-note',
   'duplicate',
   'delete',
@@ -48,6 +58,21 @@ export const insertBlockMenuItems: BlockMenuItem[] = [
     label: 'Code block',
     icon: Code2,
   },
+  {
+    id: 'insert-unordered-list',
+    label: 'Unordered list',
+    icon: List,
+  },
+  {
+    id: 'insert-ordered-list',
+    label: 'Ordered list',
+    icon: ListOrdered,
+  },
+  {
+    id: 'insert-task-list',
+    label: 'Task list',
+    icon: ListChecks,
+  },
 ]
 
 export const turnIntoBlockMenuItems: BlockMenuItem[] = [
@@ -71,14 +96,36 @@ export const turnIntoBlockMenuItems: BlockMenuItem[] = [
     icon: MessageSquareText,
     isEnabled: (info) => supportsTurnIntoNote(info.node),
   },
+  {
+    id: 'turn-into-unordered-list',
+    label: 'Unordered list',
+    icon: List,
+    isEnabled: (info) => supportsListTurnInto(info.node),
+    isChecked: (info) => info.node.type.name === 'bullet_list' && info.node.attrs.kind !== 'task',
+  },
+  {
+    id: 'turn-into-ordered-list',
+    label: 'Ordered list',
+    icon: ListOrdered,
+    isEnabled: (info) => supportsListTurnInto(info.node),
+    isChecked: (info) => info.node.type.name === 'ordered_list',
+  },
+  {
+    id: 'turn-into-task-list',
+    label: 'Task list',
+    icon: ListChecks,
+    isEnabled: (info) => supportsListTurnInto(info.node),
+    isChecked: (info) => info.node.type.name === 'bullet_list' && info.node.attrs.kind === 'task',
+  },
 ]
+
+export const listTurnIntoBlockMenuItems = turnIntoBlockMenuItems.slice(-3)
 
 export const moreBlockMenuItems: BlockMenuItem[] = [
   {
     id: 'add-note',
     label: 'Add note',
     icon: MessageSquareText,
-    isEnabled: (info) => !isListType(info.node.type.name),
   },
   {
     id: 'duplicate',
@@ -94,8 +141,8 @@ export const moreBlockMenuItems: BlockMenuItem[] = [
   },
 ]
 
-function isListType(typeName: string): boolean {
-  return typeName === 'bullet_list' || typeName === 'ordered_list' || typeName === 'list_item'
+export function getTurnIntoBlockMenuItems(info: ActiveBlockInfo): BlockMenuItem[] {
+  return isListBlockType(info.node.type.name) ? listTurnIntoBlockMenuItems : turnIntoBlockMenuItems
 }
 
 export function isProtectedBlockAction(action: BlockActionId): boolean {

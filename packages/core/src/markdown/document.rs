@@ -45,6 +45,7 @@ fn parse_to_content_tree(
   let normalized = super::normalize(markdown, raw_html_mode);
   let mut opts = Options::empty();
   opts.insert(Options::ENABLE_SMART_PUNCTUATION);
+  opts.insert(Options::ENABLE_TASKLISTS);
   let parser = Parser::new_ext(&normalized, opts);
 
   let root = ContentNode::new("doc");
@@ -107,6 +108,23 @@ fn parse_to_content_tree(
                 new_children.push(ContentNode::new("paragraph"));
               }
               node.children = new_children;
+            }
+            TagEnd::List(_) => {
+              let has_task_items = node
+                .children
+                .iter()
+                .any(|child| child.type_name == "list_item" && child.attrs.contains_key("checked"));
+              if has_task_items {
+                // A checklist is intentionally one supported unordered type,
+                // even when source Markdown used ordered task markers.
+                node.type_name = "bullet_list".to_string();
+                node.attrs.insert("kind".to_string(), json!("task"));
+                for child in &mut node.children {
+                  if child.type_name == "list_item" && !child.attrs.contains_key("checked") {
+                    child.attrs.insert("checked".to_string(), json!(false));
+                  }
+                }
+              }
             }
             TagEnd::CodeBlock => {
               if let Some(last) = node.children.last_mut() {
@@ -185,6 +203,11 @@ fn parse_to_content_tree(
       Event::HardBreak => {
         if let Some(parent) = stack.last_mut() {
           parent.push_child(ContentNode::new("hard_break"));
+        }
+      }
+      Event::TaskListMarker(checked) => {
+        if let Some(parent) = stack.last_mut() {
+          parent.attrs.insert("checked".to_string(), json!(checked));
         }
       }
       Event::Rule => {
@@ -331,6 +354,7 @@ fn tag_to_node(tag: &Tag) -> ContentNode {
     Tag::List(None) => {
       let mut node = ContentNode::new("bullet_list");
       node.attrs.insert("tight".to_string(), json!(true));
+      node.attrs.insert("kind".to_string(), json!("bullet"));
       node
     }
     Tag::Item => ContentNode::new("list_item"),

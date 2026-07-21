@@ -10,10 +10,16 @@ export interface ActiveBlockInfo {
 export type BlockActionId =
   | 'insert-paragraph'
   | 'insert-code'
+  | 'insert-unordered-list'
+  | 'insert-ordered-list'
+  | 'insert-task-list'
   | 'add-note'
   | 'turn-into-note'
   | 'turn-into-paragraph'
   | 'turn-into-code'
+  | 'turn-into-unordered-list'
+  | 'turn-into-ordered-list'
+  | 'turn-into-task-list'
   | 'move-up'
   | 'move-down'
   | 'duplicate'
@@ -161,6 +167,14 @@ export function canMoveBlockDown(doc: PMNode, pos: number, nodeSize: number): bo
 export function supportsTurnInto(node: PMNode): boolean {
   if (node.type.name === 'note_marker') return false
   return TURN_INTO_SOURCE_TYPES.has(node.type.name)
+}
+
+export function supportsListTurnInto(node: PMNode): boolean {
+  return (
+    TURN_INTO_SOURCE_TYPES.has(node.type.name) ||
+    node.type.name === 'bullet_list' ||
+    node.type.name === 'ordered_list'
+  )
 }
 
 export function isActiveBlockInDoc(view: EditorView, info: ActiveBlockInfo): boolean {

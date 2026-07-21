@@ -16,4 +16,26 @@ describe('ensureBlockIds', () => {
     expect(new Set(ids).size).toBe(2)
     expect(ids.every((id) => /^[a-f0-9-]{36}$|^blk_/.test(id))).toBe(true)
   })
+
+  test('assigns identity to a list as one block, not to its items', () => {
+    const result = ensureBlockIds({
+      type: 'doc',
+      content: [
+        {
+          type: 'bullet_list',
+          content: [
+            {
+              type: 'list_item',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'One' }] }],
+            },
+          ],
+        },
+      ],
+    })
+
+    const list = (result.content as Array<Record<string, unknown>>)[0]!
+    const item = (list.content as Array<Record<string, unknown>>)[0]!
+    expect((list.attrs as Record<string, unknown>).id).toBeTruthy()
+    expect(item.attrs).toBeUndefined()
+  })
 })

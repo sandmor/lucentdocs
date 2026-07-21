@@ -4,13 +4,17 @@ import { TextSelection } from 'prosemirror-state'
 import { schema } from '@lucentdocs/shared'
 import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import type { ActiveBlockInfo, BlockActionId } from './block-resolve'
-import { supportsTurnInto } from './block-resolve'
+import { supportsListTurnInto, supportsTurnInto } from './block-resolve'
 import { moveBlockDown, moveBlockUp } from './block-move'
 import { toCodeBlock, toParagraph } from './block-transforms'
+import { insertListAfterBlock, turnBlockIntoList } from './list-commands'
 
 const BLOCK_MUTATION_ACTIONS = new Set<BlockActionId>([
   'turn-into-paragraph',
   'turn-into-code',
+  'turn-into-unordered-list',
+  'turn-into-ordered-list',
+  'turn-into-task-list',
   'move-up',
   'move-down',
   'duplicate',
@@ -31,6 +35,15 @@ export function handleBlockAction(
   if (
     (action === 'turn-into-paragraph' || action === 'turn-into-code') &&
     !supportsTurnInto(node)
+  ) {
+    return
+  }
+
+  if (
+    (action === 'turn-into-unordered-list' ||
+      action === 'turn-into-ordered-list' ||
+      action === 'turn-into-task-list') &&
+    !supportsListTurnInto(node)
   ) {
     return
   }
@@ -67,11 +80,29 @@ export function handleBlockAction(
       insertAfter(codeBlock.create())
       break
     }
+    case 'insert-unordered-list':
+      insertListAfterBlock(view, pos, node, 'bullet')
+      break
+    case 'insert-ordered-list':
+      insertListAfterBlock(view, pos, node, 'ordered')
+      break
+    case 'insert-task-list':
+      insertListAfterBlock(view, pos, node, 'task')
+      break
     case 'turn-into-paragraph':
       selectBlockAndTransform(() => toParagraph(view))
       break
     case 'turn-into-code':
       selectBlockAndTransform(() => toCodeBlock(view))
+      break
+    case 'turn-into-unordered-list':
+      turnBlockIntoList(view, pos, node, 'bullet')
+      break
+    case 'turn-into-ordered-list':
+      turnBlockIntoList(view, pos, node, 'ordered')
+      break
+    case 'turn-into-task-list':
+      turnBlockIntoList(view, pos, node, 'task')
       break
     case 'move-up':
       moveBlockUp(view, info)

@@ -1,6 +1,6 @@
 import { Plugin, type Command, type EditorState } from 'prosemirror-state'
 import { keymap } from 'prosemirror-keymap'
-import { baseKeymap, toggleMark } from 'prosemirror-commands'
+import { baseKeymap, chainCommands, toggleMark } from 'prosemirror-commands'
 import { history, undo, redo } from 'prosemirror-history'
 import { inputRules, wrappingInputRule, textblockTypeInputRule } from 'prosemirror-inputrules'
 import { gapCursor } from 'prosemirror-gapcursor'
@@ -20,6 +20,15 @@ import { createBlockIdPlugin } from '../notes/block-id-plugin'
 import { createNotesViewPlugin } from '../notes/notes-plugin'
 import { createNotesLifecyclePlugin } from '../notes/notes-lifecycle-plugin'
 import { createNoteMarkerClipboardPlugin } from '../notes/note-marker-clipboard-plugin'
+import {
+  createTaskListNormalizationPlugin,
+  createListClipboardPlugin,
+  exitEmptyListItem,
+  indentListItem,
+  outdentListItem,
+  splitListItem,
+  toggleTaskListItem,
+} from './list-commands'
 
 export type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>
 
@@ -45,6 +54,23 @@ function buildInputRules() {
 
   if (schema.nodes.code_block) {
     rules.push(textblockTypeInputRule(/^```$/, schema.nodes.code_block))
+  }
+
+  if (schema.nodes.bullet_list) {
+    rules.push(
+      wrappingInputRule(/^\s*[-+*]\s$/, schema.nodes.bullet_list, { kind: 'bullet' }),
+      wrappingInputRule(/^\s*[-+*]\s+\[([ xX])\]\s$/, schema.nodes.bullet_list, {
+        kind: 'task',
+      })
+    )
+  }
+
+  if (schema.nodes.ordered_list) {
+    rules.push(
+      wrappingInputRule(/^\s*(\d+)\.\s$/, schema.nodes.ordered_list, (match) => ({
+        order: Number(match[1]),
+      }))
+    )
   }
 
   return inputRules({ rules })
@@ -92,6 +118,15 @@ function buildFormatKeymap() {
   return keymap(bindings)
 }
 
+function buildListKeymap() {
+  return keymap({
+    Enter: chainCommands(splitListItem, exitEmptyListItem),
+    Tab: indentListItem,
+    'Shift-Tab': outdentListItem,
+    'Mod-Enter': toggleTaskListItem,
+  })
+}
+
 export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   const { aiHandlers, aiWriterController, collaboration, getNotesMap } = options
 
@@ -113,7 +148,9 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
     plugins.push(createNotesLifecyclePlugin(getNotesMap))
   }
   plugins.push(createNoteMarkerClipboardPlugin())
+  plugins.push(createListClipboardPlugin())
   plugins.push(createAIWriterPlugin(effectiveHandlers))
+  plugins.push(createTaskListNormalizationPlugin())
   plugins.push(buildInputRules())
 
   if (collaboration) {
@@ -141,6 +178,7 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
   }
 
   plugins.push(buildFormatKeymap())
+  plugins.push(buildListKeymap())
   plugins.push(keymap(buildCodeBlockKeymapCommand()))
   plugins.push(keymap(baseKeymap))
   plugins.push(blockDragPlugin)
