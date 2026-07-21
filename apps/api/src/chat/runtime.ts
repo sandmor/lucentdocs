@@ -23,6 +23,7 @@ import {
 
 export interface StartChatGenerationInput extends ChatScope {
   message: string
+  contextDocumentId?: string
   selectionFrom?: number
   selectionTo?: number
   assistantNodeId?: string
@@ -569,6 +570,7 @@ export class ChatRuntime {
       void this.#generationEngine.runGeneration(
         {
           scope,
+          contextDocumentId: input.contextDocumentId,
           baseThread: liveThread,
           promptMessages,
           rollbackThread,

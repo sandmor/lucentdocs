@@ -158,7 +158,7 @@ function ChatBubbleImpl({
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex min-h-7 items-center gap-2">
             <span className="text-xs font-medium text-foreground/80">
-              {isUser ? 'Author' : 'Editorial Assistant'}
+              {isUser ? 'Author' : 'Project Assistant'}
             </span>
 
             {!isEditing && (
@@ -442,7 +442,11 @@ function ToolTraceCard({ part }: { part: Record<string, unknown> }) {
         )}
 
         <span className="truncate text-foreground/70 group-hover:text-foreground transition-colors">
-          {toolName === 'edit' ? 'edit file' : toolName === 'write' ? 'write file' : toolName.replace(/-/g, ' ')}
+          {toolName === 'edit'
+            ? 'edit file'
+            : toolName === 'write'
+              ? 'write file'
+              : toolName.replace(/-/g, ' ')}
         </span>
 
         <span
@@ -465,9 +469,9 @@ function ToolTraceCard({ part }: { part: Record<string, unknown> }) {
 }
 
 export const EMPTY_CHAT_SUGGESTIONS = [
-  'Analyze the pacing of this section in relation to the rest of the story',
-  'Suggest alternative phrasings for the highlighted text',
-  'Punch up the dialogue here',
+  'Give me a concise map of this project and its open threads',
+  'Compare the active chapter with the rest of the project for continuity issues',
+  'Find where this character arc needs more support and make the edits',
 ] as const
 
 export function EmptyChatState({
@@ -479,9 +483,10 @@ export function EmptyChatState({
     <div className="flex h-full flex-col justify-end pb-4">
       <div className="space-y-5">
         <div>
-          <h4 className="font-medium text-foreground">Ready to review the draft?</h4>
+          <h4 className="font-medium text-foreground">What should we move forward?</h4>
           <p className="text-sm text-muted-foreground">
-            Context automatically includes your active chapter and any highlighted text.
+            Your active document and highlighted text are ready as context. The assistant can work
+            across the project.
           </p>
         </div>
 

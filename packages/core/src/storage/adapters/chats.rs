@@ -76,6 +76,27 @@ pub async fn list_by_document(
     .await
 }
 
+pub async fn list_by_project(
+  engine: &StorageEngine,
+  tx_id: Option<&str>,
+  project_id: &str,
+) -> StorageResult<Vec<ChatThreadDto>> {
+  engine
+    .with_conn(tx_id, async |conn| {
+      let rows = sqlx::query_as::<_, ChatThreadRow>(
+        "SELECT id, projectId, documentId, title, messages, createdAt, updatedAt
+           FROM chat_threads
+          WHERE projectId = ?
+          ORDER BY updatedAt DESC, createdAt DESC",
+      )
+      .bind(project_id)
+      .fetch_all(&mut *conn)
+      .await?;
+      Ok(rows.into_iter().map(row_to_dto).collect())
+    })
+    .await
+}
+
 pub async fn insert(
   engine: &StorageEngine,
   tx_id: Option<&str>,

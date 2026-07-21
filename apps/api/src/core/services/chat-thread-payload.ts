@@ -3,7 +3,7 @@ export interface ChatThreadSettings {
 }
 
 export const DEFAULT_CHAT_THREAD_SETTINGS: ChatThreadSettings = {
-  editingEnabled: false,
+  editingEnabled: true,
 }
 
 export interface ChatTreeNode {

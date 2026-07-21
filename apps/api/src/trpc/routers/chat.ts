@@ -63,6 +63,13 @@ function mapRuntimeError(error: unknown): TRPCError {
 }
 
 export const chatRouter = router({
+  listByProject: protectedProcedure
+    .input(z.object({ projectId: idSchema }))
+    .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      return { threads: await ctx.services.chats.listForProject(input.projectId) }
+    }),
+
   listByDocument: protectedProcedure
     .input(
       z.object({
@@ -254,6 +261,33 @@ export const chatRouter = router({
       }
     }),
 
+  rename: protectedProcedure
+    .input(
+      z.object({
+        projectId: idSchema,
+        documentId: idSchema,
+        chatId: idSchema,
+        title: z.string().trim().min(1).max(160),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId)
+      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      const updated = await ctx.services.chats.rename(
+        input.projectId,
+        input.documentId,
+        input.chatId,
+        input.title
+      )
+      if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Conversation not found' })
+      publishChatChangedEvent(input, {
+        reason: 'chats.update',
+        changedChatIds: [updated.id],
+        deletedChatIds: [],
+      })
+      return { id: updated.id, title: updated.title, updatedAt: updated.updatedAt }
+    }),
+
   updateMessageById: protectedProcedure
     .input(
       z.object({
@@ -393,11 +427,7 @@ export const chatRouter = router({
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
 
       try {
-        const updated = await ctx.chatRuntime.deleteMessagesById(
-          input,
-          input.messageId,
-          input.mode
-        )
+        const updated = await ctx.chatRuntime.deleteMessagesById(input, input.messageId, input.mode)
         return {
           id: updated.id,
           messages: updated.messages,
@@ -417,6 +447,7 @@ export const chatRouter = router({
         documentId: idSchema,
         chatId: idSchema,
         message: z.string(),
+        contextDocumentId: idSchema.optional(),
         selectionFrom: z.number().int().min(0).optional(),
         selectionTo: z.number().int().min(0).optional(),
       })
@@ -424,6 +455,9 @@ export const chatRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      if (input.contextDocumentId) {
+        await assertProjectDocument(input.projectId, input.contextDocumentId, ctx.services)
+      }
       const message = input.message.trim()
       const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
       if (message.length > maxChatMessageChars) {

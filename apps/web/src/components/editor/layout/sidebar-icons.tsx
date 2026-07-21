@@ -17,7 +17,7 @@ const panels: {
   icon: React.ComponentType<{ className?: string }>
 }[] = [
   { id: 'explorer', label: 'Explorer', icon: FolderOpen },
-  { id: 'chat', label: 'AI Chat', icon: MessageCircle },
+  { id: 'chat', label: 'Project Assistant', icon: MessageCircle },
   { id: 'project-settings', label: 'Project Settings', icon: Settings2 },
 ]
 

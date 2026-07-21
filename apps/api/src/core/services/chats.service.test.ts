@@ -60,6 +60,25 @@ const conversation: UIMessage[] = [
 ]
 
 describe('ChatsService tree operations', () => {
+  test('lists project conversations across their originating documents', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Project assistant', {
+      ownerUserId: LOCAL_DEFAULT_USER.id,
+    })
+    const first = await adapter.services.documents.createForProject(project.id, 'one.md')
+    const second = await adapter.services.documents.createForProject(project.id, 'two.md')
+    if (!first || !second) throw new Error('Expected documents')
+
+    await adapter.services.chats.create(project.id, first.id, 'First conversation')
+    await adapter.services.chats.create(project.id, second.id, 'Second conversation')
+
+    const threads = await adapter.services.chats.listForProject(project.id)
+    expect(threads).toHaveLength(2)
+    expect(new Set(threads.map((thread) => thread.documentId))).toEqual(
+      new Set([first.id, second.id])
+    )
+  })
+
   test('edits plain assistant text without removing later messages', async () => {
     const scope = await createThreadWithConversation(conversation)
     const updated = await scope.chats.updateMessageById(

@@ -41,6 +41,7 @@ export interface ChatThread {
 
 export interface ChatThreadSummary {
   id: string
+  documentId: string
   title: string
   createdAt: number
   updatedAt: number
@@ -48,6 +49,7 @@ export interface ChatThreadSummary {
 }
 
 export interface ChatsService {
+  listForProject(projectId: string): Promise<ChatThreadSummary[]>
   listForDocument(projectId: string, documentId: string): Promise<ChatThreadSummary[]>
   getById(projectId: string, documentId: string, chatId: string): Promise<ChatThread | null>
   create(projectId: string, documentId: string, title?: string): Promise<ChatThread | null>
@@ -55,7 +57,7 @@ export interface ChatsService {
     projectId: string,
     documentId: string,
     chatId: string,
-  payload: ChatThreadPayload
+    payload: ChatThreadPayload
   ): Promise<ChatThread | null>
   updateMessageById(
     projectId: string,
@@ -97,6 +99,12 @@ export interface ChatsService {
     chatId: string,
     settings: Partial<ChatThreadSettings>
   ): Promise<ChatThread | null>
+  rename(
+    projectId: string,
+    documentId: string,
+    chatId: string,
+    title: string
+  ): Promise<ChatThread | null>
   delete(projectId: string, documentId: string, chatId: string): Promise<boolean>
 }
 
@@ -134,6 +142,7 @@ async function payloadToThread(
 function toSummary(thread: ChatThread): ChatThreadSummary {
   return {
     id: thread.id,
+    documentId: thread.documentId,
     title: thread.title,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
@@ -154,6 +163,20 @@ async function loadPayload(
 
 export function createChatsService(repos: RepositorySet): ChatsService {
   return {
+    async listForProject(projectId: string): Promise<ChatThreadSummary[]> {
+      if (!isValidId(projectId)) return []
+      const rows = await repos.chats.listByProject(projectId)
+      const summaries: ChatThreadSummary[] = []
+      for (const row of rows) {
+        try {
+          summaries.push(toSummary(await payloadToThread(row, parseThreadPayload(row.messages))))
+        } catch {
+          // Ignore corrupt payloads in project history.
+        }
+      }
+      return summaries
+    },
+
     async listForDocument(projectId: string, documentId: string): Promise<ChatThreadSummary[]> {
       if (!isValidId(projectId) || !isValidId(documentId)) return []
       const rows = await repos.chats.listByDocument(projectId, documentId)
@@ -218,7 +241,7 @@ export function createChatsService(repos: RepositorySet): ChatsService {
       projectId: string,
       documentId: string,
       chatId: string,
-    payload: ChatThreadPayload
+      payload: ChatThreadPayload
     ): Promise<ChatThread | null> {
       if (!isValidId(projectId) || !isValidId(documentId) || !isValidId(chatId)) return null
       const existing = await repos.chats.findById(projectId, documentId, chatId)
@@ -346,6 +369,20 @@ export function createChatsService(repos: RepositorySet): ChatsService {
         },
         nextPayload
       )
+    },
+
+    async rename(projectId: string, documentId: string, chatId: string, title: string) {
+      const loaded = await loadPayload(repos, projectId, documentId, chatId)
+      if (!loaded) return null
+      const nextTitle = title.trim()
+      if (!nextTitle) return null
+      const updatedAt = Date.now()
+      const saved = await repos.chats.update(projectId, documentId, chatId, {
+        title: nextTitle,
+        updatedAt,
+      })
+      if (!saved) return null
+      return payloadToThread({ ...loaded.row, title: nextTitle, updatedAt }, loaded.payload)
     },
 
     async delete(projectId: string, documentId: string, chatId: string): Promise<boolean> {

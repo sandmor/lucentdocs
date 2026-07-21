@@ -24,6 +24,11 @@ export class ChatsRepository implements ChatsRepositoryPort {
     return rows.map(chatThreadFromDto)
   }
 
+  async listByProject(projectId: string): Promise<ChatThreadRow[]> {
+    const rows = await this.engine.chatsListByProject(currentTxId(), projectId)
+    return rows.map(chatThreadFromDto)
+  }
+
   async insert(row: ChatThreadRow): Promise<void> {
     await this.engine.chatsInsert(currentTxId(), chatThreadToDto(row))
   }

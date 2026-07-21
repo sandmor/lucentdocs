@@ -17,6 +17,7 @@ export interface UpdateChatThreadData {
 export interface ChatsRepositoryPort {
   findById(projectId: string, documentId: string, id: string): Promise<ChatThreadRow | undefined>
   listByDocument(projectId: string, documentId: string): Promise<ChatThreadRow[]>
+  listByProject(projectId: string): Promise<ChatThreadRow[]>
   insert(row: ChatThreadRow): Promise<void>
   update(
     projectId: string,

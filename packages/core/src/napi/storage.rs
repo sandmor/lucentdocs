@@ -565,6 +565,17 @@ impl NativeStorageEngine {
       .await
       .map_err(to_napi_err)
   }
+
+  #[napi]
+  pub async fn chats_list_by_project(
+    &self,
+    tx_id: Option<String>,
+    project_id: String,
+  ) -> Result<Vec<ChatThreadDto>> {
+    chats::list_by_project(&self.engine, tx_id.as_deref(), &project_id)
+      .await
+      .map_err(to_napi_err)
+  }
   #[napi]
   pub async fn chats_insert(
     &self,
@@ -1304,4 +1315,3 @@ impl NativeStorageEngine {
     crate::import::import_markdown_documents(&self.engine, request).await
   }
 }
-

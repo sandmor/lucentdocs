@@ -48,6 +48,7 @@ export declare class NativeStorageEngine {
   authDataDeleteExpiredSessions(txId: string | undefined | null, now: number): Promise<void>
   chatsFindById(txId: string | undefined | null, projectId: string, documentId: string, id: string): Promise<ChatThreadDto | null>
   chatsListByDocument(txId: string | undefined | null, projectId: string, documentId: string): Promise<Array<ChatThreadDto>>
+  chatsListByProject(txId: string | undefined | null, projectId: string): Promise<Array<ChatThreadDto>>
   chatsInsert(txId: string | undefined | null, row: ChatThreadDto): Promise<void>
   chatsUpdate(txId: string | undefined | null, projectId: string, documentId: string, id: string, data: UpdateChatThreadDataDto): Promise<boolean>
   chatsDeleteById(txId: string | undefined | null, projectId: string, documentId: string, id: string): Promise<boolean>

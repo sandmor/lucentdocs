@@ -40,6 +40,7 @@ export interface ChatScope {
 
 export interface GenerationOptions {
   scope: ChatScope
+  contextDocumentId?: string
   baseThread: PersistedChatThread
   promptMessages: UIMessage[]
   rollbackThread: PersistedChatThread
@@ -204,6 +205,7 @@ export class GenerationEngine {
   async runGeneration(options: GenerationOptions, callbacks: GenerationCallbacks): Promise<void> {
     const {
       scope,
+      contextDocumentId = scope.documentId,
       baseThread,
       promptMessages,
       rollbackThread,
@@ -226,7 +228,7 @@ export class GenerationEngine {
     try {
       const currentDocument = await this.#services.documents.getForProject(
         scope.projectId,
-        scope.documentId
+        contextDocumentId
       )
       if (!currentDocument) {
         throw callbacks.createRuntimeError(
@@ -256,7 +258,7 @@ export class GenerationEngine {
       }
 
       const currentFilePath = normalizeDocumentPath(currentDocument.title) || '(untitled)'
-      const noteRows = await this.#services.documentNotes.listByDocumentId(scope.documentId)
+      const noteRows = await this.#services.documentNotes.listByDocumentId(contextDocumentId)
       const fileContext = buildCurrentFileContextWithAnnotations(
         currentDocument.content,
         selectionFrom,
@@ -275,7 +277,6 @@ export class GenerationEngine {
 
       const model = await getLanguageModel({
         projectId: scope.projectId,
-        documentId: scope.documentId,
       })
       const modelMessages = await convertToModelMessages(toModelMessages(promptMessages))
       const runtimeLimits = configManager.getConfig().limits
@@ -284,7 +285,7 @@ export class GenerationEngine {
         model,
         system: `${rendered.systemPrompt}\n\n${rendered.userPrompt}`,
         messages: modelMessages,
-        tools: this.buildTools(scope, editingEnabled),
+        tools: this.buildTools({ ...scope, documentId: contextDocumentId }, editingEnabled),
         stopWhen: stepCountIs(runtimeLimits.aiToolSteps),
         maxOutputTokens: rendered.definition.defaults.maxOutputTokens,
         temperature: rendered.definition.defaults.temperature,
