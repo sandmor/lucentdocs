@@ -13,7 +13,7 @@ function stateAt(doc: ProseMirrorNode, pos: number): EditorState {
 
 describe('handleCodeBlockBackspace', () => {
   test('converts an empty code block at the start to a paragraph', () => {
-    const doc = schema.node('doc', null, [schema.node('code_block', null)])
+    const doc = schema.node('doc', null, [schema.node('code_block', { id: 'code-1' })])
     const state = stateAt(doc, 1)
     let applied: EditorState | undefined
 
@@ -23,6 +23,7 @@ describe('handleCodeBlockBackspace', () => {
       })
     ).toBe(true)
     expect(applied?.doc.firstChild?.type.name).toBe('paragraph')
+    expect(applied?.doc.firstChild?.attrs.id).toBe('code-1')
   })
 
   test('does not convert a non-empty code block at the start', () => {

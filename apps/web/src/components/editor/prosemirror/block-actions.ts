@@ -4,6 +4,7 @@ import { TextSelection } from 'prosemirror-state'
 import { schema } from '@lucentdocs/shared'
 import { blockOverlapsProtectedZone } from '../ai/ai-zone-protection'
 import type { ActiveBlockInfo, BlockActionId } from './block-resolve'
+import { supportsTurnInto } from './block-resolve'
 import { moveBlockDown, moveBlockUp } from './block-move'
 import { toCodeBlock, toParagraph } from './block-transforms'
 
@@ -28,9 +29,13 @@ export function handleBlockAction(
   const { pos, node } = { pos: info.pos, node: freshNode }
 
   if (
-    BLOCK_MUTATION_ACTIONS.has(action) &&
-    blockOverlapsProtectedZone(view, pos, node.nodeSize)
+    (action === 'turn-into-paragraph' || action === 'turn-into-code') &&
+    !supportsTurnInto(node)
   ) {
+    return
+  }
+
+  if (BLOCK_MUTATION_ACTIONS.has(action) && blockOverlapsProtectedZone(view, pos, node.nodeSize)) {
     return
   }
 
