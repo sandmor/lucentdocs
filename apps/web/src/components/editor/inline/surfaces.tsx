@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
   Bold,
   Check,
@@ -13,6 +14,8 @@ import {
   X,
   Code,
   Sparkles,
+  ArrowDown,
+  ArrowUp,
 } from 'lucide-react'
 import type { EditorView } from 'prosemirror-view'
 import { Streamdown } from 'streamdown'
@@ -235,7 +238,7 @@ export function SelectionComposeSurface({
 }
 
 interface AIZoneSurfaceProps {
-  rootRef: { current: HTMLDivElement | null } | null
+  rootRef: { current: HTMLElement | null } | null
   className: string
   animationPhase?: AnimationPhase
   view: EditorView
@@ -258,6 +261,10 @@ interface AIZoneSurfaceProps {
   suggestedByLabel?: string | null
   isMinimized?: boolean
   onToggleMinimize?: () => void
+  offscreenDirection?: 'above' | 'below' | null
+  zoneOrdinal?: number
+  onMorphStart?: () => void
+  onMorphComplete?: () => void
 }
 
 export function AIZoneSurface({
@@ -284,7 +291,12 @@ export function AIZoneSurface({
   suggestedByLabel = null,
   isMinimized,
   onToggleMinimize,
+  offscreenDirection = null,
+  zoneOrdinal,
+  onMorphStart,
+  onMorphComplete,
 }: AIZoneSurfaceProps) {
+  const shouldReduceMotion = useReducedMotion()
   const isProcessing = state === 'processing'
   const isReview = state === 'review'
   const choices = session?.choices ?? []
@@ -342,37 +354,14 @@ export function AIZoneSurface({
     onDismissChoices(zoneId)
   }
 
-  if (isMinimized && onToggleMinimize) {
-    return (
-      <div
-        ref={(node) => {
-          if (rootRef) {
-            rootRef.current = node
-          }
-        }}
-        className={className}
-        onClick={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          onToggleMinimize()
-        }}
-        title="Expand AI Controls"
-        data-testid="ai-inline-controls-minimized"
-        data-state={state}
-        data-zone-id={zoneId}
-        data-ai-phase={animationPhase}
-      >
-        {isProcessing ? (
-          <Loader2 className="size-4 animate-spin text-primary" />
-        ) : (
-          <Pen className="size-4 text-muted-foreground" />
-        )}
-      </div>
-    )
+  const isCompact = Boolean(isMinimized && onToggleMinimize)
+
+  const beginToggle = () => {
+    onToggleMinimize?.()
   }
 
   return (
-    <div
+    <motion.div
       ref={(node) => {
         if (rootRef) {
           rootRef.current = node
@@ -383,6 +372,21 @@ export function AIZoneSurface({
       data-state={state}
       data-zone-id={zoneId}
       data-ai-phase={animationPhase}
+      data-ai-zone-mode={isCompact ? 'compact' : 'expanded'}
+      data-editor-floating-obstacle="true"
+      animate={{
+        width: isCompact ? 40 : 'min(94vw, 420px)',
+        height: isCompact ? 40 : 'auto',
+        borderRadius: isCompact ? 999 : 12,
+      }}
+      transition={
+        shouldReduceMotion
+          ? { duration: 0 }
+          : { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
+      }
+      onAnimationStart={onMorphStart}
+      onAnimationComplete={onMorphComplete}
+      tabIndex={-1}
       onPointerDownCapture={() => onInteractionChange?.(true)}
       onFocusCapture={() => onInteractionChange?.(true)}
       onBlurCapture={(event) => {
@@ -397,11 +401,61 @@ export function AIZoneSurface({
         }
       }}
     >
+      <AnimatePresence
+        initial={false}
+        mode="popLayout"
+      >
+        {isCompact ? (
+          <motion.button
+            key="compact"
+            type="button"
+            className="absolute inset-0 flex items-center justify-center"
+            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.65 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.65 }}
+            transition={
+              shouldReduceMotion
+                ? { duration: 0 }
+                : { duration: 0.16, delay: 0.08, ease: [0.22, 1, 0.36, 1] }
+            }
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              beginToggle()
+            }}
+            title="Expand AI Controls"
+            data-testid="ai-inline-controls-minimized"
+          >
+            {zoneOrdinal ? (
+              <span className="text-[10px] font-semibold text-primary">{zoneOrdinal}</span>
+            ) : isProcessing ? (
+              <Loader2 className="size-4 animate-spin text-primary" />
+            ) : offscreenDirection === 'above' ? (
+              <ArrowUp className="size-4 text-muted-foreground" />
+            ) : offscreenDirection === 'below' ? (
+              <ArrowDown className="size-4 text-muted-foreground" />
+            ) : (
+              <Pen className="size-4 text-muted-foreground" />
+            )}
+          </motion.button>
+        ) : (
+          <motion.div
+            key="expanded"
+            className="flex min-h-0 w-full flex-1 flex-col"
+            initial={shouldReduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={shouldReduceMotion ? undefined : { opacity: 0 }}
+            transition={
+              shouldReduceMotion
+                ? { duration: 0 }
+                : { duration: 0.12, ease: [0.22, 1, 0.36, 1] }
+            }
+          >
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
         <div className="min-w-0">
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
             <Pen className="size-3" />
-            Inline AI
+            {zoneOrdinal ? `AI Zone ${zoneOrdinal}` : 'Inline AI'}
           </span>
           {suggestedByLabel ? (
             <div className="truncate text-[10px] text-muted-foreground/80">{suggestedByLabel}</div>
@@ -448,7 +502,7 @@ export function AIZoneSurface({
                 onClick={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
-                  onToggleMinimize()
+                  beginToggle()
                 }}
               >
                 <Minus className="size-3" />
@@ -458,7 +512,7 @@ export function AIZoneSurface({
         </div>
       </div>
 
-      <div className="space-y-2 p-2">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {session?.messages && session.messages.length > 0 ? (
           <div className="max-h-40 space-y-2 overflow-y-auto px-1">
             {session.messages.map((message) => (
@@ -686,6 +740,9 @@ export function AIZoneSurface({
           </div>
         ) : null}
       </div>
-    </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   )
 }

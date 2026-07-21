@@ -37,8 +37,9 @@ export function useSideElement({
   useEffect(() => {
     if (!enabled || !measuredNode) return
 
-    const reportHeight = () => {
-      const height = measuredNode.getBoundingClientRect().height
+    const reportHeight = (entry?: ResizeObserverEntry) => {
+      const blockSize = entry?.borderBoxSize[0]?.blockSize
+      const height = blockSize ?? measuredNode.offsetHeight
       if (height <= 0) return
       if (Math.abs(heightRef.current - height) < 0.5) return
       heightRef.current = height
@@ -46,7 +47,7 @@ export function useSideElement({
     }
 
     reportHeight()
-    const observer = new ResizeObserver(reportHeight)
+    const observer = new ResizeObserver((entries) => reportHeight(entries[0]))
     observer.observe(measuredNode)
     return () => observer.disconnect()
   }, [enabled, id, measuredNode, updateDescriptor])

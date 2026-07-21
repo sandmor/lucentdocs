@@ -18,7 +18,7 @@ interface SideElementProps {
 
 function positionTransition(reducedMotion: boolean | null) {
   if (reducedMotion) return { duration: 0 }
-  return { type: 'spring' as const, stiffness: 380, damping: 32, mass: 0.8 }
+  return { duration: 0.14, ease: [0.22, 1, 0.36, 1] as const }
 }
 
 export function SideElement({
@@ -47,12 +47,12 @@ export function SideElement({
   return (
     <motion.div
       ref={measureTarget === 'self' ? measureRef : undefined}
-      layout="position"
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.8 }}
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 4 }}
       transition={transition}
       className={cn('pointer-events-auto absolute z-58', className)}
+      data-editor-floating-obstacle="true"
       style={{
         left: `${Math.round(left)}px`,
         top: `${Math.round(top)}px`,

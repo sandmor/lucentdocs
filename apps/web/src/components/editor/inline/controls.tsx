@@ -10,7 +10,6 @@ import { RestoreSuggestionChip } from './restore-suggestion-chip'
 import type { ReviewZone } from './types'
 import {
   resolveActiveLoadingAnchor,
-  resolveActiveReviewZone,
   resolveReviewZones,
 } from './state-selectors'
 import type { SelectionRange } from '../selection/types'
@@ -98,10 +97,60 @@ export function InlineAIControls({
     return resolveReviewZones(state, loadingZoneId, sessionsById)
   }, [state, loadingZoneId, sessionsById])
 
-  const activeReviewZone = useMemo(
-    () => resolveActiveReviewZone(state, activeLoadingAnchor, reviewZones),
-    [state, activeLoadingAnchor, reviewZones]
-  )
+  const desktopZones = useMemo(() => {
+    const zones = new Map<string, {
+      key: string
+      zoneId?: string
+      sessionId?: string | null
+      from: number
+      to: number
+      state: 'processing' | 'review'
+      stuck: boolean
+      session: InlineZoneSession | null
+    }>()
+
+    const add = (zone: {
+      zoneId?: string
+      sessionId?: string | null
+      from: number
+      to: number
+      state: 'processing' | 'review'
+      stuck: boolean
+      session: InlineZoneSession | null
+    }) => {
+      // Keep a stream's control mounted while its temporary range gains a
+      // canonical zone id; otherwise it briefly duplicates during creation.
+      const key = zone.sessionId ?? zone.zoneId ?? `loading-${zone.from}-${zone.to}`
+      const current = zones.get(key)
+      if (!current || zone.state === 'processing') zones.set(key, { ...zone, key })
+    }
+
+    if (activeLoadingAnchor) {
+      add({
+        zoneId: activeLoadingAnchor.zoneId,
+        sessionId: activeLoadingAnchor.sessionId,
+        from: activeLoadingAnchor.from,
+        to: activeLoadingAnchor.to,
+        state: 'processing',
+        stuck: Boolean(state?.stuck),
+        session: activeLoadingAnchor.session,
+      })
+    }
+
+    for (const zone of reviewZones) {
+      add({
+        zoneId: zone.id,
+        sessionId: zone.sessionId,
+        from: zone.from,
+        to: zone.to,
+        state: zone.streaming ? 'processing' : 'review',
+        stuck: false,
+        session: zone.session,
+      })
+    }
+
+    return [...zones.values()].sort((left, right) => left.from - right.from)
+  }, [activeLoadingAnchor, reviewZones, state?.stuck])
 
   const localClientName = getLocalClientName()
 
@@ -174,40 +223,9 @@ export function InlineAIControls({
         onInteractionChange={onInteractionChange}
       />
 
-      {(() => {
-        const activeZone = activeLoadingAnchor
-          ? {
-              key:
-                activeLoadingAnchor.zoneId ??
-                `loading-${activeLoadingAnchor.from}-${activeLoadingAnchor.to}`,
-              zoneId: activeLoadingAnchor.zoneId,
-              sessionId: activeLoadingAnchor.sessionId,
-              from: activeLoadingAnchor.from,
-              to: activeLoadingAnchor.to,
-              state: 'processing' as const,
-              stuck: Boolean(state?.stuck),
-              session: activeLoadingAnchor.session,
-            }
-          : activeReviewZone
-            ? {
-                key: activeReviewZone.id,
-                zoneId: activeReviewZone.id,
-                sessionId: activeReviewZone.sessionId,
-                from: activeReviewZone.from,
-                to: activeReviewZone.to,
-                state: activeReviewZone.streaming ? ('processing' as const) : ('review' as const),
-                stuck: false,
-                session: activeReviewZone.session,
-              }
-            : null
-
-        if (!activeZone) return null
-
+      {desktopZones.map((activeZone, index) => {
         const sessionId = activeZone.sessionId ?? null
-        const serverGenerating = sessionId
-          ? Boolean(sessionStreamMetaById[sessionId]?.generating)
-          : false
-
+        const serverGenerating = sessionId ? Boolean(sessionStreamMetaById[sessionId]?.generating) : false
         return (
           <AIZoneFloatingControl
             key={activeZone.key}
@@ -220,6 +238,8 @@ export function InlineAIControls({
             session={activeZone.session}
             sessionPreview={sessionId ? (sessionPreviewsById[sessionId] ?? null) : null}
             serverGenerating={serverGenerating}
+            initialMinimized={activeZone.state !== 'processing'}
+            zoneOrdinal={index + 1}
             onAccept={onAccept}
             onReject={onReject}
             onStop={onStop}
@@ -235,7 +255,7 @@ export function InlineAIControls({
             )}
           />
         )
-      })()}
+      })}
     </>
   )
 }

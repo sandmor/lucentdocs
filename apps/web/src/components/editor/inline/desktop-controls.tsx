@@ -8,11 +8,6 @@ import { AI_ZONE_CONTROL_LAYOUT_EVENT, emitAIZoneControlLayoutChange } from './l
 import { AIZoneSurface, SelectionComposeSurface } from './surfaces'
 import type { InlineControlState } from './types'
 import {
-  clampSideElementToViewport,
-  computeLeftGutterViewportX,
-  getEditorContentRect,
-} from '../side-elements/layout'
-import {
   applyPosition,
   COLLISION_PADDING,
   getSelectionRect,
@@ -20,6 +15,33 @@ import {
 } from './utils'
 import type { SelectionRange } from '../selection/types'
 import type { EditorView } from 'prosemirror-view'
+import {
+  AI_ZONE_VIEWPORT_PADDING,
+  getOffscreenDirection,
+  placeAIZoneCard,
+  rect,
+  type AIZoneOffscreenDirection,
+  type AIZonePlacement,
+} from './ai-zone-placement'
+
+function getAIZoneViewport(view: EditorView): DOMRect {
+  const main = view.dom.closest('main')?.getBoundingClientRect()
+  const viewport = new DOMRect(0, 0, window.innerWidth, window.innerHeight)
+  if (!main) return viewport
+  const left = Math.max(viewport.left, main.left) + AI_ZONE_VIEWPORT_PADDING
+  const top = Math.max(viewport.top, main.top) + AI_ZONE_VIEWPORT_PADDING
+  const right = Math.min(viewport.right, main.right) - AI_ZONE_VIEWPORT_PADDING
+  const bottom = Math.min(viewport.bottom, main.bottom) - AI_ZONE_VIEWPORT_PADDING
+  return new DOMRect(left, top, Math.max(1, right - left), Math.max(1, bottom - top))
+}
+
+function floatingObstacles(exclude: HTMLElement): ReturnType<typeof rect>[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-editor-floating-obstacle="true"]'))
+    .filter((element) => element !== exclude)
+    .map((element) => element.getBoundingClientRect())
+    .filter((bounds) => bounds.width > 0 && bounds.height > 0)
+    .map((bounds) => rect(bounds.left, bounds.top, bounds.width, bounds.height))
+}
 
 interface SelectionComposeFloatingControlProps {
   view: EditorView
@@ -185,6 +207,8 @@ interface AIZoneFloatingControlProps {
   onRedoTurn?: (zoneId: string) => void
   onInteractionChange?: (interacting: boolean) => void
   suggestedByLabel?: string | null
+  initialMinimized?: boolean
+  zoneOrdinal?: number
 }
 
 export function AIZoneFloatingControl({
@@ -206,9 +230,14 @@ export function AIZoneFloatingControl({
   onRedoTurn,
   onInteractionChange,
   suggestedByLabel,
+  initialMinimized = false,
+  zoneOrdinal,
 }: AIZoneFloatingControlProps) {
-  const rootRef = useRef<HTMLDivElement>(null)
-  const [isMinimized, setIsMinimized] = useState(false)
+  const rootRef = useRef<HTMLElement>(null)
+  const [isMinimized, setIsMinimized] = useState(initialMinimized)
+  const [offscreenDirection, setOffscreenDirection] = useState<AIZoneOffscreenDirection>(null)
+  const [lockedSide, setLockedSide] = useState<AIZonePlacement['side'] | null>(null)
+  const [marker, setMarker] = useState<{ x: number; y: number; side: AIZonePlacement['side'] } | null>(null)
   const fromRef = useRef(from)
   const toRef = useRef(to)
   const scheduleUpdateRef = useRef<(() => void) | null>(null)
@@ -219,6 +248,18 @@ export function AIZoneFloatingControl({
     toRef.current = to
     scheduleUpdateRef.current?.()
   }, [from, to])
+
+  useEffect(() => {
+    if (!zoneId) return
+    const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(zoneId) : zoneId
+    const matches = Array.from(
+      view.dom.querySelectorAll<HTMLElement>(`.ai-generating-text[data-ai-zone-id="${escapedId}"]`)
+    )
+    for (const match of matches) match.dataset.aiZoneControlActive = 'true'
+    return () => {
+      for (const match of matches) delete match.dataset.aiZoneControlActive
+    }
+  }, [view, zoneId])
 
   const getZoneAnchorRect = useCallback((): DOMRect | null => {
     if (!zoneId) return null
@@ -261,37 +302,7 @@ export function AIZoneFloatingControl({
       }
     }
 
-    const scrollContainer = view.dom.closest('main')
-    let viewportTop = 0
-    let viewportBottom = window.innerHeight
-
-    if (scrollContainer) {
-      const containerRect = scrollContainer.getBoundingClientRect()
-      viewportTop = containerRect.top
-      viewportBottom = containerRect.bottom
-    }
-
-    let floatingHeight = 64
-    if (rootRef.current) {
-      const h = rootRef.current.getBoundingClientRect().height
-      if (h > 0) floatingHeight = h
-    }
-
-    const screenCenterY = (viewportTop + viewportBottom) / 2
-    const targetAnchorY = screenCenterY - 8 - floatingHeight / 2
-
-    const minAnchorY = zoneTop - 8
-    const maxAnchorY = zoneBottom - 8 - floatingHeight
-
-    let anchorY = targetAnchorY
-
-    if (minAnchorY <= maxAnchorY) {
-      anchorY = Math.max(minAnchorY, Math.min(maxAnchorY, targetAnchorY))
-    } else {
-      anchorY = zoneBottom
-    }
-
-    return new DOMRect(zoneLeft, anchorY, Math.max(1, zoneRight - zoneLeft), 1)
+    return new DOMRect(zoneLeft, zoneTop, Math.max(1, zoneRight - zoneLeft), Math.max(1, zoneBottom - zoneTop))
   }, [view, zoneId])
 
   useEffect(() => {
@@ -315,7 +326,10 @@ export function AIZoneFloatingControl({
 
     const applyComputedPosition = (x: number, y: number) => {
       if (cancelled) return
-      applyPosition(el, x, y)
+      const left = `${Math.round(x)}px`
+      const top = `${Math.round(y)}px`
+      if (el.style.left !== left) el.style.left = left
+      if (el.style.top !== top) el.style.top = top
       queueLayoutNotification()
     }
 
@@ -323,45 +337,44 @@ export function AIZoneFloatingControl({
       const anchorRect = getZoneAnchorRect()
       const requestId = ++positionRequestId
 
-      if (anchorRect) {
-        if (isMinimized) {
-          const editorRect = getEditorContentRect(view)
-          const rect = el.getBoundingClientRect()
-          const width = Math.max(rect.width, el.offsetWidth, 40)
-          const height = Math.max(rect.height, el.offsetHeight, 40)
-          const x = computeLeftGutterViewportX(editorRect, width)
-          const y = anchorRect.y + 8
-          const clamped = clampSideElementToViewport(x, y, width, height)
-          if (cancelled || requestId !== positionRequestId) return
-          applyComputedPosition(clamped.x, clamped.y)
-          return
-        }
+      if (!anchorRect) return
 
-        const virtualEl = {
-          getBoundingClientRect: () => anchorRect,
-          contextElement: view.dom as HTMLElement,
-        }
+      const viewport = getAIZoneViewport(view)
+      const anchor = rect(anchorRect.left, anchorRect.top, anchorRect.width, anchorRect.height)
+      const nextOffscreenDirection = getOffscreenDirection(
+        anchor,
+        rect(viewport.left, viewport.top, viewport.width, viewport.height),
+        offscreenDirection ? 24 : 8
+      )
+      setOffscreenDirection((current) => current === nextOffscreenDirection ? current : nextOffscreenDirection)
 
-        try {
-          const result = await computePosition(virtualEl, el, {
-            placement: 'bottom-start',
-            middleware: [
-              offset({ mainAxis: 8 }),
-              shift({ padding: 8, crossAxis: true }),
-              {
-                name: 'forceY',
-                fn(state) {
-                  return { y: state.rects.reference.y + 8 }
-                },
-              },
-            ],
-          })
-          if (cancelled || requestId !== positionRequestId) return
-          applyComputedPosition(result.x, result.y)
-        } catch {
-          // ignore transient compute errors while the editor DOM is mutating
-        }
-      }
+      const compact = isMinimized || nextOffscreenDirection !== null
+      const bounds = el.getBoundingClientRect()
+      const width = Math.max(bounds.width, el.offsetWidth, compact ? 40 : 1)
+      const height = Math.max(bounds.height, el.offsetHeight, compact ? 40 : 1)
+      const editorRect = view.dom.getBoundingClientRect()
+      const nextPlacement = placeAIZoneCard({
+        anchor,
+        viewport: rect(viewport.left, viewport.top, viewport.width, viewport.height),
+        editor: rect(editorRect.left, editorRect.top, editorRect.width, editorRect.height),
+        width,
+        height,
+        obstacles: floatingObstacles(el),
+        preferredSide: lockedSide,
+      })
+      const y = compact && nextOffscreenDirection
+        ? nextOffscreenDirection === 'above' ? viewport.top : viewport.bottom - height
+        : nextPlacement.y
+      if (cancelled || requestId !== positionRequestId) return
+      el.style.maxHeight = `${Math.round(viewport.height)}px`
+      setLockedSide((current) => current ?? nextPlacement.side)
+      const markerSide = lockedSide ?? nextPlacement.side
+      setMarker({
+        side: markerSide,
+        x: markerSide === 'right' ? editorRect.right + 4 : editorRect.left - 24,
+        y: Math.round(Math.min(Math.max(anchorRect.top, viewport.top), viewport.bottom - 20)),
+      })
+      applyComputedPosition(nextPlacement.x, y)
     }
 
     const scheduleUpdate = () => {
@@ -374,7 +387,10 @@ export function AIZoneFloatingControl({
 
     scheduleUpdateRef.current = scheduleUpdate
     scheduleUpdate()
-    const resizeObserver = new ResizeObserver(scheduleUpdate)
+    const resizeObserver = new ResizeObserver(() => {
+      if (el.dataset.aiZoneMorphing === 'true') return
+      scheduleUpdate()
+    })
     resizeObserver.observe(el)
     const cleanupAutoUpdate = autoUpdate(view.dom as HTMLElement, el, scheduleUpdate)
 
@@ -387,20 +403,57 @@ export function AIZoneFloatingControl({
       cleanupAutoUpdate()
       emitAIZoneControlLayoutChange()
     }
-  }, [view, zoneId, getZoneAnchorRect, isMinimized])
+  }, [view, zoneId, getZoneAnchorRect, isMinimized, offscreenDirection, lockedSide])
 
   const portalTarget = document.body
 
+  const handleToggleMinimize = () => {
+    if (offscreenDirection) {
+      const escapedId = zoneId && typeof CSS !== 'undefined' && CSS.escape
+        ? CSS.escape(zoneId)
+        : zoneId
+      const zone = escapedId
+        ? view.dom.querySelector<HTMLElement>(`.ai-generating-text[data-ai-zone-id="${escapedId}"]`)
+        : null
+      zone?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      setIsMinimized(false)
+      return
+    }
+    setIsMinimized((value) => !value)
+  }
+
   return createPortal(
+    <>
+      {marker && !isMinimized && !offscreenDirection ? (
+        <button
+          type="button"
+          className="fixed z-40 flex size-5 items-center justify-center rounded-full border border-primary/35 bg-background/95 text-[10px] font-semibold text-primary shadow-sm backdrop-blur-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          style={{ left: `${Math.round(marker.x)}px`, top: `${Math.round(marker.y)}px` }}
+          aria-label={`Focus AI Zone ${zoneOrdinal ?? ''}`.trim()}
+          title={`AI Zone ${zoneOrdinal ?? ''}`.trim()}
+          onClick={() => rootRef.current?.focus()}
+        >
+          {zoneOrdinal ?? '•'}
+        </button>
+      ) : null}
     <AIZoneSurface
       rootRef={rootRef}
-      className={`ai-inline-controls ai-writer-floating-controls ai-inline-animated ai-inline-animated-desktop fixed z-40 flex overflow-hidden border border-border bg-background/95 shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:shadow-black/40 dark:ring-white/10 ${
-        isMinimized
-          ? 'w-10 h-10 rounded-full items-center justify-center cursor-pointer hover:bg-muted/50 transition-colors'
-          : 'min-w-0 w-[min(94vw,420px)] flex-col rounded-xl font-sans text-[13px]'
+      className={`ai-inline-controls ai-writer-floating-controls ai-zone-control-card fixed z-40 flex overflow-hidden border bg-background/95 backdrop-blur-md ${
+        isMinimized || offscreenDirection !== null
+          ? 'items-center justify-center cursor-pointer hover:bg-muted/50'
+          : `min-w-0 flex-col ${lockedSide === 'left' ? 'border-r-2' : 'border-l-2'} border-primary/30 font-sans text-[13px]`
       }`}
-      isMinimized={isMinimized}
-      onToggleMinimize={() => setIsMinimized((v) => !v)}
+      isMinimized={isMinimized || offscreenDirection !== null}
+      onToggleMinimize={handleToggleMinimize}
+      offscreenDirection={offscreenDirection}
+      zoneOrdinal={zoneOrdinal}
+      onMorphStart={() => {
+        if (rootRef.current) rootRef.current.dataset.aiZoneMorphing = 'true'
+      }}
+      onMorphComplete={() => {
+        if (rootRef.current) delete rootRef.current.dataset.aiZoneMorphing
+        scheduleUpdateRef.current?.()
+      }}
       animationPhase={animationPhase}
       zoneId={zoneId}
       state={state}
@@ -420,7 +473,8 @@ export function AIZoneFloatingControl({
       onRedoTurn={onRedoTurn}
       onInteractionChange={onInteractionChange}
       suggestedByLabel={suggestedByLabel}
-    />,
+    />
+    </>,
     portalTarget
   )
 }

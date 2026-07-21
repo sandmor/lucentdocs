@@ -26,7 +26,10 @@ interface NoteCardProps {
 
 function springTransition(reducedMotion: boolean | null) {
   if (reducedMotion) return { duration: 0 }
-  return { type: 'spring' as const, stiffness: 380, damping: 32, mass: 0.8 }
+  // Dimension springs can overshoot while ProseMirror is recalculating its
+  // content height, which reads as a brief vertical stretch. A short ease-out
+  // keeps the morph deliberate without scaling text.
+  return { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const }
 }
 
 function fadeTransition(reducedMotion: boolean | null) {
@@ -64,7 +67,9 @@ export function NoteCard({
   useEffect(() => {
     if (isCollapsed) return
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCollapse()
+      if (e.key === 'Escape' && cardRef.current?.contains(document.activeElement)) {
+        onCollapse()
+      }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
@@ -109,7 +114,6 @@ export function NoteCard({
           ? 'cursor-pointer border border-border bg-background/95 shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md hover:bg-muted/50 dark:shadow-black/40 dark:ring-white/10'
           : 'note-card border border-border/70 bg-card/95 shadow-sm backdrop-blur-sm'
       )}
-      onClick={isCollapsed ? onExpand : undefined}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
@@ -120,6 +124,7 @@ export function NoteCard({
         style={{ pointerEvents: isCollapsed ? 'none' : 'auto' }}
         className="p-3"
         aria-hidden={isCollapsed}
+        inert={isCollapsed || undefined}
       >
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -190,6 +195,15 @@ export function NoteCard({
       >
         <MessageSquareText className="size-4 text-muted-foreground" />
       </motion.div>
+
+      {isCollapsed ? (
+        <button
+          type="button"
+          className="absolute inset-0 cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          aria-label="Expand note"
+          onClick={onExpand}
+        />
+      ) : null}
     </motion.div>
   )
 }
