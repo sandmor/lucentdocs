@@ -22,17 +22,25 @@ interface YSyncBindingPatchTarget {
   prosemirrorView: EditorView | null
   beforeTransactionSelection: RelativeSelectionSnapshot | null
   beforeAllTransactions: () => void
+  afterAllTransactions: () => void
   _isLocalCursorInView: () => boolean
   type: unknown
   mapping: unknown
   __lucentdocsSelectionPatchApplied?: boolean
+  __lucentdocsAbsoluteSelectionBeforeRemoteTx?: AbsoluteSelectionSnapshot | null
 }
 
-let pendingAbsoluteSelectionBeforeRemoteTx: AbsoluteSelectionSnapshot | null = null
+export function consumeAbsoluteSelectionSnapshotBeforeRemoteTx(
+  state: EditorState
+): AbsoluteSelectionSnapshot | null {
+  const syncState = ySyncPluginKey.getState(state) as
+    | { binding?: YSyncBindingPatchTarget }
+    | undefined
+  const binding = syncState?.binding
+  if (!binding) return null
 
-export function consumeAbsoluteSelectionSnapshotBeforeRemoteTx(): AbsoluteSelectionSnapshot | null {
-  const snapshot = pendingAbsoluteSelectionBeforeRemoteTx
-  pendingAbsoluteSelectionBeforeRemoteTx = null
+  const snapshot = binding.__lucentdocsAbsoluteSelectionBeforeRemoteTx ?? null
+  binding.__lucentdocsAbsoluteSelectionBeforeRemoteTx = null
   return snapshot
 }
 
@@ -69,7 +77,7 @@ function getRelativeSelectionFromDOM(
   const absolute = getAbsoluteSelectionFromDOM(view)
   if (!absolute) return null
 
-  pendingAbsoluteSelectionBeforeRemoteTx = absolute
+  binding.__lucentdocsAbsoluteSelectionBeforeRemoteTx = absolute
 
   return {
     type: (view.state.selection as typeof view.state.selection & { jsonID: string }).jsonID,
@@ -108,6 +116,9 @@ export function installYjsSelectionPatch(state: EditorState): void {
   if (!binding || binding.__lucentdocsSelectionPatchApplied) return
 
   binding.__lucentdocsSelectionPatchApplied = true
+  binding.__lucentdocsAbsoluteSelectionBeforeRemoteTx = null
+  const originalAfterAllTransactions = binding.afterAllTransactions
+
   binding.beforeAllTransactions = () => {
     if (binding.beforeTransactionSelection !== null || binding.prosemirrorView == null) {
       return
@@ -121,7 +132,7 @@ export function installYjsSelectionPatch(state: EditorState): void {
 
     const view = binding.prosemirrorView
     if (view) {
-      pendingAbsoluteSelectionBeforeRemoteTx = {
+      binding.__lucentdocsAbsoluteSelectionBeforeRemoteTx = {
         anchor: view.state.selection.anchor,
         head: view.state.selection.head,
       }
@@ -131,6 +142,11 @@ export function installYjsSelectionPatch(state: EditorState): void {
       binding as Parameters<typeof getRelativeSelection>[0],
       binding.prosemirrorView.state
     )
+  }
+
+  binding.afterAllTransactions = () => {
+    originalAfterAllTransactions()
+    binding.__lucentdocsAbsoluteSelectionBeforeRemoteTx = null
   }
 
   binding._isLocalCursorInView = () => false

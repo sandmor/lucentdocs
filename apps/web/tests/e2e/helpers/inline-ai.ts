@@ -128,7 +128,7 @@ export async function placeCaretAtText(page: PWPage, needle: string, occurrence 
 
   const found = await page.evaluate(
     ({ query, occurrenceIndex }) => {
-      const root = document.querySelector('.ProseMirror')
+      const root = document.querySelector<HTMLElement>('.ProseMirror')
       if (!root) return false
 
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
@@ -147,11 +147,16 @@ export async function placeCaretAtText(page: PWPage, needle: string, occurrence 
             const selection = window.getSelection()
             if (!selection) return false
 
+            root.focus({ preventScroll: true })
             const range = document.createRange()
             range.setStart(node, index + query.length)
             range.collapse(true)
             selection.removeAllRanges()
             selection.addRange(range)
+            // Programmatic DOM selection changes are reported asynchronously by
+            // Chromium. Flush the event synchronously so ProseMirror owns this
+            // selection before a remote Yjs update can replace its DOM anchor.
+            document.dispatchEvent(new Event('selectionchange'))
             return true
           }
 
@@ -175,7 +180,7 @@ export async function selectEditorText(page: PWPage, needle: string, occurrence 
 
   const found = await page.evaluate(
     ({ query, occurrenceIndex }) => {
-      const root = document.querySelector('.ProseMirror')
+      const root = document.querySelector<HTMLElement>('.ProseMirror')
       if (!root) return false
 
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
@@ -194,11 +199,13 @@ export async function selectEditorText(page: PWPage, needle: string, occurrence 
             const selection = window.getSelection()
             if (!selection) return false
 
+            root.focus({ preventScroll: true })
             const range = document.createRange()
             range.setStart(node, index)
             range.setEnd(node, index + query.length)
             selection.removeAllRanges()
             selection.addRange(range)
+            document.dispatchEvent(new Event('selectionchange'))
             return true
           }
 

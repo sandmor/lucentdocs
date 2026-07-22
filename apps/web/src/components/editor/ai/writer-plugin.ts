@@ -201,7 +201,10 @@ function createInactiveState(zones: AIZone[] = []): AIWriterState {
 
 function mapPositionThroughTransactions(
   position: number,
-  transactions: readonly { docChanged: boolean; mapping: { map: (pos: number, bias?: number) => number } }[]
+  transactions: readonly {
+    docChanged: boolean
+    mapping: { map: (pos: number, bias?: number) => number }
+  }[]
 ): number {
   let mapped = position
   for (const transaction of transactions) {
@@ -240,7 +243,10 @@ function shouldRevertIllegalInsideZoneSelection(
   }
 }
 
-function protectedRanges(state: AIWriterState, doc: ProseMirrorNode): Array<{ from: number; to: number }> {
+function protectedRanges(
+  state: AIWriterState,
+  doc: ProseMirrorNode
+): Array<{ from: number; to: number }> {
   return getProtectionRangesForZones(doc, state.zones)
 }
 
@@ -283,8 +289,7 @@ export function sessionIdsWithEndedZoneStreaming(
 
     const nextZone = nextZones.find(
       (zone) =>
-        zone.id === previousZone.id &&
-        (zone.sessionId ?? null) === (previousZone.sessionId ?? null)
+        zone.id === previousZone.id && (zone.sessionId ?? null) === (previousZone.sessionId ?? null)
     )
     if (nextZone && !nextZone.streaming) {
       endedSessionIds.push(previousZone.sessionId)
@@ -454,7 +459,7 @@ export function createAIWriterPlugin(handlers: AIWriterActionHandlers): Plugin {
             ?.isChangeOrigin === true
       )
       const absoluteSnapshot = wasRemoteYjs
-        ? consumeAbsoluteSelectionSnapshotBeforeRemoteTx()
+        ? consumeAbsoluteSelectionSnapshotBeforeRemoteTx(newState)
         : null
       if (absoluteSnapshot) {
         const restored = shouldRevertIllegalInsideZoneSelection(

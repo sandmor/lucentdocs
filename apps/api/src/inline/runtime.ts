@@ -161,12 +161,19 @@ function resolveTestInlineResponse(prompt: string): string {
 }
 
 function resolveTestInlineDelayMs(prompt: string): number {
+  const normalizedPrompt = prompt.trim().toLowerCase()
+  if (normalizedPrompt.includes('slow')) {
+    const slowEnvDelay = Number(process.env.LUCENTDOCS_TEST_INLINE_SLOW_DELAY_MS ?? '')
+    if (Number.isFinite(slowEnvDelay) && slowEnvDelay > 0) {
+      return Math.round(slowEnvDelay)
+    }
+  }
+
   const envDelay = Number(process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS ?? '')
   if (Number.isFinite(envDelay) && envDelay > 0) {
     return Math.round(envDelay)
   }
 
-  const normalizedPrompt = prompt.trim().toLowerCase()
   if (normalizedPrompt.includes('slow')) return 1200
   return 0
 }
@@ -536,7 +543,10 @@ export class InlineRuntime {
 
     const checkpoint = checkpoints[checkpoints.length - 1]
     if (checkpoint.assistantMessageId !== lastMessage.id) {
-      throw new InlineRuntimeError('BAD_REQUEST', 'Inline session undo checkpoints are out of sync.')
+      throw new InlineRuntimeError(
+        'BAD_REQUEST',
+        'Inline session undo checkpoints are out of sync.'
+      )
     }
 
     const clientName = normalizeRequesterClientName(requesterClientName)

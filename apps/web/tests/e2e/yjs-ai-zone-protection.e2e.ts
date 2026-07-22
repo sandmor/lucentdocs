@@ -54,9 +54,12 @@ test('select-all delete does not remove a pending AI zone', async ({ page }) => 
   await page.keyboard.type('Once ')
   await startInlineGeneration(page)
 
-  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toHaveCount(0, {
-    timeout: 20_000,
-  })
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toHaveCount(
+    0,
+    {
+      timeout: 20_000,
+    }
+  )
   await expect(editor).toContainText(/Once\s*spark/)
 
   const selectAll = process.platform === 'darwin' ? 'Meta+a' : 'Control+a'
@@ -155,6 +158,13 @@ test('local caret stays outside the zone across remote updates while AI is proce
 
     await expect(editorOne).toContainText('Tail line local peer edit')
     await expect(editorOne).not.toContainText('Start edit')
+
+    await page
+      .locator('.ai-writer-floating-controls[data-state="processing"] [data-action="stop"]')
+      .click({ force: true })
+    await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toHaveCount(
+      0
+    )
   } finally {
     await secondContext.close().catch(() => {})
   }

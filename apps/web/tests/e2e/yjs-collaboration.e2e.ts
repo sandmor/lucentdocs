@@ -1,5 +1,31 @@
 import { expect, test } from '@playwright/test'
-import { createProject, placeCaretAtText } from './helpers/inline-ai'
+import { createProject, placeCaretAtText, waitForEditorConnected } from './helpers/inline-ai'
+
+test('page reload reuses the room without duplicating document content', async ({
+  browser,
+  page,
+}) => {
+  await createProject(page, 'Yjs Reconnect Identity Stability')
+
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('Reconnect content appears once')
+  await expect(editor).toHaveText('Reconnect content appears once')
+
+  await page.reload()
+  await waitForEditorConnected(page, 20_000)
+  await expect(editor).toHaveText('Reconnect content appears once')
+
+  const peerContext = await browser.newContext()
+  const peerPage = await peerContext.newPage()
+  try {
+    await peerPage.goto(page.url())
+    await waitForEditorConnected(peerPage)
+    await expect(peerPage.locator('.ProseMirror')).toHaveText('Reconnect content appears once')
+  } finally {
+    await peerContext.close()
+  }
+})
 
 test('yjs syncs edits from one client to another on same document', async ({ browser, page }) => {
   await createProject(page, 'Yjs Collaboration')

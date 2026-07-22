@@ -133,7 +133,10 @@ export class YjsRuntime {
     if (this.#initializedDocs.has(documentName) && docs.has(documentName)) {
       const doc = getYDoc(documentName)
       return ensureBlockIds(
-        yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+        yXmlFragmentToProseMirrorRootNode(
+          doc.getXmlFragment('prosemirror'),
+          schema
+        ).toJSON() as JsonObject
       )
     }
 
@@ -148,7 +151,10 @@ export class YjsRuntime {
     await this.ensureDocumentLoaded(documentName)
     const doc = getYDoc(documentName)
     return ensureBlockIds(
-      yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+      yXmlFragmentToProseMirrorRootNode(
+        doc.getXmlFragment('prosemirror'),
+        schema
+      ).toJSON() as JsonObject
     )
   }
 
@@ -360,11 +366,7 @@ export class YjsRuntime {
     prosemirrorJson: JsonObject,
     options: { evictLive?: boolean; closeCode?: number; closeReason?: string } = {}
   ): Promise<void> {
-    await this.replaceDocumentBundle(
-      documentName,
-      { doc: prosemirrorJson, notes: [] },
-      options
-    )
+    await this.replaceDocumentBundle(documentName, { doc: prosemirrorJson, notes: [] }, options)
   }
 
   async replaceDocumentBundle(
@@ -415,7 +417,10 @@ export class YjsRuntime {
     if (liveDoc) {
       return {
         doc: ensureBlockIds(
-          yXmlFragmentToProseMirrorRootNode(liveDoc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+          yXmlFragmentToProseMirrorRootNode(
+            liveDoc.getXmlFragment('prosemirror'),
+            schema
+          ).toJSON() as JsonObject
         ),
         notes: snapshotsFromRecords(notesMapToRecords(documentName, liveDoc)),
       }
@@ -474,7 +479,10 @@ export class YjsRuntime {
     if (!this.#isCurrentDocumentInstance(documentName, doc)) return
 
     const prosemirrorJson = ensureBlockIds(
-      yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+      yXmlFragmentToProseMirrorRootNode(
+        doc.getXmlFragment('prosemirror'),
+        schema
+      ).toJSON() as JsonObject
     )
     const noteRecords = notesMapToRecords(documentName, doc)
     const now = Date.now()
@@ -523,10 +531,20 @@ export class YjsRuntime {
     }
 
     const pmJson = ensureBlockIds(JSON.parse(contentRow.content) as JsonObject)
-    const built = prosemirrorJSONToYDoc(schema, pmJson)
-    const update = Y.encodeStateAsUpdate(built)
-    Y.applyUpdate(doc, update)
-    built.destroy()
+    const canonicalDoc = schema.nodeFromJSON(pmJson)
+    const fragment = doc.getXmlFragment('prosemirror')
+
+    // The canonical ProseMirror document is authoritative, but the persisted Yjs
+    // update carries the stable CRDT identities that reconnecting clients still
+    // reference. Reconcile canonical content into that identity graph instead of
+    // applying a separately-built Y.Doc, which would merge duplicate content when
+    // an existing client reconnects after a server restart.
+    doc.transact(() => {
+      updateYFragment(doc, fragment, canonicalDoc, {
+        mapping: new Map(),
+        isOMark: new Map(),
+      })
+    }, 'canonical-reconciliation')
     hydrateNotesMap(doc, noteRows)
     await this.#persistDocumentState(documentName, doc)
   }
@@ -558,13 +576,22 @@ export class YjsRuntime {
         (this.#documentInstances.get(documentName) ?? 0) + 1
       )
 
+      const contentRow = await this.#repos.documentContent.findByDocumentId(documentName)
       const blob = await this.#repos.yjsDocuments.getPersisted(documentName)
 
-      const contentRow = await this.#repos.documentContent.findByDocumentId(documentName)
+      // Restore the previous CRDT identity graph before reconciling the canonical
+      // ProseMirror document. Canonical content still wins; the blob only prevents
+      // reconnecting clients from presenting the same content under disjoint Yjs IDs.
+      if (blob) {
+        Y.applyUpdate(doc, new Uint8Array(blob), 'persistence-load')
+      }
+
       if (contentRow) {
         await this.#loadFromCanonical(documentName, doc)
       } else if (blob) {
-        Y.applyUpdate(doc, new Uint8Array(blob))
+        // Legacy blobs may predate the canonical projection. Materialize it now so
+        // subsequent reads and cold starts follow the same authority invariant.
+        await this.#persistDocumentState(documentName, doc)
       } else {
         await this.#createAndPersistDefaultContent(documentName, doc)
       }

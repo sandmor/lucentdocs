@@ -39,9 +39,9 @@ describe('YjsRuntime', () => {
     documentsService = adapter.services.documents
   })
 
-  afterEach(() => {
-    yjsRuntime.shutdown()
-    void adapter.adapter.engine.close()
+  afterEach(async () => {
+    await yjsRuntime.shutdown()
+    await adapter.adapter.engine.close()
   })
 
   test('flushes pending in-memory updates so content survives restart', async () => {
@@ -103,6 +103,10 @@ describe('YjsRuntime', () => {
       yjsRuntime.ensureDocumentLoaded(doc.id),
       yjsRuntime.ensureDocumentLoaded(doc.id),
     ])
+    const firstLiveDoc = docs.get(doc.id)
+    await yjsRuntime.ensureDocumentLoaded(doc.id)
+
+    expect(docs.get(doc.id)).toBe(firstLiveDoc)
 
     const content = await documentsService.getContent(doc.id)
     expect(content).toBeTruthy()
@@ -154,9 +158,9 @@ describe('DocumentsService YJS operations', () => {
     documentsService = adapter.services.documents
   })
 
-  afterEach(() => {
-    yjsRuntime.shutdown()
-    void adapter.adapter.engine.close()
+  afterEach(async () => {
+    await yjsRuntime.shutdown()
+    await adapter.adapter.engine.close()
   })
 
   test('getContent returns default content for new document', async () => {
@@ -229,7 +233,10 @@ describe('DocumentsService YJS operations', () => {
     await yjsRuntime.replaceDocumentBundle(doc.id, { doc: makeDoc('canonical-truth'), notes: [] })
 
     const staleDoc = prosemirrorJSONToYDoc(schema, makeDoc('stale-blob'))
-    await adapter.repositories.yjsDocuments.set(doc.id, Buffer.from(Y.encodeStateAsUpdate(staleDoc)))
+    await adapter.repositories.yjsDocuments.set(
+      doc.id,
+      Buffer.from(Y.encodeStateAsUpdate(staleDoc))
+    )
     staleDoc.destroy()
 
     const content = await documentsService.getContent(doc.id)
@@ -239,10 +246,52 @@ describe('DocumentsService YJS operations', () => {
     yjsRuntime.evictLiveDocument(doc.id)
     await yjsRuntime.ensureDocumentLoaded(doc.id)
     const liveDoc = docs.get(doc.id)!
-    const json = yXmlFragmentToProseMirrorRootNode(liveDoc.getXmlFragment('prosemirror'), schema).toJSON() as {
+    const json = yXmlFragmentToProseMirrorRootNode(
+      liveDoc.getXmlFragment('prosemirror'),
+      schema
+    ).toJSON() as {
       content?: Array<{ content?: Array<{ text?: string }> }>
     }
     expect(json.content?.[0]?.content?.[0]?.text).toBe('canonical-truth')
+  })
+
+  test('cold reload preserves Yjs identities so reconnecting clients do not duplicate content', async () => {
+    const doc = await documentsService.create('reconnect-identities.md')
+    await yjsRuntime.replaceDocumentBundle(doc.id, {
+      doc: makeDoc('one canonical paragraph'),
+      notes: [],
+    })
+    await yjsRuntime.ensureDocumentLoaded(doc.id)
+
+    const originalServerDoc = docs.get(doc.id)
+    if (!originalServerDoc) throw new Error('Expected initial live Yjs document.')
+
+    const reconnectingClient = new Y.Doc()
+    Y.applyUpdate(reconnectingClient, Y.encodeStateAsUpdate(originalServerDoc))
+
+    yjsRuntime.evictLiveDocument(doc.id)
+    await yjsRuntime.ensureDocumentLoaded(doc.id)
+
+    const restartedServerDoc = docs.get(doc.id)
+    if (!restartedServerDoc) throw new Error('Expected reloaded live Yjs document.')
+
+    // Simulate the bidirectional state-vector exchange performed by y-websocket.
+    // If the cold server rebuilt canonical JSON under fresh Yjs IDs, this merge
+    // would retain both copies of the paragraph.
+    Y.applyUpdate(restartedServerDoc, Y.encodeStateAsUpdate(reconnectingClient))
+    Y.applyUpdate(reconnectingClient, Y.encodeStateAsUpdate(restartedServerDoc))
+
+    const json = yXmlFragmentToProseMirrorRootNode(
+      restartedServerDoc.getXmlFragment('prosemirror'),
+      schema
+    ).toJSON() as {
+      content?: Array<{ content?: Array<{ text?: string }> }>
+    }
+
+    expect(json.content).toHaveLength(1)
+    expect(json.content?.[0]?.content?.[0]?.text).toBe('one canonical paragraph')
+
+    reconnectingClient.destroy()
   })
 
   test('epoch bump prevents stale live flush from overwriting canonical restore', async () => {
