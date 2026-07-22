@@ -23,16 +23,23 @@ function dividerRule(): InputRule {
   })
 }
 
-function inlineMarkRule(pattern: RegExp, markType: MarkType): InputRule {
+function inlineMarkRule(pattern: RegExp, markType: MarkType, delimiterLength: number): InputRule {
   return new InputRule(pattern, (state, match, start, end) => {
     const text = match[1]
     if (!text || /^\s|\s$/.test(text)) return null
-    const from = start + match[0].indexOf(text)
-    const tr = state.tr.delete(start, from).delete(from + text.length, end)
-    const mappedFrom = tr.mapping.map(from, -1)
-    const mappedTo = mappedFrom + text.length
-    tr.addMark(mappedFrom, mappedTo, markType.create())
-    return tr.setSelection(TextSelection.create(tr.doc, mappedTo))
+
+    // `end` only covers document content that already exists. During ordinary
+    // typing the final delimiter is still in the browser input event, whereas
+    // after composition it is already in the document. Replacing the entire
+    // existing syntax range with the captured text works in both cases.
+    const textStart = start + match[0].indexOf(text)
+    const replacementStart = textStart - delimiterLength
+    const tr = state.tr.insertText(text, replacementStart, end)
+    const replacementEnd = replacementStart + text.length
+    tr.addMark(replacementStart, replacementEnd, markType.create())
+    tr.setSelection(TextSelection.create(tr.doc, replacementEnd))
+    tr.removeStoredMark(markType)
+    return tr
   })
 }
 
@@ -43,14 +50,14 @@ export function buildMarkdownTypingRules(): InputRule[] {
   const em = schema.marks.em
 
   // Delimiters are deliberately constrained to a single textblock segment.
-  if (code) rules.push(inlineMarkRule(/`([^`\n]+)`$/, code))
+  if (code) rules.push(inlineMarkRule(/`([^`\n]+)`$/, code, 1))
   if (strong) {
-    rules.push(inlineMarkRule(/\*\*([^*\n]+)\*\*$/, strong))
-    rules.push(inlineMarkRule(/__([^_\n]+)__$/, strong))
+    rules.push(inlineMarkRule(/\*\*([^*\n]+)\*\*$/, strong, 2))
+    rules.push(inlineMarkRule(/__([^_\n]+)__$/, strong, 2))
   }
   if (em) {
-    rules.push(inlineMarkRule(/(?:^|\s)\*([^*\n]+)\*$/, em))
-    rules.push(inlineMarkRule(/(?:^|\s)_([^_\n]+)_$/, em))
+    rules.push(inlineMarkRule(/(?:^|\s)\*([^*\n]+)\*$/, em, 1))
+    rules.push(inlineMarkRule(/(?:^|\s)_([^_\n]+)_$/, em, 1))
   }
   return rules
 }
