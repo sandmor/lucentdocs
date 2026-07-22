@@ -309,6 +309,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
             createdAt: event.thread.createdAt,
             updatedAt: event.thread.updatedAt,
             generating: event.generating,
+            generationId: event.generationId,
           }
         )
 
@@ -375,7 +376,11 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const createThread = useCallback(async () => {
     if (!projectId || !documentId) return null
     try {
-      const created = await createThreadMutation.mutateAsync({ projectId, documentId, editingEnabled: draftEditingEnabled })
+      const created = await createThreadMutation.mutateAsync({
+        projectId,
+        documentId,
+        editingEnabled: draftEditingEnabled,
+      })
       utils.chat.listByProject.setData({ projectId }, (previous) => {
         const existing = previous?.threads ?? []
         return {
@@ -402,14 +407,14 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
 
   const deleteThread = useCallback(
     async (threadId: string) => {
-      const threadDocumentId = threads.find((thread) => thread.id === threadId)?.documentId
-      if (!projectId || !threadDocumentId) return
+      const contextDocumentId = documentId ?? operationDocumentId
+      if (!projectId || !contextDocumentId) return
       if (isGenerating && threadId === activeThreadId) return
 
       try {
         await deleteThreadMutation.mutateAsync({
           projectId,
-          documentId: threadDocumentId,
+          documentId: contextDocumentId,
           chatId: threadId,
         })
         utils.chat.listByProject.setData({ projectId }, (previous) => {
@@ -428,8 +433,9 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     [
       activeThreadId,
       deleteThreadMutation,
-      threads,
+      documentId,
       isGenerating,
+      operationDocumentId,
       projectId,
       resetLocalChatState,
       utils.chat.listByProject,
@@ -737,6 +743,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
                 createdAt: Date.now(),
                 updatedAt: updated.updatedAt,
                 generating: false,
+                generationId: null,
               }
             }
             return {

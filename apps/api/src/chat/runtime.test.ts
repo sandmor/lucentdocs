@@ -90,6 +90,44 @@ describe('ChatRuntime continue generation', () => {
 })
 
 describe('ChatRuntime generation completion', () => {
+  test('shares an active run across document scopes and late subscribers', async () => {
+    const adapter = createTestAdapter()
+    const project = await adapter.services.projects.create('Shared live run', {
+      ownerUserId: LOCAL_DEFAULT_USER.id,
+    })
+    const origin = await adapter.services.documents.createForProject(project.id, 'origin.md')
+    const destination = await adapter.services.documents.createForProject(project.id, 'destination.md')
+    if (!origin || !destination) throw new Error('Expected documents')
+    const thread = await adapter.services.chats.create(project.id, origin.id)
+    if (!thread) throw new Error('Expected a chat thread')
+
+    const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
+    const originScope = { projectId: project.id, documentId: origin.id, chatId: thread.id }
+    const destinationScope = { projectId: project.id, documentId: destination.id, chatId: thread.id }
+    const previousDelay = process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS
+    process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS = '100'
+
+    try {
+      await runtime.startGeneration({ ...originScope, message: 'Keep streaming' })
+      const lateEvents: Array<{ generating: boolean; generationId: string | null }> = []
+      const unsubscribe = await runtime.subscribe(destinationScope, (event) => {
+        if (event.type === 'snapshot') {
+          lateEvents.push({ generating: event.generating, generationId: event.generationId })
+        }
+      })
+
+      expect(runtime.isGenerating(destinationScope)).toBe(true)
+      expect((await runtime.getObserveState(destinationScope)).generating).toBe(true)
+      expect(lateEvents.some((event) => event.generating && event.generationId)).toBe(true)
+
+      unsubscribe()
+      runtime.cancelGeneration(destinationScope)
+    } finally {
+      if (previousDelay === undefined) delete process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS
+      else process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS = previousDelay
+    }
+  })
+
   test('completes test-mode generation and clears active state', async () => {
     const adapter = createTestAdapter()
     const project = await adapter.services.projects.create('Generation complete', {

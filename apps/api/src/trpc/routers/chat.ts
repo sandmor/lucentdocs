@@ -96,12 +96,8 @@ export const chatRouter = router({
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
-      const thread = await ctx.services.chats.getById(
-        input.projectId,
-        input.documentId,
-        input.chatId
-      )
-      if (!thread) {
+      const state = await ctx.chatRuntime.getObserveState(input)
+      if (!state.thread) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: `Chat thread ${input.chatId} not found`,
@@ -109,14 +105,15 @@ export const chatRouter = router({
       }
 
       return {
-        id: thread.id,
-        title: thread.title,
-        messages: thread.messages,
-        tree: thread.tree,
-        settings: thread.settings,
-        createdAt: thread.createdAt,
-        updatedAt: thread.updatedAt,
-        generating: ctx.chatRuntime.isGenerating(input),
+        id: state.thread.id,
+        title: state.thread.title,
+        messages: state.thread.messages,
+        tree: state.thread.tree,
+        settings: state.thread.settings,
+        createdAt: state.thread.createdAt,
+        updatedAt: state.thread.updatedAt,
+        generating: state.generating,
+        generationId: state.generationId,
       }
     }),
 

@@ -45,10 +45,11 @@ export class ChatRuntimeError extends Error {
 
 export function toChatKey(scope: {
   projectId: string
-  documentId: string
   chatId: string
 }): string {
-  return `${scope.projectId}:${scope.documentId}:${scope.chatId}`
+  // A conversation belongs to a project, not to the document that happened to
+  // be active when a run started. documentId remains run context only.
+  return `${scope.projectId}:${scope.chatId}`
 }
 
 export function toPersistedThread(thread: ChatThread | null): PersistedChatThread | null {

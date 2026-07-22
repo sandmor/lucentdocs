@@ -206,6 +206,16 @@ export class ChatRuntime {
     }
   }
 
+  /**
+   * Returns the same canonical state used to bootstrap subscriptions. This is
+   * intentionally live while a generation is active, so a document change or
+   * a second client cannot replace a partial answer with stale persisted data.
+   */
+  async getObserveState(scope: ChatScope): Promise<ChatObserveState> {
+    const key = toChatKey(scope)
+    return this.#liveStates.get(key) ?? this.#loadPersistedState(scope)
+  }
+
   async publishPersistedState(scope: ChatScope): Promise<void> {
     const state = await this.#loadPersistedState(scope)
     this.#emitSnapshot(state)
