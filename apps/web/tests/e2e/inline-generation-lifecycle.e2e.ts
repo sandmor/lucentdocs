@@ -92,6 +92,7 @@ test('accept then restore and reject reverts the assistant suggestion', async ({
   await expect(page.locator('.ai-generating-text')).toHaveCount(1)
   await expect(page.locator('.ai-writer-floating-controls')).toBeVisible()
 
+  await page.locator('.ai-writer-floating-controls').click()
   await page.locator('.ai-writer-floating-controls [data-action="reject"]').click()
   await expect(editor).toContainText('Once')
   await expect(editor).not.toContainText('spark')

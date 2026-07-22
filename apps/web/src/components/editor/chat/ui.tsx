@@ -139,6 +139,7 @@ function ChatBubbleImpl({
     <>
       <div
         data-chat-message-id={message.id}
+        data-chat-message-role={message.role}
         className={cn(
           'group/message animate-in fade-in-0 slide-in-from-bottom-1 flex w-full min-w-0 gap-3 py-3 duration-200',
           isUser ? 'items-start' : 'items-start rounded-lg bg-muted/30 px-3'

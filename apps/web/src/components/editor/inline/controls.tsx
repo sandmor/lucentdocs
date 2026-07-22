@@ -8,14 +8,10 @@ import { MobileInlineAIDock } from './mobile-dock'
 import { RestoreSuggestionChip } from './restore-suggestion-chip'
 
 import type { ReviewZone } from './types'
-import {
-  resolveActiveLoadingAnchor,
-  resolveReviewZones,
-} from './state-selectors'
+import { resolveActiveLoadingAnchor, resolveReviewZones } from './state-selectors'
 import type { SelectionRange } from '../selection/types'
 import { useEditorStore } from '@/lib/editor-store'
 import { shouldShowSelectionCompose } from './utils'
-import { getAIZones } from '../ai/writer-plugin'
 
 function resolveSuggestedByLabel(
   session: InlineZoneSession | null,
@@ -98,16 +94,19 @@ export function InlineAIControls({
   }, [state, loadingZoneId, sessionsById])
 
   const desktopZones = useMemo(() => {
-    const zones = new Map<string, {
-      key: string
-      zoneId?: string
-      sessionId?: string | null
-      from: number
-      to: number
-      state: 'processing' | 'review'
-      stuck: boolean
-      session: InlineZoneSession | null
-    }>()
+    const zones = new Map<
+      string,
+      {
+        key: string
+        zoneId?: string
+        sessionId?: string | null
+        from: number
+        to: number
+        state: 'processing' | 'review'
+        stuck: boolean
+        session: InlineZoneSession | null
+      }
+    >()
 
     const add = (zone: {
       zoneId?: string
@@ -157,7 +156,7 @@ export function InlineAIControls({
   const restorableSessions = useMemo(() => {
     if (!view) return []
     const liveSessionIds = new Set(
-      getAIZones(view)
+      (state?.zones ?? [])
         .map((zone) => zone.sessionId)
         .filter((sessionId): sessionId is string => Boolean(sessionId))
     )
@@ -168,7 +167,7 @@ export function InlineAIControls({
       if (dismissedRestoreSessionIds[sessionId]) return []
       return [{ sessionId, session }]
     })
-  }, [dismissedRestoreSessionIds, sessionsById, view])
+  }, [dismissedRestoreSessionIds, sessionsById, state?.zones, view])
 
   if (!view) return null
 
@@ -225,7 +224,9 @@ export function InlineAIControls({
 
       {desktopZones.map((activeZone, index) => {
         const sessionId = activeZone.sessionId ?? null
-        const serverGenerating = sessionId ? Boolean(sessionStreamMetaById[sessionId]?.generating) : false
+        const serverGenerating = sessionId
+          ? Boolean(sessionStreamMetaById[sessionId]?.generating)
+          : false
         return (
           <AIZoneFloatingControl
             key={activeZone.key}

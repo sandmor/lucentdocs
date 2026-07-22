@@ -126,8 +126,14 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       assistantPreferencesQuery.data &&
       preferenceSeededProjectRef.current !== projectId
     ) {
-      setDraftEditingEnabled(assistantPreferencesQuery.data.resolved.defaultMode === 'agent')
       preferenceSeededProjectRef.current = projectId ?? null
+      // Seed after React commits this external-query update. Scheduling avoids a
+      // cascading render while preserving the project preference for a new chat.
+      const timeoutId = window.setTimeout(() => {
+        setDraftEditingEnabled(assistantPreferencesQuery.data.resolved.defaultMode === 'agent')
+      }, 0)
+
+      return () => window.clearTimeout(timeoutId)
     }
   }, [assistantPreferencesQuery.data, hasActiveThreadId, projectId])
 
@@ -141,6 +147,10 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           return next
         }),
       onGeneratingChange: (generating) => {
+        // A finished client-side chunk stream can precede server persistence.
+        // Only the authoritative chat snapshot may clear the generating state;
+        // otherwise tree mutations can race finalization and be rejected.
+        if (!generating) return
         isGeneratingRef.current = generating
         setIsGenerating(generating)
       },
@@ -211,6 +221,11 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
 
     queueMicrotask(() => {
       if (cancelled) return
+      // A query started before generation can resolve after the live
+      // subscription has marked the thread active. Do not let that stale
+      // non-generating snapshot hide the stop state or replace streamed data;
+      // the subscription publishes the authoritative completion snapshot.
+      if (isGeneratingRef.current && !activeThreadQuery.data.generating) return
       const nextMessages = asUIMessageArray(activeThreadQuery.data.messages)
       const nextTree = activeThreadQuery.data.tree ?? null
       const nextGenerating = Boolean(activeThreadQuery.data.generating)
