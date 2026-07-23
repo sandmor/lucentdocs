@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Sigma, Trash2 } from 'lucide-react'
+import { Sigma, TextCursorInput, Trash2 } from 'lucide-react'
 import { NodeSelection, TextSelection } from 'prosemirror-state'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import type { EditorView } from 'prosemirror-view'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { useIsCoarsePointer } from '../inline/hooks'
+import { toggleInlineMath } from '../prosemirror/inline-math-commands'
 
 interface ActiveMath {
   pos: number
@@ -170,6 +171,18 @@ export function MathControls({
           <Sigma className="size-3" /> {isBlock ? 'Equation' : 'Inline equation'}
         </span>
         <div className="flex items-center gap-1">
+          {!isBlock ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Turn equation into text"
+              title="Turn into text"
+              onClick={() => toggleInlineMath(view)}
+            >
+              <TextCursorInput className="size-3" />
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="ghost"

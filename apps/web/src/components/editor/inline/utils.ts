@@ -1,5 +1,6 @@
 import type { MarkType } from 'prosemirror-model'
 import type { EditorView } from 'prosemirror-view'
+import { NodeSelection } from 'prosemirror-state'
 import { AI_ZONE_ALLOWED_META } from '../ai/ai-zone-protection'
 import { aiWriterPluginKey } from '../ai/writer-plugin'
 import type { FormatMarkName } from './types'
@@ -46,6 +47,14 @@ export function shouldShowSelectionCompose(
   selection: SelectionRange | null
 ): boolean {
   if (!selection || selection.from >= selection.to) return false
+  if (
+    view.state.selection instanceof NodeSelection &&
+    view.state.selection.node.type.name === 'math_inline' &&
+    view.state.selection.from === selection.from &&
+    view.state.selection.to === selection.to
+  ) {
+    return false
+  }
   if (selectionTouchesCodeBlock(view, selection.from, selection.to)) return false
   let touchesMathBlock = false
   view.state.doc.nodesBetween(selection.from, selection.to, (node) => {

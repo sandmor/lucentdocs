@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Node as ProseMirrorNode } from 'prosemirror-model'
-import { EditorState, TextSelection } from 'prosemirror-state'
+import { EditorState, NodeSelection, TextSelection } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 import { schema } from '@lucentdocs/shared'
 import {
@@ -68,6 +68,15 @@ describe('shouldShowSelectionCompose', () => {
     const view = viewFromDoc(doc, 2)
     const selection: SelectionRange = { from: 2, to: 5 }
     expect(shouldShowSelectionCompose(view, selection)).toBe(true)
+  })
+
+  test('returns false for an exact inline equation node selection', () => {
+    const equation = schema.nodes.math_inline.create({ latex: 'x' })
+    const doc = schema.node('doc', null, [schema.node('paragraph', null, [equation])])
+    const view = {
+      state: EditorState.create({ doc, selection: NodeSelection.create(doc, 1) }),
+    } as EditorView
+    expect(shouldShowSelectionCompose(view, { from: 1, to: 2 })).toBe(false)
   })
 })
 

@@ -44,6 +44,7 @@ import { resolveObservedInlineSessionIds } from './inline/resolve-observed-inlin
 import { aiWriterPluginKey, getAIZones, sessionIdsWithEndedZoneStreaming } from './ai/writer-plugin'
 import { emitEditorViewChange } from './prosemirror/view-store'
 import { getMathEntryEdge } from './prosemirror/math-navigation-plugin'
+import { toggleInlineMath } from './prosemirror/inline-math-commands'
 import {
   getLocalPresenceUser,
   installLocalPresenceUser,
@@ -730,14 +731,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         onConvertSelectionToMath={(selection) => {
           if (!viewRef.current) return false
           const view = viewRef.current
-          const math = schema.nodes.math_inline
-          if (!math || selection.from >= selection.to) return false
-          const latex = view.state.doc.textBetween(selection.from, selection.to, '', '')
-          if (!latex.trim() || /[\n\r]/.test(latex)) return false
-          const tr = view.state.tr.replaceWith(selection.from, selection.to, math.create({ latex }))
-          tr.setSelection(NodeSelection.create(tr.doc, selection.from))
-          view.dispatch(tr)
-          return true
+          if (view.state.selection.from !== selection.from || view.state.selection.to !== selection.to) {
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, selection.from, selection.to)))
+          }
+          return toggleInlineMath(view)
         }}
         onAccept={(zoneId) => {
           if (viewRef.current) aiControllerRef.current?.acceptAI(viewRef.current, zoneId)

@@ -11,6 +11,8 @@ import { createMathNodeViews } from '../nodes/math-node-view'
 import { MathControls } from '../nodes/math-controls'
 import { createMathNavigationPlugin, getMathEntryEdge } from '../prosemirror/math-navigation-plugin'
 import { createMarkdownClipboardPlugin } from '../prosemirror/list-commands'
+import { buildInlineMathTypingRules, undoMarkdownTypingRule } from '../prosemirror/typing-rules'
+import { inputRules } from 'prosemirror-inputrules'
 
 export interface NoteEditorHandle {
   focus(): void
@@ -71,7 +73,9 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
           ySyncPlugin(body, { mapping }),
           history(),
           createMarkdownClipboardPlugin({ target: 'note' }),
+          inputRules({ rules: buildInlineMathTypingRules(noteSchema) }),
           createMathNavigationPlugin(),
+          keymap({ Backspace: undoMarkdownTypingRule }),
           keymap(baseKeymap),
         ],
       })
