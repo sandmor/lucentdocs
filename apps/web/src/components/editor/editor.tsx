@@ -9,7 +9,7 @@ import {
 } from 'react'
 import type * as Y from 'yjs'
 import { Skeleton } from '@/components/ui/skeleton'
-import { EditorState, TextSelection } from 'prosemirror-state'
+import { EditorState, NodeSelection, TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { initProseMirrorDoc } from 'y-prosemirror'
 import { toast } from 'sonner'
@@ -26,6 +26,8 @@ import { RemotePresenceOverlay } from './collaboration/remote-presence-overlay'
 import { createAIBubbleNodeViews } from './collaboration/ai-bubble-node-view'
 import { createCodeBlockNodeView } from './nodes/code-block-node-view'
 import { createNoteMarkerNodeView } from './nodes/note-marker-node-view'
+import { createMathNodeViews } from './nodes/math-node-view'
+import { MathControls } from './nodes/math-controls'
 import { AIBubblePresenceStore } from './collaboration/ai-bubble-presence'
 import { SelectionFakeOverlay } from './selection/fake-overlay'
 import type { SelectionRange } from './selection/types'
@@ -41,6 +43,7 @@ import { useInlineSessionObserver } from './inline/use-inline-session-observer'
 import { resolveObservedInlineSessionIds } from './inline/resolve-observed-inline-session-ids'
 import { aiWriterPluginKey, getAIZones, sessionIdsWithEndedZoneStreaming } from './ai/writer-plugin'
 import { emitEditorViewChange } from './prosemirror/view-store'
+import { getMathEntryEdge } from './prosemirror/math-navigation-plugin'
 import {
   getLocalPresenceUser,
   installLocalPresenceUser,
@@ -222,6 +225,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
   const [isEditorFocused, setIsEditorFocused] = useState(false)
   const [mobileBlockBarInteracting, setMobileBlockBarInteracting] = useState(false)
+  const [activeMath, setActiveMath] = useState<{
+    pos: number
+    node: import('prosemirror-model').Node
+    entryEdge: 'start' | 'end'
+  } | null>(null)
 
   const meQuery = trpc.auth.me.useQuery()
   const noteCreatorUserId = meQuery.data?.id ?? 'local'
@@ -395,6 +403,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       nodeViews: {
         ...createAIBubbleNodeViews(bubblePresence),
         ...createCodeBlockNodeView(),
+        ...createMathNodeViews(),
         note_marker: createNoteMarkerNodeView(),
       },
       dispatchTransaction(tr) {
@@ -413,6 +422,20 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         emitAIStateChange(view)
 
         const { from, to, empty } = newState.selection
+        if (newState.selection instanceof NodeSelection) {
+          const selectedNode = newState.selection.node
+          if (selectedNode.type.name === 'math_inline' || selectedNode.type.name === 'math_block') {
+            setActiveMath({
+              pos: newState.selection.from,
+              node: selectedNode,
+              entryEdge: getMathEntryEdge(newState, newState.selection.from),
+            })
+          } else {
+            setActiveMath(null)
+          }
+        } else {
+          setActiveMath(null)
+        }
         const viewIsFocused = view.hasFocus()
         const interacting = selectionToolbarInteractingRef.current
 
@@ -704,6 +727,18 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
           return true
         }}
+        onConvertSelectionToMath={(selection) => {
+          if (!viewRef.current) return false
+          const view = viewRef.current
+          const math = schema.nodes.math_inline
+          if (!math || selection.from >= selection.to) return false
+          const latex = view.state.doc.textBetween(selection.from, selection.to, '', '')
+          if (!latex.trim() || /[\n\r]/.test(latex)) return false
+          const tr = view.state.tr.replaceWith(selection.from, selection.to, math.create({ latex }))
+          tr.setSelection(NodeSelection.create(tr.doc, selection.from))
+          view.dispatch(tr)
+          return true
+        }}
         onAccept={(zoneId) => {
           if (viewRef.current) aiControllerRef.current?.acceptAI(viewRef.current, zoneId)
         }}
@@ -758,6 +793,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         currentUserId={noteCreatorUserId}
         onNoteCreated={(noteId, anchorId) => setJustCreatedNote({ id: noteId, anchorId })}
       />
+      <MathControls view={editorView} active={activeMath} />
       <RemotePresenceOverlay view={editorView} awareness={presenceAwareness} />
       <SearchResultMarkers
         view={editorView}

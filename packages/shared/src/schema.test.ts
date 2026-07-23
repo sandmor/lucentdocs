@@ -50,3 +50,10 @@ describe('block id toDOM', () => {
     expect(findContentHole(spec[3])).toBe(true)
   })
 })
+
+describe('math schema nodes', () => {
+  test('exposes canonical source as leaf text', () => {
+    expect(schema.nodes.math_inline.create({ latex: 'x^2' }).textContent).toBe('$x^2$')
+    expect(schema.nodes.math_block.create({ latex: 'x=y' }).textContent).toBe('$$\nx=y\n$$')
+  })
+})

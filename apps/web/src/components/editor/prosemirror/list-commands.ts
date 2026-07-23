@@ -2,7 +2,7 @@ import { liftListItem, sinkListItem, splitListItemKeepMarks } from 'prosemirror-
 import { Plugin, TextSelection, type Command } from 'prosemirror-state'
 import type { Node as PMNode } from 'prosemirror-model'
 import type { EditorView } from 'prosemirror-view'
-import { parseMarkdownishToSlice, schema } from '@lucentdocs/shared'
+import { hasRecognizedMarkdownSyntax, parseMarkdownishToSlice, schema } from '@lucentdocs/shared'
 
 export type ListKind = 'bullet' | 'ordered' | 'task'
 
@@ -182,21 +182,38 @@ export function createTaskListNormalizationPlugin(): Plugin {
   })
 }
 
-export function createListClipboardPlugin(): Plugin {
+function isLucentClipboardHtml(html: string): boolean {
+  return /data-(?:math-inline|math-block|block-id|note-marker|ai-zone)/.test(html)
+}
+
+/**
+ * Upgrades recognizably Markdown plain text on paste. Internal Lucent HTML is
+ * intentionally left to ProseMirror's DOM parser so rich copies stay rich.
+ */
+export function createMarkdownClipboardPlugin(options: { target?: 'document' | 'note' } = {}): Plugin {
+  const target = options.target ?? 'document'
   return new Plugin({
     props: {
       handlePaste(view, event) {
-        // Keep code and ordinary prose literal. Rich HTML remains ProseMirror's
-        // preferred clipboard path; this only upgrades recognizably list-shaped
-        // plain text to the shared GFM representation.
-        if (event.clipboardData?.types.includes('text/html')) return false
-        if (view.state.selection.$from.parent.type === schema.nodes.code_block) return false
+        if (view.state.selection.$from.parent.type.name === 'code_block') return false
         const text = event.clipboardData?.getData('text/plain') ?? ''
-        if (!/^\s{0,3}(?:[-+*]|\d+\.)\s+(?:\[[ xX]\]\s+)?\S/m.test(text)) return false
+        if (!text || !hasRecognizedMarkdownSyntax(text, target)) return false
+
+        const html = event.clipboardData?.getData('text/html') ?? ''
+        if (html && isLucentClipboardHtml(html)) return false
 
         event.preventDefault()
+        const { $from, $to } = view.state.selection
         view.dispatch(
-          view.state.tr.replaceSelection(parseMarkdownishToSlice(text)).scrollIntoView()
+          view.state.tr
+            .replaceSelection(
+              parseMarkdownishToSlice(text, {
+                openStart: $from.parent.inlineContent,
+                openEnd: $to.parent.inlineContent,
+                target,
+              })
+            )
+            .scrollIntoView()
         )
         return true
       },

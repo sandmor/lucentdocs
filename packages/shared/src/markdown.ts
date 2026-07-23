@@ -46,6 +46,17 @@ function serializeAiZone(state: MarkdownSerializerState, node: Node) {
   state.renderContent(node)
 }
 
+function serializeInlineMath(state: MarkdownSerializerState, node: Node) {
+  state.write(`$${String(node.attrs.latex ?? '')}$`)
+}
+
+function serializeMathBlock(state: MarkdownSerializerState, node: Node) {
+  state.write('$$\n')
+  state.write(String(node.attrs.latex ?? ''))
+  state.write('\n$$')
+  state.closeBlock(node)
+}
+
 function serializeBulletList(state: MarkdownSerializerState, node: Node) {
   if (node.attrs.kind === 'task') {
     state.renderList(node, '  ', (index) => {
@@ -63,6 +74,8 @@ export const lucentMarkdownSerializer = new MarkdownSerializer(
     ...defaultMarkdownSerializer.nodes,
     bullet_list: serializeBulletList,
     code_block: serializeCodeBlock,
+    math_inline: serializeInlineMath,
+    math_block: serializeMathBlock,
     note_marker: serializeNoteMarker,
   },
   defaultMarkdownSerializer.marks

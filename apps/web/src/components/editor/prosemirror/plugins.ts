@@ -26,9 +26,10 @@ import { createBlockIdPlugin } from '../notes/block-id-plugin'
 import { createNotesViewPlugin } from '../notes/notes-plugin'
 import { createNotesLifecyclePlugin } from '../notes/notes-lifecycle-plugin'
 import { createNoteMarkerClipboardPlugin } from '../notes/note-marker-clipboard-plugin'
+import { createMathNavigationPlugin } from './math-navigation-plugin'
 import {
   createTaskListNormalizationPlugin,
-  createListClipboardPlugin,
+  createMarkdownClipboardPlugin,
   exitEmptyListItem,
   indentListItem,
   outdentListItem,
@@ -174,7 +175,8 @@ export function buildPlugins(options: BuildPluginsOptions = {}): Plugin[] {
     plugins.push(createNotesLifecyclePlugin(getNotesMap))
   }
   plugins.push(createNoteMarkerClipboardPlugin())
-  plugins.push(createListClipboardPlugin())
+  plugins.push(createMarkdownClipboardPlugin())
+  plugins.push(createMathNavigationPlugin())
   plugins.push(createAIWriterPlugin(effectiveHandlers))
   plugins.push(createTaskListNormalizationPlugin())
   plugins.push(

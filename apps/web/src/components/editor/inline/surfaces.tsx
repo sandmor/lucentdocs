@@ -13,6 +13,7 @@ import {
   Redo2,
   X,
   Code,
+  Sigma,
   Sparkles,
   ArrowDown,
   ArrowUp,
@@ -47,6 +48,7 @@ interface SelectionComposeSurfaceProps {
   onPromptChange: (value: string) => void
   onToggleMark: (markName: FormatMarkName) => void
   onSubmit: () => void
+  onInsertMath?: () => void
   onInteractionChange: (interacting: boolean) => void
   showShortcutHint: boolean
 }
@@ -62,6 +64,7 @@ export function SelectionComposeSurface({
   onPromptChange,
   onToggleMark,
   onSubmit,
+  onInsertMath,
   onInteractionChange,
   showShortcutHint,
 }: SelectionComposeSurfaceProps) {
@@ -165,6 +168,20 @@ export function SelectionComposeSurface({
             }}
           >
             <Code className="size-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            data-action="insert-inline-math"
+            title="Inline equation"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              onInsertMath?.()
+            }}
+          >
+            <Sigma className="size-3" />
           </Button>
           <div className="mx-1 h-3 w-px bg-border" />
           <Button
@@ -380,9 +397,7 @@ export function AIZoneSurface({
         borderRadius: isCompact ? 999 : 12,
       }}
       transition={
-        shouldReduceMotion
-          ? { duration: 0 }
-          : { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
+        shouldReduceMotion ? { duration: 0 } : { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
       }
       onAnimationStart={onMorphStart}
       onAnimationComplete={onMorphComplete}
@@ -401,10 +416,7 @@ export function AIZoneSurface({
         }
       }}
     >
-      <AnimatePresence
-        initial={false}
-        mode="popLayout"
-      >
+      <AnimatePresence initial={false} mode="popLayout">
         {isCompact ? (
           <motion.button
             key="compact"
@@ -446,300 +458,302 @@ export function AIZoneSurface({
             animate={{ opacity: 1 }}
             exit={shouldReduceMotion ? undefined : { opacity: 0 }}
             transition={
-              shouldReduceMotion
-                ? { duration: 0 }
-                : { duration: 0.12, ease: [0.22, 1, 0.36, 1] }
+              shouldReduceMotion ? { duration: 0 } : { duration: 0.12, ease: [0.22, 1, 0.36, 1] }
             }
           >
-      <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-        <div className="min-w-0">
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-            <Pen className="size-3" />
-            {zoneOrdinal ? `AI Zone ${zoneOrdinal}` : 'Inline AI'}
-          </span>
-          {suggestedByLabel ? (
-            <div className="truncate text-[10px] text-muted-foreground/80">{suggestedByLabel}</div>
-          ) : null}
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          {isProcessing &&
-            (stuck ? (
-              <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400">
-                <Loader2 className="size-3 animate-spin" />
-                <span className="text-[10px] font-medium">Stuck…</span>
-              </span>
-            ) : (
-              <span className="text-[10px] font-medium text-muted-foreground">Processing</span>
-            ))}
-
-          <div className="flex items-center gap-0.5">
-            {isProcessing && (
-              <Button
-                variant="ghost"
-                size="xs"
-                className="gap-1.5 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-                title="Stop generation"
-                data-action="stop"
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  onStop(zoneId)
-                }}
-              >
-                <StopCircle className="size-3" />
-                Stop
-              </Button>
-            )}
-
-            {onToggleMinimize && (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground hover:bg-foreground/5"
-                title="Minimize"
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  beginToggle()
-                }}
-              >
-                <Minus className="size-3" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
-        {session?.messages && session.messages.length > 0 ? (
-          <div className="max-h-40 space-y-2 overflow-y-auto px-1">
-            {session.messages.map((message) => (
-              <div
-                key={message.id}
-                className={
-                  message.role === 'user'
-                    ? 'rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-xs'
-                    : 'rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs'
-                }
-              >
-                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {message.role === 'user' ? 'You' : 'AI'}
-                </div>
-                {message.text ? (
-                  <div className="streamdown prose prose-xs dark:prose-invert max-w-none leading-relaxed">
-                    <Streamdown>{message.text}</Streamdown>
-                  </div>
-                ) : null}
-                {message.tools.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {message.tools.map((tool) => (
-                      <span
-                        key={`${message.id}-${tool.toolName}`}
-                        className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                      >
-                        <Search className="size-2.5" />
-                        {tool.toolName.replace(/_/g, ' ')}
-                        {tool.state === 'pending' ? '…' : ''}
-                      </span>
-                    ))}
+            <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
+              <div className="min-w-0">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                  <Pen className="size-3" />
+                  {zoneOrdinal ? `AI Zone ${zoneOrdinal}` : 'Inline AI'}
+                </span>
+                {suggestedByLabel ? (
+                  <div className="truncate text-[10px] text-muted-foreground/80">
+                    {suggestedByLabel}
                   </div>
                 ) : null}
               </div>
-            ))}
-            {showAssistantPreview ? (
-              <div className="rounded-md border border-dashed border-border/50 bg-muted/20 px-2 py-1.5 text-xs opacity-80">
-                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  AI (streaming)
+              <div className="ml-auto flex items-center gap-3">
+                {isProcessing &&
+                  (stuck ? (
+                    <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400">
+                      <Loader2 className="size-3 animate-spin" />
+                      <span className="text-[10px] font-medium">Stuck…</span>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-medium text-muted-foreground">
+                      Processing
+                    </span>
+                  ))}
+
+                <div className="flex items-center gap-0.5">
+                  {isProcessing && (
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="gap-1.5 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                      title="Stop generation"
+                      data-action="stop"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        onStop(zoneId)
+                      }}
+                    >
+                      <StopCircle className="size-3" />
+                      Stop
+                    </Button>
+                  )}
+
+                  {onToggleMinimize && (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground hover:bg-foreground/5"
+                      title="Minimize"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        beginToggle()
+                      }}
+                    >
+                      <Minus className="size-3" />
+                    </Button>
+                  )}
                 </div>
-                {sessionPreview?.assistantText ? (
-                  <div className="streamdown prose prose-xs dark:prose-invert max-w-none leading-relaxed">
-                    <Streamdown>{sessionPreview.assistantText}</Streamdown>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+              {session?.messages && session.messages.length > 0 ? (
+                <div className="max-h-40 space-y-2 overflow-y-auto px-1">
+                  {session.messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={
+                        message.role === 'user'
+                          ? 'rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-xs'
+                          : 'rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs'
+                      }
+                    >
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {message.role === 'user' ? 'You' : 'AI'}
+                      </div>
+                      {message.text ? (
+                        <div className="streamdown prose prose-xs dark:prose-invert max-w-none leading-relaxed">
+                          <Streamdown>{message.text}</Streamdown>
+                        </div>
+                      ) : null}
+                      {message.tools.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {message.tools.map((tool) => (
+                            <span
+                              key={`${message.id}-${tool.toolName}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                            >
+                              <Search className="size-2.5" />
+                              {tool.toolName.replace(/_/g, ' ')}
+                              {tool.state === 'pending' ? '…' : ''}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                  {showAssistantPreview ? (
+                    <div className="rounded-md border border-dashed border-border/50 bg-muted/20 px-2 py-1.5 text-xs opacity-80">
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        AI (streaming)
+                      </div>
+                      {sessionPreview?.assistantText ? (
+                        <div className="streamdown prose prose-xs dark:prose-invert max-w-none leading-relaxed">
+                          <Streamdown>{sessionPreview.assistantText}</Streamdown>
+                        </div>
+                      ) : null}
+                      {sessionPreview && sessionPreview.tools.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {sessionPreview.tools.map((tool) => (
+                            <span
+                              key={`preview-${tool.toolName}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                            >
+                              <Search className="size-2.5" />
+                              {tool.toolName.replace(/_/g, ' ')}
+                              {tool.state === 'pending' ? '…' : ''}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : isProcessing ? (
+                <div className="flex items-center justify-center gap-2 px-2 py-3 text-muted-foreground">
+                  <Loader2 className="size-3 animate-spin" />
+                  <span className="text-xs">Awaiting AI response…</span>
+                </div>
+              ) : null}
+
+              {isProcessing && stuck ? (
+                <div className="mx-1 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                  <Loader2 className="size-3 animate-spin" />
+                  <span>Still processing this inline request…</span>
+                </div>
+              ) : null}
+
+              {choices.length > 0 ? (
+                <div className="space-y-1.5 px-1 py-0.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Suggestions
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                      title="Dismiss all suggestions"
+                      data-action="dismiss-choices"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        handleDismissChoices()
+                      }}
+                    >
+                      <X className="size-3" />
+                    </Button>
                   </div>
-                ) : null}
-                {sessionPreview && sessionPreview.tools.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {sessionPreview.tools.map((tool) => (
-                      <span
-                        key={`preview-${tool.toolName}`}
-                        className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+
+                  <div className="max-h-48 space-y-1 overflow-y-auto">
+                    {choices.map((choice, index) => (
+                      <button
+                        key={`${zoneId ?? 'zone'}-choice-${index}`}
+                        className="group flex w-full cursor-pointer items-start gap-2 rounded-md border border-border/50 bg-background px-2.5 py-2 text-left text-xs transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        title={choice}
+                        onPointerDown={(event) => event.preventDefault()}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          selectChoice(view, choice, from, to)
+                          handleDismissChoices()
+                        }}
                       >
-                        <Search className="size-2.5" />
-                        {tool.toolName.replace(/_/g, ' ')}
-                        {tool.state === 'pending' ? '…' : ''}
-                      </span>
+                        <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground transition-colors group-hover:bg-primary/15 group-hover:text-primary">
+                          {index + 1}
+                        </span>
+                        <span className="line-clamp-3 leading-relaxed text-foreground/80 group-hover:text-foreground">
+                          {choice}
+                        </span>
+                      </button>
                     ))}
                   </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : isProcessing ? (
-          <div className="flex items-center justify-center gap-2 px-2 py-3 text-muted-foreground">
-            <Loader2 className="size-3 animate-spin" />
-            <span className="text-xs">Awaiting AI response…</span>
-          </div>
-        ) : null}
-
-        {isProcessing && stuck ? (
-          <div className="mx-1 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-            <Loader2 className="size-3 animate-spin" />
-            <span>Still processing this inline request…</span>
-          </div>
-        ) : null}
-
-        {choices.length > 0 ? (
-          <div className="space-y-1.5 px-1 py-0.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                Suggestions
-              </span>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-                title="Dismiss all suggestions"
-                data-action="dismiss-choices"
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  handleDismissChoices()
-                }}
-              >
-                <X className="size-3" />
-              </Button>
-            </div>
-
-            <div className="max-h-48 space-y-1 overflow-y-auto">
-              {choices.map((choice, index) => (
-                <button
-                  key={`${zoneId ?? 'zone'}-choice-${index}`}
-                  className="group flex w-full cursor-pointer items-start gap-2 rounded-md border border-border/50 bg-background px-2.5 py-2 text-left text-xs transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  title={choice}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    selectChoice(view, choice, from, to)
-                    handleDismissChoices()
-                  }}
-                >
-                  <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground transition-colors group-hover:bg-primary/15 group-hover:text-primary">
-                    {index + 1}
-                  </span>
-                  <span className="line-clamp-3 leading-relaxed text-foreground/80 group-hover:text-foreground">
-                    {choice}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {zoneId ? (
-          <div className="space-y-1 px-1">
-            <Textarea
-              value={followupPrompt}
-              onChange={(event) => setFollowupPrompt(event.target.value)}
-              placeholder="Ask a follow-up for this AI zone..."
-              className="min-h-14 text-xs"
-              disabled={isProcessing}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                  event.preventDefault()
-                  handleSendFollowup()
-                }
-              }}
-            />
-            <div className="flex items-center justify-end">
-              <Button size="xs" disabled={!canSendFollowup} onClick={handleSendFollowup}>
-                Send
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {isReview && choices.length === 0 ? (
-          <div className="flex items-center justify-between gap-2 border-t border-border px-2 py-1.5">
-            <div className="flex items-center gap-0.5">
-              {canUndoTurn ? (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="gap-1.5 text-muted-foreground hover:bg-muted/60"
-                  title="Undo turn (Mod-z when zone is focused)"
-                  data-action="undo-turn"
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    if (zoneId) onUndoTurn?.(zoneId)
-                  }}
-                >
-                  <Undo2 className="size-3" />
-                  Undo turn
-                </Button>
+                </div>
               ) : null}
-              {canRedoTurn ? (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="gap-1.5 text-muted-foreground hover:bg-muted/60"
-                  title="Redo turn"
-                  data-action="redo-turn"
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    if (zoneId) onRedoTurn?.(zoneId)
-                  }}
-                >
-                  <Redo2 className="size-3" />
-                  Redo turn
-                </Button>
+
+              {zoneId ? (
+                <div className="space-y-1 px-1">
+                  <Textarea
+                    value={followupPrompt}
+                    onChange={(event) => setFollowupPrompt(event.target.value)}
+                    placeholder="Ask a follow-up for this AI zone..."
+                    className="min-h-14 text-xs"
+                    disabled={isProcessing}
+                    onKeyDown={(event) => {
+                      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                        event.preventDefault()
+                        handleSendFollowup()
+                      }
+                    }}
+                  />
+                  <div className="flex items-center justify-end">
+                    <Button size="xs" disabled={!canSendFollowup} onClick={handleSendFollowup}>
+                      Send
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {isReview && choices.length === 0 ? (
+                <div className="flex items-center justify-between gap-2 border-t border-border px-2 py-1.5">
+                  <div className="flex items-center gap-0.5">
+                    {canUndoTurn ? (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="gap-1.5 text-muted-foreground hover:bg-muted/60"
+                        title="Undo turn (Mod-z when zone is focused)"
+                        data-action="undo-turn"
+                        onPointerDown={(event) => event.preventDefault()}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          if (zoneId) onUndoTurn?.(zoneId)
+                        }}
+                      >
+                        <Undo2 className="size-3" />
+                        Undo turn
+                      </Button>
+                    ) : null}
+                    {canRedoTurn ? (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="gap-1.5 text-muted-foreground hover:bg-muted/60"
+                        title="Redo turn"
+                        data-action="redo-turn"
+                        onPointerDown={(event) => event.preventDefault()}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          if (zoneId) onRedoTurn?.(zoneId)
+                        }}
+                      >
+                        <Redo2 className="size-3" />
+                        Redo turn
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="ml-auto flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="gap-1.5 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                      title="Reject (Esc)"
+                      data-action="reject"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        onReject(zoneId)
+                      }}
+                    >
+                      <X className="size-3" />
+                      Reject
+                      <Kbd>Esc</Kbd>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="gap-1.5"
+                      title="Accept (Tab)"
+                      data-action="accept"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        onAccept(zoneId)
+                      }}
+                    >
+                      <Check className="size-3" />
+                      Accept
+                      <Kbd>Tab</Kbd>
+                    </Button>
+                  </div>
+                </div>
               ) : null}
             </div>
-            <div className="ml-auto flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="xs"
-                className="gap-1.5 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-                title="Reject (Esc)"
-                data-action="reject"
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  onReject(zoneId)
-                }}
-              >
-                <X className="size-3" />
-                Reject
-                <Kbd>Esc</Kbd>
-              </Button>
-              <Button
-                variant="ghost"
-                size="xs"
-                className="gap-1.5"
-                title="Accept (Tab)"
-                data-action="accept"
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  onAccept(zoneId)
-                }}
-              >
-                <Check className="size-3" />
-                Accept
-                <Kbd>Tab</Kbd>
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </div>
           </motion.div>
         )}
       </AnimatePresence>

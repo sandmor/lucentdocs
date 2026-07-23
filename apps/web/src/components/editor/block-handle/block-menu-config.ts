@@ -1,6 +1,7 @@
 import {
   Check,
   Code2,
+  Sigma,
   Minus,
   Copy,
   List,
@@ -20,12 +21,14 @@ import {
   isListBlockType,
   supportsListTurnInto,
   supportsTurnInto,
+  supportsTurnIntoMath,
 } from '../prosemirror/block-resolve'
 import { supportsTurnIntoNote } from '../notes/note-transforms'
 
 const PROTECTED_BLOCK_ACTIONS = new Set<BlockActionId>([
   'turn-into-paragraph',
   'turn-into-code',
+  'turn-into-math',
   'turn-into-unordered-list',
   'turn-into-ordered-list',
   'turn-into-task-list',
@@ -58,6 +61,11 @@ export const insertBlockMenuItems: BlockMenuItem[] = [
     id: 'insert-code',
     label: 'Code block',
     icon: Code2,
+  },
+  {
+    id: 'insert-math',
+    label: 'Equation',
+    icon: Sigma,
   },
   {
     id: 'insert-divider',
@@ -95,6 +103,13 @@ export const turnIntoBlockMenuItems: BlockMenuItem[] = [
     icon: Code2,
     isEnabled: (info) => supportsTurnInto(info.node),
     isChecked: (info) => info.node.type.name === 'code_block',
+  },
+  {
+    id: 'turn-into-math',
+    label: 'Equation',
+    icon: Sigma,
+    isEnabled: (info) => supportsTurnIntoMath(info.node),
+    isChecked: (info) => info.node.type.name === 'math_block',
   },
   {
     id: 'turn-into-note',

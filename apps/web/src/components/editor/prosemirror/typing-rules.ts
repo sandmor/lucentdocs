@@ -1,6 +1,6 @@
 import { InputRule, undoInputRule } from 'prosemirror-inputrules'
 import { type Command } from 'prosemirror-state'
-import { TextSelection } from 'prosemirror-state'
+import { NodeSelection, TextSelection } from 'prosemirror-state'
 import type { MarkType } from 'prosemirror-model'
 import { schema } from '@lucentdocs/shared'
 
@@ -43,8 +43,36 @@ function inlineMarkRule(pattern: RegExp, markType: MarkType, delimiterLength: nu
   })
 }
 
+function inlineMathRule(): InputRule {
+  return new InputRule(/(?<!\\)\$([^$\n]+)\$$/, (state, match, start, end) => {
+    const latex = match[1]
+    const math = schema.nodes.math_inline
+    if (!math || !latex || /^\s|\s$/.test(latex)) return null
+    const tr = state.tr.replaceWith(start, end, math.create({ latex }))
+    return tr.setSelection(TextSelection.create(tr.doc, start + 1))
+  })
+}
+
+function mathBlockRule(): InputRule {
+  return new InputRule(/^\$\$\s$/, (state, _match, start, end) => {
+    const math = schema.nodes.math_block
+    const paragraph = schema.nodes.paragraph
+    if (!math || !paragraph) return null
+    const $start = state.doc.resolve(start)
+    if ($start.parent.type !== paragraph || $start.parent.content.size !== end - start) return null
+
+    const sourceId = typeof $start.parent.attrs.id === 'string' ? $start.parent.attrs.id : null
+    const blockPos = $start.before()
+    const tr = state.tr.replaceWith(blockPos, $start.after(), [
+      math.create({ latex: '', id: sourceId }),
+      paragraph.create(),
+    ])
+    return tr.setSelection(NodeSelection.create(tr.doc, blockPos))
+  })
+}
+
 export function buildMarkdownTypingRules(): InputRule[] {
-  const rules: InputRule[] = [dividerRule()]
+  const rules: InputRule[] = [dividerRule(), mathBlockRule(), inlineMathRule()]
   const code = schema.marks.code
   const strong = schema.marks.strong
   const em = schema.marks.em

@@ -198,6 +198,73 @@ const extendedNodes = nodesWithBlockIds
     },
   })
   .append({
+    math_inline: {
+      inline: true,
+      group: 'inline',
+      atom: true,
+      selectable: true,
+      marks: '',
+      attrs: { latex: { default: '' } },
+      leafText(node) {
+        return `$${String(node.attrs.latex ?? '')}$`
+      },
+      parseDOM: [
+        {
+          tag: 'span[data-math-inline]',
+          getAttrs(dom) {
+            return { latex: (dom as HTMLElement).getAttribute('data-latex') ?? '' }
+          },
+        },
+      ],
+      toDOM(node) {
+        return [
+          'span',
+          {
+            class: 'math-inline',
+            'data-math-inline': 'true',
+            'data-latex': String(node.attrs.latex ?? ''),
+            contenteditable: 'false',
+          },
+        ]
+      },
+    },
+    math_block: {
+      group: 'block',
+      atom: true,
+      selectable: true,
+      defining: true,
+      attrs: { latex: { default: '' }, id: { default: null } },
+      leafText(node) {
+        return `$$\n${String(node.attrs.latex ?? '')}\n$$`
+      },
+      parseDOM: [
+        {
+          tag: 'div[data-math-block]',
+          getAttrs(dom) {
+            const el = dom as HTMLElement
+            const blockId = readBlockIdFromDom(el)
+            return {
+              latex: el.getAttribute('data-latex') ?? '',
+              ...(blockId ? { id: blockId } : {}),
+            }
+          },
+        },
+      ],
+      toDOM(node) {
+        return [
+          'div',
+          mergeBlockIdIntoDomAttrs(
+            {
+              class: 'math-block',
+              'data-math-block': 'true',
+              'data-latex': String(node.attrs.latex ?? ''),
+              contenteditable: 'false',
+            },
+            node.attrs.id as string | null | undefined
+          ),
+        ]
+      },
+    },
     ai_zone: {
       inline: true,
       group: 'inline',
@@ -268,10 +335,9 @@ const extendedNodes = nodesWithBlockIds
     },
   })
 
-const extendedNodesWithMarker = extendedNodes.update(
-  'note_marker',
-  withBlockId(extendedNodes.get('note_marker')!)
-)
+const extendedNodesWithMarker = extendedNodes
+  .update('note_marker', withBlockId(extendedNodes.get('note_marker')!))
+  .update('math_block', withBlockId(extendedNodes.get('math_block')!))
 
 const extendedMarks = basicSchema.spec.marks.update('code', {
   ...basicSchema.spec.marks.get('code')!,

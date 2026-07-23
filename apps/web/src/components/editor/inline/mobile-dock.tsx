@@ -25,6 +25,7 @@ interface MobileInlineAIDockProps {
   stuck: boolean
   mobileBlockBarInteracting: boolean
   onGenerate: (prompt: string, selection: SelectionRange) => boolean
+  onConvertSelectionToMath: (selection: SelectionRange) => boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
   onStop: (zoneId?: string) => void
@@ -69,6 +70,7 @@ export function MobileInlineAIDock({
   reviewZones,
   stuck,
   onGenerate,
+  onConvertSelectionToMath,
   onAccept,
   onReject,
   onStop,
@@ -179,9 +181,17 @@ export function MobileInlineAIDock({
   const localClientName = getLocalClientName()
   const activeSuggestedByLabel =
     activeMode?.kind === 'loading'
-      ? resolveSuggestedByLabel(activeMode.zone.session, localClientName, getCollaboratorDisplayName)
+      ? resolveSuggestedByLabel(
+          activeMode.zone.session,
+          localClientName,
+          getCollaboratorDisplayName
+        )
       : activeMode?.kind === 'review'
-        ? resolveSuggestedByLabel(activeMode.zone.session, localClientName, getCollaboratorDisplayName)
+        ? resolveSuggestedByLabel(
+            activeMode.zone.session,
+            localClientName,
+            getCollaboratorDisplayName
+          )
         : null
 
   useEffect(() => {
@@ -282,6 +292,9 @@ export function MobileInlineAIDock({
             onPromptChange={selectionControls.setPrompt}
             onToggleMark={selectionControls.runToggleMark}
             onSubmit={selectionControls.handleSubmit}
+            onInsertMath={() => {
+              if (selection) onConvertSelectionToMath(selection)
+            }}
             onInteractionChange={onInteractionChange}
             showShortcutHint={false}
           />

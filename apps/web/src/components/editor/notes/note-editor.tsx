@@ -1,5 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import { EditorState } from 'prosemirror-state'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { EditorState, NodeSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { initProseMirrorDoc, ySyncPlugin } from 'y-prosemirror'
 import type * as Y from 'yjs'
@@ -7,6 +7,10 @@ import { noteSchema } from '@lucentdocs/shared'
 import { baseKeymap } from 'prosemirror-commands'
 import { keymap } from 'prosemirror-keymap'
 import { history } from 'prosemirror-history'
+import { createMathNodeViews } from '../nodes/math-node-view'
+import { MathControls } from '../nodes/math-controls'
+import { createMathNavigationPlugin, getMathEntryEdge } from '../prosemirror/math-navigation-plugin'
+import { createMarkdownClipboardPlugin } from '../prosemirror/list-commands'
 
 export interface NoteEditorHandle {
   focus(): void
@@ -25,6 +29,12 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
   function NoteEditor({ body, yMap, className, editable = true, onFocus, onBlur }, ref) {
     const containerRef = useRef<HTMLDivElement | null>(null)
     const viewRef = useRef<EditorView | null>(null)
+    const [activeMath, setActiveMath] = useState<{
+      view: EditorView
+      pos: number
+      node: import('prosemirror-model').Node
+      entryEdge: 'start' | 'end'
+    } | null>(null)
 
     const editableRef = useRef(editable)
     const onFocusRef = useRef(onFocus)
@@ -57,15 +67,32 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
       const { doc, mapping } = initProseMirrorDoc(body, noteSchema)
       const state = EditorState.create({
         doc,
-        plugins: [ySyncPlugin(body, { mapping }), history(), keymap(baseKeymap)],
+        plugins: [
+          ySyncPlugin(body, { mapping }),
+          history(),
+          createMarkdownClipboardPlugin({ target: 'note' }),
+          createMathNavigationPlugin(),
+          keymap(baseKeymap),
+        ],
       })
 
       const view = new EditorView(container, {
         state,
+        nodeViews: createMathNodeViews(),
         editable: () => editableRef.current,
         dispatchTransaction(tr) {
           const next = view.state.apply(tr)
           view.updateState(next)
+          if (next.selection instanceof NodeSelection && next.selection.node.type.name === 'math_inline') {
+            setActiveMath({
+              view,
+              pos: next.selection.from,
+              node: next.selection.node,
+              entryEdge: getMathEntryEdge(next, next.selection.from),
+            })
+          } else {
+            setActiveMath(null)
+          }
           if (tr.docChanged && yMapRef.current) {
             yMapRef.current.set('updatedAt', Date.now())
           }
@@ -90,6 +117,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
       return () => {
         view.destroy()
         viewRef.current = null
+        setActiveMath(null)
       }
     }, [body])
 
@@ -99,6 +127,11 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
       view.setProps({ editable: () => editable })
     }, [editable])
 
-    return <div ref={containerRef} className={className} />
+    return (
+      <>
+        <div ref={containerRef} className={className} />
+        <MathControls view={activeMath?.view ?? null} active={activeMath} context="note" />
+      </>
+    )
   }
 )

@@ -46,7 +46,16 @@ export function shouldShowSelectionCompose(
   selection: SelectionRange | null
 ): boolean {
   if (!selection || selection.from >= selection.to) return false
-  return !selectionTouchesCodeBlock(view, selection.from, selection.to)
+  if (selectionTouchesCodeBlock(view, selection.from, selection.to)) return false
+  let touchesMathBlock = false
+  view.state.doc.nodesBetween(selection.from, selection.to, (node) => {
+    if (node.type.name === 'math_block') {
+      touchesMathBlock = true
+      return false
+    }
+    return true
+  })
+  return !touchesMathBlock
 }
 
 export function canApplyFormatMark(view: EditorView, markName: FormatMarkName): boolean {

@@ -72,6 +72,7 @@ export {
 export {
   parseMarkdownishToFragment,
   parseMarkdownishToSlice,
+  hasRecognizedMarkdownSyntax,
   type MarkdownishSliceOptions,
 } from './markdownish.js'
 export {

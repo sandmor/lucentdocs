@@ -4,8 +4,9 @@ import { EditorState, TextSelection, type Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 import { schema } from '@lucentdocs/shared'
 import { collectDeletedTopLevelBlockIds } from '../notes/note-reconcile'
-import { supportsTurnInto } from './block-resolve'
+import { supportsTurnInto, supportsTurnIntoMath } from './block-resolve'
 import { fromCodeBlockToParagraph, toCodeBlock, toParagraph } from './block-transforms'
+import { handleBlockAction } from './block-actions'
 
 function createView(node: PMNode) {
   const doc = schema.nodes.doc.create(null, [node])
@@ -22,6 +23,9 @@ function createView(node: PMNode) {
     focus() {
       focusCalls += 1
     },
+    nodeDOM() {
+      return null
+    },
   } as unknown as EditorView
 
   return { view, getState: () => state, getFocusCalls: () => focusCalls }
@@ -32,9 +36,33 @@ describe('block turn-into transforms', () => {
     expect(supportsTurnInto(schema.nodes.paragraph.create())).toBe(true)
     expect(supportsTurnInto(schema.nodes.heading.create({ level: 1 }))).toBe(true)
     expect(supportsTurnInto(schema.nodes.code_block.create())).toBe(true)
+    expect(supportsTurnInto(schema.nodes.math_block.create())).toBe(true)
     expect(supportsTurnInto(schema.nodes.blockquote.create())).toBe(false)
     expect(supportsTurnInto(schema.nodes.bullet_list.create())).toBe(false)
     expect(supportsTurnInto(schema.nodes.note_marker.create())).toBe(false)
+  })
+
+  test('only promotes plain paragraph and code content into equations', () => {
+    expect(supportsTurnIntoMath(schema.nodes.paragraph.create())).toBe(true)
+    expect(supportsTurnIntoMath(schema.nodes.code_block.create())).toBe(true)
+    expect(supportsTurnIntoMath(schema.nodes.heading.create({ level: 1 }))).toBe(false)
+    expect(supportsTurnIntoMath(schema.nodes.math_block.create())).toBe(false)
+  })
+
+  test('turning fenced text into an equation removes one display fence pair', () => {
+    const paragraph = schema.nodes.paragraph.create({ id: 'math-1' }, schema.text('$$\n\\frac{a}{b}\n$$'))
+    const { view, getState } = createView(paragraph)
+
+    handleBlockAction(view, 'turn-into-math', {
+      pos: 0,
+      node: paragraph,
+      dom: {} as HTMLElement,
+    })
+
+    expect(getState().doc.firstChild?.toJSON()).toEqual({
+      type: 'math_block',
+      attrs: { latex: '\\frac{a}{b}', id: 'math-1' },
+    })
   })
 
   test('converts a heading to a paragraph without losing its identity or inline formatting', () => {

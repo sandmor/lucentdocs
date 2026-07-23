@@ -3,6 +3,7 @@
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/sora';
 @import '@fontsource-variable/source-serif-4';
+@import 'katex/dist/katex.min.css';
 @source "../node_modules/streamdown/dist";
 
 @custom-variant dark (&:is(.dark *));
@@ -461,6 +462,179 @@
 /* Inline code marks that contain only whitespace should remain visible */
 .ProseMirror code:empty::before {
   content: '\00a0';
+}
+
+/* Math is deliberately presentation-only: KaTeX gets to choose semantic
+ * inline breakpoints while display equations get an isolated scroll surface. */
+.math-inline {
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  vertical-align: baseline;
+}
+
+.math-inline .katex {
+  white-space: normal;
+}
+
+/* Only unbreakable inline expressions scroll. Formulas KaTeX can split stay
+ * inline and retain normal text-flow semantics. */
+.math-inline[data-math-overflow='true'] {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x;
+  scrollbar-width: thin;
+}
+
+.math-inline[data-math-overflow='true'] .math-inline-render {
+  display: inline-block;
+  min-width: max-content;
+}
+
+.math-inline[data-math-empty='true'] {
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.8em;
+  font-style: italic;
+}
+
+.math-inline[data-math-invalid='true'],
+.math-block[data-math-invalid='true'] {
+  color: var(--destructive);
+}
+
+.math-inline.ProseMirror-selectednode {
+  padding: 0.1em 0.2em;
+  border-radius: 0.35rem;
+  background: color-mix(in oklch, var(--ring) 11%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ring) 55%, transparent);
+}
+
+.math-block.ProseMirror-selectednode {
+  outline: none;
+}
+
+.math-block.ProseMirror-selectednode .math-block-render {
+  border-radius: 0.45rem;
+  background: color-mix(in oklch, var(--ring) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ring) 45%, transparent);
+}
+
+.math-block {
+  display: block;
+  max-width: 100%;
+  margin: 1.2em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x;
+  scrollbar-gutter: stable both-edges;
+  border-radius: 0.4rem;
+}
+
+.math-block:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.math-block-render {
+  display: block;
+  width: fit-content;
+  min-width: max-content;
+  margin-inline: auto;
+  padding: 0.35rem 0.5rem;
+}
+
+.math-block-render .katex-display {
+  margin: 0;
+}
+
+.math-block[data-math-empty='true'] .math-block-render {
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.8em;
+  font-style: italic;
+}
+
+.math-editor-surface {
+  position: fixed;
+  z-index: 70;
+  width: min(320px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--foreground) 16%, transparent);
+  border-radius: 0.7rem;
+  background: color-mix(in oklch, var(--background) 98%, var(--muted) 2%);
+  box-shadow: 0 12px 28px color-mix(in oklch, var(--foreground) 15%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.math-editor-surface--inline {
+  width: min(280px, calc(100vw - 24px));
+}
+
+.math-editor-surface--note {
+  width: min(240px, calc(100vw - 24px));
+}
+
+.math-editor-surface--note .math-editor-surface__canvas {
+  padding: 0.45rem;
+}
+
+.math-editor-surface__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 2.2rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.7rem;
+  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.math-editor-surface__header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.math-editor-surface__canvas {
+  padding: 0.55rem;
+  background: color-mix(in oklch, var(--muted) 28%, transparent);
+}
+
+.math-editor-surface__input {
+  width: 100%;
+  border-radius: 0.55rem;
+  background: color-mix(in oklch, var(--background) 88%, var(--muted) 12%);
+  padding: 0.5rem 0.6rem;
+  line-height: 1.35;
+}
+
+.math-editor-surface--block .math-editor-surface__input {
+  min-height: 4.75rem;
+  resize: vertical;
+}
+
+.math-editor-surface--inline .math-editor-surface__input {
+  min-height: 2.35rem;
+}
+
+.math-editor-surface--mobile {
+  right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: calc(12px + var(--ai-inline-mobile-dock-reserve) + env(safe-area-inset-bottom, 0px));
+  left: max(12px, env(safe-area-inset-left, 0px));
+  width: auto;
+}
+
+.math-editor-surface--note.math-editor-surface--mobile {
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
 }
 
 .code-block-wrapper {

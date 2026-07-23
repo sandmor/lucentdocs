@@ -182,6 +182,26 @@ describe('planMarkdownImport', () => {
 })
 
 describe('markdownToProseMirrorDoc', () => {
+  test('parses canonical inline and display math', () => {
+    const result = markdownToProseMirrorDoc('Area $r^2$\n\n$$\n\\int_0^1 x\\,dx\n$$')
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Area ' },
+              { type: 'math_inline', attrs: { latex: 'r^2' } },
+            ],
+          },
+          { type: 'math_block', attrs: { latex: '\\int_0^1 x\\,dx' } },
+        ],
+      },
+    })
+  })
+
   test('parses nested GFM checklists into task-list attributes', () => {
     const result = markdownToProseMirrorDoc('- [x] Done\n  - [ ] Follow up\n- Plain')
     expect(result).toEqual({

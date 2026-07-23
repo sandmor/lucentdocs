@@ -46,6 +46,7 @@ fn parse_to_content_tree(
   let mut opts = Options::empty();
   opts.insert(Options::ENABLE_SMART_PUNCTUATION);
   opts.insert(Options::ENABLE_TASKLISTS);
+  opts.insert(Options::ENABLE_MATH);
   let parser = Parser::new_ext(&normalized, opts);
 
   let root = ContentNode::new("doc");
@@ -69,6 +70,23 @@ fn parse_to_content_tree(
           let mut node = stack.pop().ok_or("Unbalanced tags")?;
 
           match tag_end {
+            TagEnd::Paragraph => {
+              // pulldown-cmark emits display math inside a paragraph. Canonical
+              // Lucent display syntax is standalone, so hoist a paragraph that
+              // consists solely of one display expression. Mixed paragraphs
+              // retain a valid inline representation instead.
+              if node.type_name == "paragraph" {
+                if node.children.len() == 1 && node.children[0].type_name == "math_block" {
+                  node = node.children.remove(0);
+                } else {
+                  for child in &mut node.children {
+                    if child.type_name == "math_block" {
+                      child.type_name = "math_inline".to_string();
+                    }
+                  }
+                }
+              }
+            }
             TagEnd::Image => {
               let alt_text: String = node
                 .children
@@ -191,6 +209,22 @@ fn parse_to_content_tree(
           marks.push(json!({ "type": "code" }));
           text_node.marks = marks;
           parent.push_child(text_node);
+        }
+      }
+      Event::InlineMath(math) => {
+        if let Some(parent) = stack.last_mut() {
+          let mut node = ContentNode::new("math_inline");
+          node.attrs.insert("latex".to_string(), json!(math.as_ref()));
+          parent.push_child(node);
+        }
+      }
+      Event::DisplayMath(math) => {
+        if let Some(parent) = stack.last_mut() {
+          let mut node = ContentNode::new("math_block");
+          node
+            .attrs
+            .insert("latex".to_string(), json!(math.as_ref().trim()));
+          parent.push_child(node);
         }
       }
       Event::SoftBreak => {

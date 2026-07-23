@@ -5,7 +5,12 @@ import { ySyncPluginKey } from 'y-prosemirror'
 import { gapBreaksZoneSegmentChain } from '@lucentdocs/shared'
 import { getAIZones, type AIZone, aiWriterPluginKey } from './writer-plugin'
 
-const STRUCTURAL_GAP_BLOCK_TYPES = new Set(['code_block', 'horizontal_rule', 'note_marker'])
+const STRUCTURAL_GAP_BLOCK_TYPES = new Set([
+  'code_block',
+  'horizontal_rule',
+  'note_marker',
+  'math_block',
+])
 
 export const AI_ZONE_ALLOWED_META = 'aiZoneAllowDocChange'
 
@@ -89,7 +94,7 @@ export function blockOverlapsProtectedZone(
   }
 
   const blockDom = view.nodeDOM(blockPos)
-  if (blockDom instanceof HTMLElement) {
+  if (typeof HTMLElement !== 'undefined' && blockDom instanceof HTMLElement) {
     return blockDom.querySelector('.ai-generating-text') !== null
   }
 

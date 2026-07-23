@@ -10,6 +10,7 @@ export interface ActiveBlockInfo {
 export type BlockActionId =
   | 'insert-paragraph'
   | 'insert-code'
+  | 'insert-math'
   | 'insert-divider'
   | 'insert-unordered-list'
   | 'insert-ordered-list'
@@ -18,6 +19,7 @@ export type BlockActionId =
   | 'turn-into-note'
   | 'turn-into-paragraph'
   | 'turn-into-code'
+  | 'turn-into-math'
   | 'turn-into-unordered-list'
   | 'turn-into-ordered-list'
   | 'turn-into-task-list'
@@ -26,7 +28,8 @@ export type BlockActionId =
   | 'duplicate'
   | 'delete'
 
-const TURN_INTO_SOURCE_TYPES = new Set(['paragraph', 'heading', 'code_block'])
+const TURN_INTO_SOURCE_TYPES = new Set(['paragraph', 'heading', 'code_block', 'math_block'])
+const MATH_TURN_INTO_SOURCE_TYPES = new Set(['paragraph', 'code_block'])
 const LIST_BLOCK_TYPES = new Set(['bullet_list', 'ordered_list', 'list_item'])
 
 export function isListBlockType(typeName: string): boolean {
@@ -180,6 +183,11 @@ export function canMoveBlockDown(doc: PMNode, pos: number, nodeSize: number): bo
 export function supportsTurnInto(node: PMNode): boolean {
   if (node.type.name === 'note_marker') return false
   return TURN_INTO_SOURCE_TYPES.has(node.type.name)
+}
+
+/** Math is intentionally opt-in only from plain-text blocks. */
+export function supportsTurnIntoMath(node: PMNode): boolean {
+  return MATH_TURN_INTO_SOURCE_TYPES.has(node.type.name)
 }
 
 export function supportsListTurnInto(node: PMNode): boolean {

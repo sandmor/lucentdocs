@@ -29,6 +29,7 @@ interface InlineAIControlsProps {
   view: EditorView | null
   selection: SelectionRange | null
   onGenerate: (prompt: string, selection: SelectionRange) => boolean
+  onConvertSelectionToMath: (selection: SelectionRange) => boolean
   onAccept: (zoneId?: string) => void
   onReject: (zoneId?: string) => void
   onStop: (zoneId?: string) => void
@@ -52,6 +53,7 @@ export function InlineAIControls({
   view,
   selection,
   onGenerate,
+  onConvertSelectionToMath,
   onAccept,
   onReject,
   onStop,
@@ -181,6 +183,7 @@ export function InlineAIControls({
         reviewZones={reviewZones}
         stuck={Boolean(state?.stuck)}
         onGenerate={onGenerate}
+        onConvertSelectionToMath={onConvertSelectionToMath}
         onAccept={onAccept}
         onReject={onReject}
         onStop={onStop}
@@ -219,6 +222,7 @@ export function InlineAIControls({
         selection={selection}
         visible={showSelectionCompose && !state?.active}
         onGenerate={onGenerate}
+        onConvertSelectionToMath={onConvertSelectionToMath}
         onInteractionChange={onInteractionChange}
       />
 
