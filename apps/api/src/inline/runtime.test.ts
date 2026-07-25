@@ -114,6 +114,134 @@ describe('InlineRuntime', () => {
     expect(aiZones).toEqual([false])
   })
 
+  test('waits for a newly-created zone to reach Yjs before starting', async () => {
+    const project = await adapter.services.projects.create('Story', {
+      ownerUserId: 'user_1',
+    })
+    const document = await adapter.services.documents.createForProject(project.id, 'zone-sync.md')
+    if (!document) throw new Error('Expected a project document to be created.')
+
+    const sessionId = 'inline_session_zone_sync'
+    const start = inlineRuntime.startGeneration({
+      mode: 'prompt',
+      projectId: project.id,
+      documentId: document.id,
+      sessionId,
+      prompt: 'rewrite this',
+      selectionFrom: 1,
+      selectionTo: 9,
+      requesterClientName: 'test_client',
+    })
+
+    setTimeout(() => {
+      void yjsRuntime.replaceLiveDocumentContent(document.id, {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'ai_zone',
+                attrs: {
+                  id: 'zone_sync',
+                  streaming: true,
+                  sessionId,
+                  originalSlice: null,
+                },
+                content: [{ type: 'text', text: 'original' }],
+              },
+            ],
+          },
+        ],
+      } as JsonObject)
+    }, 30)
+
+    await start
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (
+        !inlineRuntime.isGenerating({ projectId: project.id, documentId: document.id, sessionId })
+      ) {
+        break
+      }
+      await sleep(10)
+    }
+
+    const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+    expect(extractDocText(live)).toBe('spark')
+  })
+
+  test('times out a hung inline generation and restores the zone text', async () => {
+    const previousDelay = process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS
+    const previousTimeout = process.env.LUCENTDOCS_TEST_INLINE_TIMEOUT_MS
+    process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS = '100'
+    process.env.LUCENTDOCS_TEST_INLINE_TIMEOUT_MS = '20'
+
+    try {
+      const project = await adapter.services.projects.create('Story', {
+        ownerUserId: 'user_1',
+      })
+      const document = await adapter.services.documents.createForProject(
+        project.id,
+        'zone-timeout.md'
+      )
+      if (!document) throw new Error('Expected a project document to be created.')
+
+      const sessionId = 'inline_session_timeout'
+      await yjsRuntime.replaceLiveDocumentContent(document.id, {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'ai_zone',
+                attrs: {
+                  id: 'zone_timeout',
+                  streaming: true,
+                  sessionId,
+                  originalSlice: null,
+                },
+                content: [{ type: 'text', text: 'original' }],
+              },
+            ],
+          },
+        ],
+      } as JsonObject)
+
+      await inlineRuntime.startGeneration({
+        mode: 'prompt',
+        projectId: project.id,
+        documentId: document.id,
+        sessionId,
+        prompt: 'rewrite this',
+        selectionFrom: 1,
+        selectionTo: 9,
+        requesterClientName: 'test_client',
+      })
+
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        if (
+          !inlineRuntime.isGenerating({ projectId: project.id, documentId: document.id, sessionId })
+        ) {
+          break
+        }
+        await sleep(10)
+      }
+
+      expect(
+        inlineRuntime.isGenerating({ projectId: project.id, documentId: document.id, sessionId })
+      ).toBe(false)
+      const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)
+      const zone = getInlineZoneTextFromDoc(schema.nodeFromJSON(live), sessionId)
+      expect(zone).toEqual({ zoneFound: true, text: 'original' })
+    } finally {
+      if (previousDelay === undefined) delete process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS
+      else process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS = previousDelay
+      if (previousTimeout === undefined) delete process.env.LUCENTDOCS_TEST_INLINE_TIMEOUT_MS
+      else process.env.LUCENTDOCS_TEST_INLINE_TIMEOUT_MS = previousTimeout
+    }
+  })
+
   test('continues writing after the live Yjs document is evicted mid-generation', async () => {
     const previousDelay = process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS
     process.env.LUCENTDOCS_TEST_INLINE_DELAY_MS = '50'
@@ -502,9 +630,7 @@ describe('InlineRuntime', () => {
     })
 
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      if (
-        !inlineRuntime.isGenerating({ projectId, documentId, sessionId })
-      ) {
+      if (!inlineRuntime.isGenerating({ projectId, documentId, sessionId })) {
         break
       }
       await sleep(10)
@@ -515,7 +641,10 @@ describe('InlineRuntime', () => {
     const project = await adapter.services.projects.create('Story', {
       ownerUserId: 'user_1',
     })
-    const document = await adapter.services.documents.createForProject(project.id, 'chapter-undo.md')
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'chapter-undo.md'
+    )
 
     if (!document) {
       throw new Error('Expected a project document to be created.')
@@ -777,7 +906,9 @@ describe('InlineRuntime', () => {
     const sessionBeforeRestore = await inlineRuntime.getSessions(scope, [sessionId])
     const restored = await inlineRuntime.restoreAcceptedSessionZone(scope, 'test_client')
 
-    expect(restored.turnCheckpoints?.length).toBe(sessionBeforeRestore[sessionId]?.turnCheckpoints?.length)
+    expect(restored.turnCheckpoints?.length).toBe(
+      sessionBeforeRestore[sessionId]?.turnCheckpoints?.length
+    )
     expect(restored.messages.length).toBe(sessionBeforeRestore[sessionId]?.messages.length)
 
     const live = await yjsRuntime.getDocumentProsemirrorJson(document.id)

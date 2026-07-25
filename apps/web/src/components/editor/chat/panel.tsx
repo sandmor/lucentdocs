@@ -38,6 +38,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
   const treeRef = useRef<ChatTreeSnapshot | null>(null)
   const [input, setInput] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
   const [isThreadBrowserOpen, setIsThreadBrowserOpen] = useState(false)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [draftEditingEnabled, setDraftEditingEnabled] = useState(true)
@@ -146,14 +147,6 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           messagesRef.current = next
           return next
         }),
-      onGeneratingChange: (generating) => {
-        // A finished client-side chunk stream can precede server persistence.
-        // Only the authoritative chat snapshot may clear the generating state;
-        // otherwise tree mutations can race finalization and be rejected.
-        if (!generating) return
-        isGeneratingRef.current = generating
-        setIsGenerating(generating)
-      },
     })
 
   const resetLocalChatState = useCallback(
@@ -168,6 +161,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       setTree(null)
       treeRef.current = null
       setIsGenerating(false)
+      setIsStopping(false)
       messagesRef.current = []
       isGeneratingRef.current = false
       lastGenerationErrorRef.current = null
@@ -221,10 +215,10 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
 
     queueMicrotask(() => {
       if (cancelled) return
-      // A query started before generation can resolve after the live
-      // subscription has marked the thread active. Do not let that stale
-      // non-generating snapshot hide the stop state or replace streamed data;
-      // the subscription publishes the authoritative completion snapshot.
+      // A query initiated before a live generation can resolve after a
+      // subscription snapshot. Keep streamed state authoritative while it is
+      // active; terminal snapshots now safely clear it because the chunk pump
+      // no longer changes lifecycle state.
       if (isGeneratingRef.current && !activeThreadQuery.data.generating) return
       const nextMessages = asUIMessageArray(activeThreadQuery.data.messages)
       const nextTree = activeThreadQuery.data.tree ?? null
@@ -235,6 +229,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       setMessages(nextMessages)
       setTree(nextTree)
       setIsGenerating(nextGenerating)
+      setIsStopping(Boolean(activeThreadQuery.data.stopping))
       if (!activeThreadQuery.data.generating) {
         stopStreamChunkPump()
       }
@@ -258,6 +253,11 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
         if (event.chatId !== activeThreadIdRef.current) return
 
         if (event.type === 'stream-chunk') {
+          // Snapshots own lifecycle. A late chunk must never resurrect a run
+          // that has already reached a terminal snapshot.
+          if (!isGeneratingRef.current && streamGenerationIdRef.current !== event.generationId) {
+            return
+          }
           if (streamGenerationIdRef.current !== event.generationId) {
             const seedAssistant = isGeneratingRef.current
               ? getTrailingAssistantMessage(messagesRef.current)
@@ -285,6 +285,13 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
 
         if (!event.thread) return
 
+        // Stop/discard the local pump before installing a canonical snapshot.
+        // `stop()` flushes a pending message, so doing this afterwards can
+        // overwrite the persisted terminal state with an older chunk.
+        if (!event.generating) {
+          stopStreamChunkPump()
+        }
+
         const nextMessages = asUIMessageArray(event.thread.messages)
         const nextTree = event.thread.tree ?? null
         messagesRef.current = nextMessages
@@ -293,6 +300,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
         setMessages(nextMessages)
         setTree(nextTree)
         setIsGenerating(event.generating)
+        setIsStopping(Boolean(event.stopping))
         const trailingAssistant = getTrailingAssistantMessage(nextMessages)
 
         if (event.generating && event.generationId) {
@@ -300,8 +308,6 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
           if (streamGenerationIdRef.current !== event.generationId) {
             startStreamChunkPump(event.generationId, trailingAssistant, event.chatId)
           }
-        } else {
-          stopStreamChunkPump()
         }
 
         const nextThreadSummary: ChatThreadSummary = {
@@ -324,6 +330,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
             createdAt: event.thread.createdAt,
             updatedAt: event.thread.updatedAt,
             generating: event.generating,
+            stopping: Boolean(event.stopping),
             generationId: event.generationId,
           }
         )
@@ -652,6 +659,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     if (!projectId || !operationDocumentId || !activeThreadId || !isGenerating) return
 
     try {
+      setIsStopping(true)
       await cancelGenerationMutation.mutateAsync({
         projectId,
         documentId: operationDocumentId,
@@ -659,6 +667,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
         generationId: streamGenerationIdRef.current ?? undefined,
       })
     } catch (error) {
+      setIsStopping(false)
       const message = error instanceof Error ? error.message : 'Failed to stop generation'
       toast.error('AI Chat Error', { description: message })
     }
@@ -758,6 +767,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
                 createdAt: Date.now(),
                 updatedAt: updated.updatedAt,
                 generating: false,
+                stopping: false,
                 generationId: null,
               }
             }
@@ -1099,9 +1109,13 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
                   void handleStop()
                 }}
                 className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                disabled={cancelGenerationMutation.isPending}
+                disabled={isStopping || cancelGenerationMutation.isPending}
               >
-                <StopCircle className="size-4.5" />
+                {isStopping ? (
+                  <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  <StopCircle className="size-4.5" />
+                )}
               </Button>
             ) : (
               <Button

@@ -23,7 +23,7 @@ import { createAIWriterController, type AIWriterController } from './ai/writer'
 import { InlineAIControls } from './inline/controls'
 import { useAIWriterState } from './inline/hooks'
 import { RemotePresenceOverlay } from './collaboration/remote-presence-overlay'
-import { createAIBubbleNodeViews } from './collaboration/ai-bubble-node-view'
+import { createAIDraftPreviewPlugin } from './collaboration/ai-draft-preview-plugin'
 import { createCodeBlockNodeView } from './nodes/code-block-node-view'
 import { createNoteMarkerNodeView } from './nodes/note-marker-node-view'
 import { createMathNodeViews } from './nodes/math-node-view'
@@ -371,29 +371,37 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
     const type = provider.type
     const { doc: pmDoc, mapping } = initProseMirrorDoc(type, schema)
+    const previewNodeViews = {
+      ...createCodeBlockNodeView(),
+      ...createMathNodeViews(),
+      note_marker: createNoteMarkerNodeView(),
+    }
 
     const state = EditorState.create({
       doc: pmDoc,
-      plugins: buildPlugins({
-        getQuoteTypingPreferences: () => quoteTypingPreferencesRef.current,
-        getNotesMap: () => notesMapRef.current,
-        collaboration: {
-          yjsFragment: type,
-          yjsMapping: mapping as ProsemirrorMapping,
-        },
-        aiWriterController: aiController,
-        aiHandlers: {
-          onAccept(zoneId) {
-            if (viewRef.current) aiController.acceptAI(viewRef.current, zoneId)
+      plugins: [
+        ...buildPlugins({
+          getQuoteTypingPreferences: () => quoteTypingPreferencesRef.current,
+          getNotesMap: () => notesMapRef.current,
+          collaboration: {
+            yjsFragment: type,
+            yjsMapping: mapping as ProsemirrorMapping,
           },
-          onReject(zoneId) {
-            if (viewRef.current) aiController.rejectAI(viewRef.current, zoneId)
+          aiWriterController: aiController,
+          aiHandlers: {
+            onAccept(zoneId) {
+              if (viewRef.current) aiController.acceptAI(viewRef.current, zoneId)
+            },
+            onReject(zoneId) {
+              if (viewRef.current) aiController.rejectAI(viewRef.current, zoneId)
+            },
+            onCancelAI(view, options) {
+              aiController.cancelAI(view, options)
+            },
           },
-          onCancelAI(view, options) {
-            aiController.cancelAI(view, options)
-          },
-        },
-      }),
+        }),
+        createAIDraftPreviewPlugin(bubblePresence),
+      ],
     })
     finalizeCollaborationState(state)
 
@@ -401,12 +409,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       state,
       scrollThreshold: 150,
       scrollMargin: 150,
-      nodeViews: {
-        ...createAIBubbleNodeViews(bubblePresence),
-        ...createCodeBlockNodeView(),
-        ...createMathNodeViews(),
-        note_marker: createNoteMarkerNodeView(),
-      },
+      nodeViews: previewNodeViews,
       dispatchTransaction(tr) {
         const previousZones = aiWriterPluginKey.getState(view.state)?.zones ?? []
         const newState = view.state.apply(tr)
@@ -731,8 +734,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         onConvertSelectionToMath={(selection) => {
           if (!viewRef.current) return false
           const view = viewRef.current
-          if (view.state.selection.from !== selection.from || view.state.selection.to !== selection.to) {
-            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, selection.from, selection.to)))
+          if (
+            view.state.selection.from !== selection.from ||
+            view.state.selection.to !== selection.to
+          ) {
+            view.dispatch(
+              view.state.tr.setSelection(
+                TextSelection.create(view.state.doc, selection.from, selection.to)
+              )
+            )
           }
           return toggleInlineMath(view)
         }}

@@ -5,12 +5,16 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  FilePenLine,
+  FileSearch,
+  FolderSearch,
   MessageSquareQuote,
   MoreHorizontal,
   Pencil,
-  PenTool,
   RefreshCw,
   Search,
+  ShieldAlert,
+  Square,
   Trash2,
   User,
 } from 'lucide-react'
@@ -35,6 +39,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { extractMessageText, extractToolParts } from './message-utils'
+import { getMessageParts } from '../ai/message-parts'
 import type { BranchMeta } from './tree'
 import type { ChatThreadSummary } from './types'
 
@@ -257,32 +262,7 @@ function ChatBubbleImpl({
               </div>
             </div>
           ) : (
-            <div
-              className={cn(
-                'min-w-0 text-sm leading-relaxed text-foreground/90',
-                isUser ? 'font-medium wrap-break-word' : ''
-              )}
-            >
-              {text ? (
-                isUser ? (
-                  <p className="wrap-break-word whitespace-pre-wrap">{text}</p>
-                ) : (
-                  <ChatMarkdown>{text}</ChatMarkdown>
-                )
-              ) : (
-                isStreaming && <TypingIndicator />
-              )}
-
-              {isStreaming && text && <TypingIndicator compact />}
-            </div>
-          )}
-
-          {toolParts.length > 0 && (
-            <div className="mt-4 flex flex-col gap-1.5">
-              {toolParts.map((part, index) => (
-                <ToolTraceCard key={`${message.id}-tool-${index}`} part={part} />
-              ))}
-            </div>
+            <MessageParts message={message} isStreaming={isStreaming} isUser={isUser} />
           )}
 
           {branchMeta.count > 1 && !isEditing && (
@@ -413,6 +393,88 @@ function TypingIndicator({ compact = false }: { compact?: boolean }) {
   )
 }
 
+function MessageParts({
+  message,
+  isStreaming,
+  isUser,
+}: {
+  message: UIMessage
+  isStreaming: boolean
+  isUser: boolean
+}) {
+  const parts = getMessageParts(message)
+  const hasVisiblePart = parts.some((part) => {
+    if (typeof part !== 'object' || part === null || Array.isArray(part)) return false
+    const type = (part as Record<string, unknown>).type
+    return (
+      type === 'text' ||
+      type === 'dynamic-tool' ||
+      (typeof type === 'string' && type.startsWith('tool-')) ||
+      type === 'data-generation-status'
+    )
+  })
+
+  return (
+    <div
+      className={cn(
+        'min-w-0 space-y-2 text-sm leading-relaxed text-foreground/90',
+        isUser ? 'font-medium wrap-break-word' : ''
+      )}
+    >
+      {parts.map((part, index) => {
+        if (typeof part !== 'object' || part === null || Array.isArray(part)) return null
+        const record = part as Record<string, unknown>
+        const key = `${message.id}-part-${index}`
+        if (record.type === 'text' && typeof record.text === 'string') {
+          return isUser ? (
+            <p key={key} className="wrap-break-word whitespace-pre-wrap">
+              {record.text}
+            </p>
+          ) : (
+            <ChatMarkdown key={key}>{record.text}</ChatMarkdown>
+          )
+        }
+        if (
+          record.type === 'dynamic-tool' ||
+          (typeof record.type === 'string' && record.type.startsWith('tool-'))
+        ) {
+          return <ToolTraceCard key={key} part={record} />
+        }
+        if (record.type === 'data-generation-status') {
+          return <GenerationStatus key={key} data={record.data} />
+        }
+        return null
+      })}
+      {!hasVisiblePart && isStreaming && <TypingIndicator />}
+      {isStreaming && hasVisiblePart && <TypingIndicator compact />}
+    </div>
+  )
+}
+
+function GenerationStatus({ data }: { data: unknown }) {
+  const record = typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {}
+  const status = record.status === 'failed' ? 'failed' : 'stopped'
+  const message = typeof record.message === 'string' ? record.message : null
+  const Icon = status === 'failed' ? ShieldAlert : Square
+
+  return (
+    <div
+      className={cn(
+        'flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-xs',
+        status === 'failed'
+          ? 'border-destructive/30 bg-destructive/5 text-destructive'
+          : 'border-border/60 bg-muted/35 text-muted-foreground'
+      )}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span className="min-w-0 wrap-break-word">
+        {status === 'failed' ? 'Response interrupted' : 'Response stopped'}
+        {message ? ` — ${message}` : ''}
+      </span>
+    </div>
+  )
+}
+
 function ToolTraceCard({ part }: { part: Record<string, unknown> }) {
   const partType = typeof part.type === 'string' ? part.type : 'tool'
   const toolName =
@@ -422,51 +484,139 @@ function ToolTraceCard({ part }: { part: Record<string, unknown> }) {
         : 'dynamic-tool'
       : partType.replace(/^tool-/, '')
   const state = typeof part.state === 'string' ? part.state : 'unknown'
-
-  const isPending = state === 'call' || state === 'pending'
-  const statusText = isPending ? 'Reviewing...' : 'Reviewed'
-  const isWriteTool = toolName === 'edit' || toolName === 'write'
+  const input = part.input
+  const output = part.output
+  const errorText = typeof part.errorText === 'string' ? part.errorText : null
+  const inputRecord =
+    typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+  const path = typeof inputRecord.path === 'string' ? inputRecord.path : null
+  const status = toolStatus(state)
+  const label = toolLabel(toolName, path)
+  const summary = toolSummary(toolName, output, errorText)
 
   return (
-    <details className="group max-w-full min-w-0 overflow-hidden rounded-lg border border-border/40 bg-background/50 transition-colors hover:bg-muted/20">
-      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2.5 px-3 py-2 text-xs font-medium text-muted-foreground outline-none">
-        {isPending ? (
-          isWriteTool ? (
-            <PenTool className="size-3.5 animate-pulse text-primary/60" />
-          ) : (
-            <Search className="size-3.5 animate-pulse text-primary/60" />
-          )
-        ) : isWriteTool ? (
-          <PenTool className="size-3.5 text-muted-foreground/60" />
-        ) : (
-          <Eye className="size-3.5 text-muted-foreground/60" />
-        )}
-
-        <span className="truncate text-foreground/70 group-hover:text-foreground transition-colors">
-          {toolName === 'edit'
-            ? 'edit file'
-            : toolName === 'write'
-              ? 'write file'
-              : toolName.replace(/-/g, ' ')}
-        </span>
-
+    <details className="group/tool max-w-full min-w-0 overflow-hidden rounded-md border border-border/45 bg-background/45 transition-colors hover:bg-muted/25">
+      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 px-2.5 py-2 text-xs outline-none">
         <span
           className={cn(
-            'ml-auto shrink-0 text-[10px] tracking-wide',
-            isPending ? 'text-primary/70 animate-pulse' : 'text-muted-foreground/50'
+            'flex size-5 shrink-0 items-center justify-center rounded-full',
+            status.iconClass
           )}
         >
-          {statusText}
+          <ToolIcon
+            toolName={toolName}
+            className={cn('size-3', status.pending && 'animate-spin')}
+          />
+        </span>
+        <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">{label}</span>
+        <span className={cn('shrink-0 text-[10px] font-medium tracking-wide', status.textClass)}>
+          {status.label}
         </span>
       </summary>
-
-      <div className="min-w-0 overflow-hidden border-t border-border/40 bg-muted/10 p-3">
-        <pre className="max-h-40 max-w-full overflow-x-auto overflow-y-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-muted-foreground/80 scrollbar-thin">
-          {JSON.stringify(part, null, 2)}
-        </pre>
+      <div className="min-w-0 space-y-2 border-t border-border/40 bg-muted/10 p-2.5 text-[11px]">
+        {summary && <p className="wrap-break-word text-muted-foreground">{summary}</p>}
+        {errorText && <p className="wrap-break-word text-destructive">{errorText}</p>}
+        <ToolPayload label="Input" value={input} />
+        {(output !== undefined || errorText) && (
+          <ToolPayload label="Output" value={output ?? errorText} />
+        )}
       </div>
     </details>
   )
+}
+
+function ToolPayload({ label, value }: { label: string; value: unknown }) {
+  if (value === undefined) return null
+  return (
+    <div className="min-w-0">
+      <p className="mb-1 font-medium uppercase tracking-[0.12em] text-[9px] text-muted-foreground/65">
+        {label}
+      </p>
+      <pre className="max-h-44 max-w-full overflow-auto whitespace-pre-wrap break-words rounded border border-border/35 bg-background/60 p-2 font-mono text-[10px] leading-relaxed text-muted-foreground/85">
+        {typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  )
+}
+
+function toolStatus(state: string) {
+  if (state === 'output-available')
+    return {
+      label: 'Done',
+      pending: false,
+      iconClass: 'bg-success/15 text-success',
+      textClass: 'text-success',
+    }
+  if (state === 'output-error')
+    return {
+      label: 'Failed',
+      pending: false,
+      iconClass: 'bg-destructive/15 text-destructive',
+      textClass: 'text-destructive',
+    }
+  if (state === 'output-denied')
+    return {
+      label: 'Denied',
+      pending: false,
+      iconClass: 'bg-destructive/15 text-destructive',
+      textClass: 'text-destructive',
+    }
+  if (state === 'approval-requested')
+    return {
+      label: 'Needs approval',
+      pending: false,
+      iconClass: 'bg-accent/20 text-accent-foreground',
+      textClass: 'text-accent-foreground',
+    }
+  if (state === 'approval-responded')
+    return {
+      label: 'Approved',
+      pending: false,
+      iconClass: 'bg-muted text-muted-foreground',
+      textClass: 'text-muted-foreground',
+    }
+  return {
+    label: state === 'input-streaming' ? 'Preparing' : 'Working',
+    pending: true,
+    iconClass: 'bg-primary/10 text-primary',
+    textClass: 'text-primary',
+  }
+}
+
+function ToolIcon({ toolName, className }: { toolName: string; className: string }) {
+  if (toolName === 'edit' || toolName === 'write') return <FilePenLine className={className} />
+  if (toolName === 'glob') return <FolderSearch className={className} />
+  if (toolName === 'grep' || toolName === 'search') return <Search className={className} />
+  if (toolName === 'read') return <FileSearch className={className} />
+  return <Eye className={className} />
+}
+
+function toolLabel(toolName: string, path: string | null) {
+  const subject = path ? ` ${path}` : ''
+  if (toolName === 'edit') return `Edited${subject}`
+  if (toolName === 'write') return `Wrote${subject}`
+  if (toolName === 'read') return `Read${subject}`
+  if (toolName === 'glob') return `Listed files${subject ? ` in${subject}` : ''}`
+  if (toolName === 'grep') return `Searched text${subject ? ` in${subject}` : ''}`
+  if (toolName === 'search') return 'Searched project knowledge'
+  return toolName.replace(/-/g, ' ')
+}
+
+function toolSummary(toolName: string, output: unknown, errorText: string | null) {
+  if (errorText) return null
+  if (typeof output !== 'object' || output === null) return null
+  const record = output as Record<string, unknown>
+  if (toolName === 'edit' && typeof record.replacements === 'number')
+    return `${record.replacements} replacement${record.replacements === 1 ? '' : 's'} applied.`
+  if ((toolName === 'grep' || toolName === 'search') && typeof record.match_count === 'number')
+    return `${record.match_count} match${record.match_count === 1 ? '' : 'es'} found.`
+  if (toolName === 'glob' && typeof record.total_matches === 'number')
+    return `${record.total_matches} file${record.total_matches === 1 ? '' : 's'} found.`
+  if (toolName === 'write' && typeof record.action === 'string')
+    return `${record.action[0]?.toUpperCase()}${record.action.slice(1)} successfully.`
+  if (toolName === 'read' && typeof record.path === 'string')
+    return `Read ${record.path}${typeof record.start_line === 'number' ? `, lines ${record.start_line}–${record.end_line}` : ''}.`
+  return null
 }
 
 export const EMPTY_CHAT_SUGGESTIONS = [

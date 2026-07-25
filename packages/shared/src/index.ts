@@ -226,6 +226,11 @@ export {
   wrapNodeWithZoneNodes,
   wrapSliceWithZoneNodes,
 } from './ai-zone-utils.js'
+export {
+  hasStreamingAIZone,
+  replaceAIZoneTextInDoc,
+  type AIZoneTextReplacement,
+} from './ai-zone-draft.js'
 export type { ExcerptPart, ContextMarkerKind, ContextParts } from './prompt-excerpt.js'
 export {
   DEFAULT_PROMPT_EXCERPT_CHARS,

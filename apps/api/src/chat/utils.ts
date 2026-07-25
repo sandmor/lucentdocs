@@ -43,10 +43,7 @@ export class ChatRuntimeError extends Error {
   }
 }
 
-export function toChatKey(scope: {
-  projectId: string
-  chatId: string
-}): string {
+export function toChatKey(scope: { projectId: string; chatId: string }): string {
   // A conversation belongs to a project, not to the document that happened to
   // be active when a run started. documentId remains run context only.
   return `${scope.projectId}:${scope.chatId}`
@@ -71,6 +68,7 @@ export function createObserveState(
   options: {
     thread: PersistedChatThread | null
     generating: boolean
+    stopping?: boolean
     generationId: string | null
     error?: string | null
   }
@@ -81,6 +79,7 @@ export function createObserveState(
     chatId: scope.chatId,
     deleted: options.thread === null,
     generating: options.generating,
+    stopping: options.stopping ?? false,
     generationId: options.generationId,
     error: options.error ?? null,
     thread: options.thread,
@@ -226,13 +225,7 @@ export function buildCurrentFileContextWithAnnotations(
   const from = Math.min(clampedFrom, clampedTo)
   const to = Math.max(clampedFrom, clampedTo)
 
-  return buildAnnotatedPromptContextExcerpt(
-    documentNode,
-    from,
-    to,
-    getPromptExcerptBudget(),
-    notes
-  )
+  return buildAnnotatedPromptContextExcerpt(documentNode, from, to, getPromptExcerptBudget(), notes)
 }
 
 export function serializeConversationForPrompt(messages: UIMessage[]): string {

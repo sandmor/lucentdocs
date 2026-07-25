@@ -129,9 +129,11 @@ export function useInlineSessionObserver({
               })
             }
             current.lastSeq = event.seq
-            emitInlineStreamActivity(sessionId)
 
             if (event.type === 'stream-chunk') {
+              // Snapshots acknowledge lifecycle state, not model output. Counting
+              // them as progress armed the stuck warning before generation began.
+              emitInlineStreamActivity(sessionId)
               if (
                 shouldStartChunkPumpForGeneration(
                   current.activeGenerationId,
@@ -176,7 +178,7 @@ export function useInlineSessionObserver({
               store.setSessionPreviewById(sessionId, null)
             }
 
-            if (event.generating && event.generationId) {
+            if (event.generating && event.generationId && event.draftKind === 'continuation') {
               const zoneId = resolveZoneIdForSessionRef.current(sessionId)
               const bubblePresence = getBubblePresenceRef.current?.() ?? null
               const draftText = event.draftText?.trim() ?? ''

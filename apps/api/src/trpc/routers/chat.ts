@@ -113,6 +113,7 @@ export const chatRouter = router({
         createdAt: state.thread.createdAt,
         updatedAt: state.thread.updatedAt,
         generating: state.generating,
+        stopping: state.stopping,
         generationId: state.generationId,
       }
     }),
@@ -486,7 +487,10 @@ export const chatRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
       await assertProjectDocument(input.projectId, input.documentId, ctx.services)
-      return { canceled: ctx.chatRuntime.cancelGeneration(input, input.generationId) }
+      // A stop is intentionally chat-scoped: any connected collaborator can
+      // stop the active project-assistant run. The optional ID is retained for
+      // older clients, but a stale local pump must not block a real stop.
+      return { canceled: ctx.chatRuntime.cancelGeneration(input) }
     }),
 
   deleteById: protectedProcedure

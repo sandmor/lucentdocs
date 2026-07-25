@@ -264,6 +264,7 @@ test('sidebar chat stop aborts an in-flight generation without saving assistant 
 
   await expect(page.locator('[data-chat-stop="true"]')).toHaveCount(0, { timeout: 10_000 })
   await expect(page.locator('[data-chat-panel="true"]')).toContainText('Abort this chat response')
+  await expect(page.locator('[data-chat-panel="true"]')).toContainText('Response stopped')
   await expect(page.locator('[data-chat-panel="true"]')).not.toContainText('spark')
 })
 

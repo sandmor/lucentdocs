@@ -4,6 +4,7 @@ import {
   type InlineZoneWriteAction,
   gapBreaksZoneSegmentChain,
   parseZoneNodeAttrs,
+  replaceAIZoneTextInDoc,
   createWrappedZoneSliceFromText,
   type AIZoneAttrs,
 } from '@lucentdocs/shared'
@@ -194,38 +195,7 @@ export function applyInlineZoneWriteActionToDoc(
 
   const nextText = `${zoneText.slice(0, fromOffset)}${action.content}${zoneText.slice(toOffset)}`
 
-  const zoneType = doc.type.schema.nodes.ai_zone
-  if (!zoneType) {
-    return {
-      changed: false,
-      nextDoc: doc,
-      zoneFound: false,
-    }
-  }
-
-  const attrs: AIZoneAttrs = {
-    id: zone.id,
-    streaming: true,
-    sessionId: zone.sessionId,
-    originalSlice: zone.originalSlice,
-  }
-  const wrappedReplacement = createWrappedZoneSliceFromText(
-    doc,
-    zone.nodeFrom,
-    zone.nodeTo,
-    nextText,
-    zoneType,
-    attrs
-  )
-
-  const tr = new Transform(doc)
-  tr.replaceRange(zone.nodeFrom, zone.nodeTo, wrappedReplacement)
-
-  return {
-    changed: !tr.doc.eq(doc),
-    nextDoc: tr.doc,
-    zoneFound: true,
-  }
+  return replaceAIZoneTextInDoc(doc, sessionId, nextText, true)
 }
 
 /**
@@ -245,44 +215,13 @@ export function finalizeInlineZoneInDoc(
     }
   }
 
-  const zoneType = doc.type.schema.nodes.ai_zone
-  if (!zoneType) {
-    return {
-      changed: false,
-      nextDoc: doc,
-      zoneFound: false,
-    }
-  }
-
   const zoneText = doc.textBetween(zone.nodeFrom, zone.nodeTo, '\n\n', '\n')
-  const finalizedAttrs: AIZoneAttrs = {
-    id: zone.id,
-    streaming: false,
-    sessionId: zone.sessionId,
-    originalSlice: zone.originalSlice,
-  }
 
   if (zoneText === content) {
     return setInlineZoneStreamingInDoc(doc, sessionId, false)
   }
 
-  const wrappedReplacement = createWrappedZoneSliceFromText(
-    doc,
-    zone.nodeFrom,
-    zone.nodeTo,
-    content,
-    zoneType,
-    finalizedAttrs
-  )
-
-  const tr = new Transform(doc)
-  tr.replaceRange(zone.nodeFrom, zone.nodeTo, wrappedReplacement)
-
-  return {
-    changed: !tr.doc.eq(doc),
-    nextDoc: tr.doc,
-    zoneFound: true,
-  }
+  return replaceAIZoneTextInDoc(doc, sessionId, content, false)
 }
 
 export function setInlineZoneStreamingInDoc(

@@ -263,9 +263,13 @@ export function AIZoneFloatingControl({
   useEffect(() => {
     if (!zoneId) return
     const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(zoneId) : zoneId
-    const matches = Array.from(
+    const allMatches = Array.from(
       view.dom.querySelectorAll<HTMLElement>(`.ai-generating-text[data-ai-zone-id="${escapedId}"]`)
     )
+    const previewMatches = allMatches.filter((match) =>
+      match.closest('[data-ai-zone-preview="true"]')
+    )
+    const matches = previewMatches.length > 0 ? previewMatches : allMatches
     for (const match of matches) match.dataset.aiZoneControlActive = 'true'
     return () => {
       for (const match of matches) delete match.dataset.aiZoneControlActive
@@ -280,9 +284,13 @@ export function AIZoneFloatingControl({
         ? CSS.escape(zoneId)
         : zoneId.replace(/["\\]/g, '\\$&')
 
-    const matches = Array.from(
+    const allMatches = Array.from(
       view.dom.querySelectorAll<HTMLElement>(`.ai-generating-text[data-ai-zone-id="${escapedId}"]`)
     )
+    const previewMatches = allMatches.filter((match) =>
+      match.closest('[data-ai-zone-preview="true"]')
+    )
+    const matches = previewMatches.length > 0 ? previewMatches : allMatches
 
     let zoneTop: number
     let zoneBottom: number

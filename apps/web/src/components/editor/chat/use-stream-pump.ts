@@ -6,7 +6,6 @@ import { createUIMessageChunkPump, type UIMessageChunkPump } from '../ai/ui-mess
 interface UseChatStreamPumpOptions {
   isThreadActive: (chatId: string) => boolean
   onAssistantMessage: (updater: (previous: UIMessage[]) => UIMessage[]) => void
-  onGeneratingChange: (generating: boolean) => void
 }
 
 interface ChatStreamPump {
@@ -24,14 +23,12 @@ interface ChatStreamPump {
 export function useChatStreamPump({
   isThreadActive,
   onAssistantMessage,
-  onGeneratingChange,
 }: UseChatStreamPumpOptions): ChatStreamPump {
   const streamAssistantRef = useRef<UIMessage | null>(null)
   const streamGenerationIdRef = useRef<string | null>(null)
   const pumpRef = useRef<UIMessageChunkPump | null>(null)
   const isThreadActiveRef = useRef(isThreadActive)
   const onAssistantMessageRef = useRef(onAssistantMessage)
-  const onGeneratingChangeRef = useRef(onGeneratingChange)
 
   useEffect(() => {
     isThreadActiveRef.current = isThreadActive
@@ -40,10 +37,6 @@ export function useChatStreamPump({
   useEffect(() => {
     onAssistantMessageRef.current = onAssistantMessage
   }, [onAssistantMessage])
-
-  useEffect(() => {
-    onGeneratingChangeRef.current = onGeneratingChange
-  }, [onGeneratingChange])
 
   useEffect(() => {
     const pump = createUIMessageChunkPump({
@@ -61,7 +54,6 @@ export function useChatStreamPump({
           upsertAssistantMessage(previous, nextMessageClone)
         )
       },
-      onGeneratingChange: (generating) => onGeneratingChangeRef.current(generating),
       onError: (error) => {
         console.warn('Chat stream chunk pump failed', { error })
       },

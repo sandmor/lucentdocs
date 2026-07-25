@@ -37,6 +37,7 @@ export interface ChatObserveState {
   chatId: string
   deleted: boolean
   generating: boolean
+  stopping: boolean
   generationId: string | null
   error: string | null
   thread: PersistedChatThread | null
@@ -64,6 +65,7 @@ type ChatStateListener = (event: ChatObserveEvent) => void
 interface ActiveGeneration {
   id: string
   controller: AbortController
+  stopping: boolean
 }
 
 export class ChatRuntime {
@@ -140,11 +142,13 @@ export class ChatRuntime {
 
   #getGenerationState(scope: ChatScope): {
     generating: boolean
+    stopping: boolean
     generationId: string | null
   } {
     const active = this.#activeGenerations.get(toChatKey(scope))
     return {
       generating: Boolean(active),
+      stopping: active?.stopping ?? false,
       generationId: active?.id ?? null,
     }
   }
@@ -444,6 +448,18 @@ export class ChatRuntime {
     const active = this.#activeGenerations.get(toChatKey(scope))
     if (!active) return false
     if (generationId && active.id !== generationId) return false
+    if (active.stopping) return true
+    active.stopping = true
+    const liveState = this.#liveStates.get(toChatKey(scope))
+    if (liveState) {
+      this.#emitSnapshot({
+        ...liveState,
+        generating: true,
+        stopping: true,
+        generationId: active.id,
+        error: null,
+      })
+    }
     active.controller.abort()
     return true
   }
@@ -478,7 +494,7 @@ export class ChatRuntime {
     const promptText = input.message.trim()
     const generationId = nanoid()
     const controller = new AbortController()
-    this.#activeGenerations.set(key, { id: generationId, controller })
+    this.#activeGenerations.set(key, { id: generationId, controller, stopping: false })
 
     try {
       const document = await this.#services.documents.getForProject(
@@ -573,6 +589,7 @@ export class ChatRuntime {
         createObserveState(scope, {
           thread: liveThread,
           generating: true,
+          stopping: false,
           generationId,
         })
       )
@@ -594,13 +611,18 @@ export class ChatRuntime {
         },
         {
           onChunk: ({ generationId: activeGenerationId, chunk }) => {
+            const active = this.#activeGenerations.get(key)
+            if (!active || active.id !== activeGenerationId || active.stopping) return
             this.#emitStreamChunk(scope, activeGenerationId, chunk)
           },
           onProgress: (state) => {
+            const active = this.#activeGenerations.get(key)
+            if (!active || active.id !== state.generationId || active.stopping) return
             this.#updateSnapshot(
               createObserveState(scope, {
                 thread: state.thread,
                 generating: true,
+                stopping: false,
                 generationId: state.generationId,
                 error: null,
               })
@@ -608,14 +630,14 @@ export class ChatRuntime {
           },
           onComplete: (result) => {
             const active = this.#activeGenerations.get(key)
-            if (active?.id === generationId) {
-              this.#activeGenerations.delete(key)
-            }
+            if (active?.id !== generationId) return
+            this.#activeGenerations.delete(key)
 
             this.#emitSnapshot(
               createObserveState(scope, {
                 thread: result.thread,
                 generating: false,
+                stopping: false,
                 generationId: null,
                 error: result.error ?? null,
               })

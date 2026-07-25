@@ -9,10 +9,7 @@ import { StuckDetector } from './stuck-detector'
 import { createInlineSessionId, createZoneId } from './writer/ids'
 import { createEmptySession } from './writer/session-state'
 import { waitForInlineGeneration } from '../inline/inline-generation-wait'
-import {
-  emitInlineStreamActivity,
-  registerInlineStreamActivityHandler,
-} from '../inline/inline-stream-activity'
+import { registerInlineStreamActivityHandler } from '../inline/inline-stream-activity'
 import {
   createEmptyZoneSlice,
   createZoneNodeAttrs,
@@ -45,8 +42,7 @@ export function createAIWriterController(
     }))
   const getRequesterClientName = options.getRequesterClientName ?? (() => null)
   const isInlineAIControlsInteracting = options.isInlineAIControlsInteracting ?? (() => false)
-  const getCollaboratorDisplayName =
-    options.getCollaboratorDisplayName ?? (() => 'Collaborator')
+  const getCollaboratorDisplayName = options.getCollaboratorDisplayName ?? (() => 'Collaborator')
   const getSessionById = options.getSessionById ?? (() => null)
   const setSessionById = options.setSessionById ?? (() => {})
   const bubblePresence = options.bubblePresence ?? null
@@ -177,9 +173,13 @@ export function createAIWriterController(
           abortPolicies.delete(requestAbortController)
           const shouldCancelServer = abortPolicy?.cancelServerOnAbort ?? true
 
-          if (shouldCancelServer && activeGenerationId) {
+          if (shouldCancelServer) {
+            // The start mutation can still be in flight. Remember the intent before
+            // we have its id so the response cannot leave an orphaned server run.
             cancelRequested = true
-            requestServerCancel(activeGenerationId)
+            if (activeGenerationId) {
+              requestServerCancel(activeGenerationId)
+            }
           }
         },
         { once: true }
@@ -206,7 +206,6 @@ export function createAIWriterController(
             })
 
       activeGenerationId = started.generationId
-      emitInlineStreamActivity(sessionId)
 
       if (cancelRequested) {
         requestServerCancel(started.generationId)

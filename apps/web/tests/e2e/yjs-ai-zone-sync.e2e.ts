@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test'
 import { createProject, startInlineGeneration } from './helpers/inline-ai'
 
+async function placeCaretAtParagraphEnd(page: import('@playwright/test').Page, index: number) {
+  await page.evaluate((paragraphIndex) => {
+    const paragraph = document.querySelectorAll<HTMLElement>('.ProseMirror p')[paragraphIndex]
+    if (!paragraph) throw new Error(`Paragraph ${paragraphIndex} was not found`)
+
+    const selection = window.getSelection()
+    if (!selection) throw new Error('Selection API is unavailable')
+
+    const range = document.createRange()
+    range.selectNodeContents(paragraph)
+    range.collapse(false)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    paragraph.closest<HTMLElement>('.ProseMirror')?.focus()
+  }, index)
+}
+
 test('ai generation zone syncs and clears on reject across clients', async ({ browser, page }) => {
   await createProject(page, 'Yjs AI Zone Reject Sync')
 
@@ -65,6 +82,38 @@ test('ai generation zone syncs and persists on accept across clients', async ({
     await expect(page.locator('.ai-generating-text')).toHaveCount(0)
     await expect(secondPage.locator('.ai-generating-text')).toHaveCount(0)
     await expect(editorTwo).toContainText('Once spark')
+  } finally {
+    await secondContext.close()
+  }
+})
+
+test('concurrent continuation drafts stay visible across clients', async ({ browser, page }) => {
+  await createProject(page, 'Yjs Concurrent AI Draft Previews')
+
+  const secondContext = await browser.newContext()
+  const secondPage = await secondContext.newPage()
+
+  try {
+    const editorOne = page.locator('.ProseMirror')
+    await editorOne.click()
+    await page.keyboard.type('Alpha')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('Beta')
+
+    await secondPage.goto(page.url())
+    const editorTwo = secondPage.locator('.ProseMirror')
+    await expect(editorTwo).toContainText('Beta')
+
+    await placeCaretAtParagraphEnd(page, 0)
+    await placeCaretAtParagraphEnd(secondPage, 1)
+    await Promise.all([startInlineGeneration(page), startInlineGeneration(secondPage)])
+
+    const previewOne = page.locator('.ai-zone-draft-preview .ai-generating-text')
+    const previewTwo = secondPage.locator('.ai-zone-draft-preview .ai-generating-text')
+    await expect(previewOne).toHaveCount(2, { timeout: 10_000 })
+    await expect(previewTwo).toHaveCount(2, { timeout: 10_000 })
+    await expect(previewOne).toHaveText(['spark', 'spark'])
+    await expect(previewTwo).toHaveText(['spark', 'spark'])
   } finally {
     await secondContext.close()
   }

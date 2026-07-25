@@ -50,6 +50,8 @@ export interface InlineObserveState extends InlineScope {
   generating: boolean
   generationId: string | null
   draftText: string | null
+  /** An ephemeral draft is only rendered for isolated continuation previews. */
+  draftKind: 'continuation' | null
   error: string | null
   session: InlineZoneSession | null
 }
@@ -137,6 +139,24 @@ interface ActiveGeneration {
   id: string
   controller: AbortController
   events: InlineObserveEvent[]
+  timeoutId: ReturnType<typeof setTimeout>
+  timedOut: boolean
+}
+
+const INLINE_GENERATION_TIMEOUT_MS = 120_000
+const INLINE_ZONE_SYNC_TIMEOUT_MS = 5_000
+const INLINE_ZONE_SYNC_RETRY_MS = 25
+const INLINE_STREAM_CLEANUP_TIMEOUT_MS = 2_000
+
+function resolveInlineGenerationTimeoutMs(): number {
+  if (isTestRuntime()) {
+    const configured = Number(process.env.LUCENTDOCS_TEST_INLINE_TIMEOUT_MS ?? '')
+    if (Number.isFinite(configured) && configured > 0) {
+      return Math.round(configured)
+    }
+  }
+
+  return INLINE_GENERATION_TIMEOUT_MS
 }
 
 interface ParsedInlineToolPart {
@@ -178,6 +198,12 @@ function resolveTestInlineDelayMs(prompt: string): number {
   return 0
 }
 
+function resolveTestInlinePreviewHoldMs(): number {
+  if (!isTestRuntime()) return 0
+  const configured = Number(process.env.LUCENTDOCS_TEST_INLINE_PREVIEW_HOLD_MS ?? '')
+  return Number.isFinite(configured) && configured > 0 ? Math.round(configured) : 0
+}
+
 async function waitForAbortableDelay(controller: AbortController, delayMs: number): Promise<void> {
   if (delayMs <= 0) return
   if (controller.signal.aborted) return
@@ -214,6 +240,7 @@ function createObserveState(
     generating: boolean
     generationId: string | null
     draftText?: string | null
+    draftKind?: 'continuation' | null
     error?: string | null
   }
 ): InlineObserveState {
@@ -226,6 +253,7 @@ function createObserveState(
     generating: options.generating,
     generationId: options.generationId,
     draftText: options.draftText ?? null,
+    draftKind: options.draftKind ?? null,
     error: options.error ?? null,
     session: options.session,
   }
@@ -490,6 +518,9 @@ export class InlineRuntime {
     chunk: UIMessageChunk
   ): void {
     const key = toInlineKey(scope)
+    const active = this.#activeGenerations.get(key)
+    if (active?.id !== generationId) return
+
     const event: InlineObserveChunkEvent = {
       type: 'stream-chunk',
       projectId: scope.projectId,
@@ -500,10 +531,7 @@ export class InlineRuntime {
       chunk,
     }
 
-    const active = this.#activeGenerations.get(key)
-    if (active?.id === generationId) {
-      active.events.push(event)
-    }
+    active.events.push(event)
 
     this.#emitEvent(event)
   }
@@ -865,11 +893,41 @@ export class InlineRuntime {
     return true
   }
 
+  async #waitForZoneSync(documentId: string, sessionId: string): Promise<void> {
+    const deadline = Date.now() + INLINE_ZONE_SYNC_TIMEOUT_MS
+
+    while (true) {
+      const found = await this.#yjsRuntime.applyProsemirrorTransform(documentId, {
+        transform: (currentDoc) => {
+          const snapshot = getInlineZoneSnapshotFromDoc(currentDoc, sessionId)
+          return {
+            changed: false,
+            nextDoc: currentDoc,
+            result: snapshot.zoneFound,
+          }
+        },
+      })
+
+      if (found.result) return
+      if (Date.now() >= deadline) {
+        throw new InlineRuntimeError(
+          'CONFLICT',
+          'The inline AI zone did not reach the collaboration server. Please retry the request.'
+        )
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, INLINE_ZONE_SYNC_RETRY_MS)
+      })
+    }
+  }
+
   async #resolveInlineContext(
     request: StartInlineGenerationRequest
   ): Promise<ResolvedInlineGenerationInput> {
     const limits = configManager.getConfig().limits
     const budget = limits.promptExcerptChars
+    await this.#waitForZoneSync(request.documentId, request.sessionId)
     const snapshotBundle = await this.#yjsRuntime.buildSnapshotBundle(request.documentId)
     const notes = snapshotBundle.notes
 
@@ -1081,10 +1139,22 @@ export class InlineRuntime {
       error: null,
     })
     const startedSnapshot = this.#toSnapshotEvent(startedState)
+    const timeoutId = setTimeout(() => {
+      const active = this.#activeGenerations.get(key)
+      if (!active || active.id !== generationId) return
+      active.timedOut = true
+      active.controller.abort()
+    }, resolveInlineGenerationTimeoutMs())
+    if (typeof timeoutId.unref === 'function') {
+      timeoutId.unref()
+    }
+
     this.#activeGenerations.set(key, {
       id: generationId,
       controller,
       events: [startedSnapshot],
+      timeoutId,
+      timedOut: false,
     })
     this.#emitEvent(startedSnapshot)
 
@@ -1378,7 +1448,12 @@ export class InlineRuntime {
         finalSession = testResult.session
         zoneDraftText = testResult.draftText
         if (controller.signal.aborted) {
-          generationAborted = true
+          const active = this.#activeGenerations.get(key)
+          if (active?.id === generationId && active.timedOut) {
+            generationError = 'Inline AI request timed out. The original text was restored.'
+          } else {
+            generationAborted = true
+          }
           finalSession =
             input.mode === 'prompt'
               ? sessionAfterInterruptedGeneration(generationSession, baselineSession)
@@ -1422,6 +1497,7 @@ export class InlineRuntime {
               generating: true,
               generationId,
               draftText: generatedText.length > 0 ? generatedText : null,
+              draftKind: 'continuation',
             }),
             {
               recordInGeneration: active?.id === generationId ? generationId : null,
@@ -1498,7 +1574,9 @@ export class InlineRuntime {
                   session: finalSession,
                   generating: true,
                   generationId,
-                  draftText: zoneDraftText.length > 0 ? zoneDraftText : null,
+                  // Prompt writes are already applied to Yjs. They must not become
+                  // a second isolated overlay over a selection rewrite.
+                  draftText: null,
                 }),
                 {
                   recordInGeneration: active?.id === generationId ? generationId : null,
@@ -1581,7 +1659,7 @@ export class InlineRuntime {
               session: finalSession,
               generating: true,
               generationId,
-              draftText: zoneDraftText.length > 0 ? zoneDraftText : null,
+              draftText: null,
             }),
             {
               recordInGeneration: active?.id === generationId ? generationId : null,
@@ -1590,18 +1668,28 @@ export class InlineRuntime {
         }
 
         if (chunkReader) {
-          try {
-            await chunkReader.cancel()
-          } catch {
+          // A tee branch must not be allowed to hold the generation in the
+          // processing state after the message branch is done.
+          void chunkReader.cancel().catch(() => {
             // Ignore cancellation errors when stream already closed.
-          }
+          })
         }
         chunkReader = null
-        await chunkForwardTask
+        await Promise.race([
+          chunkForwardTask,
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, INLINE_STREAM_CLEANUP_TIMEOUT_MS)
+          }),
+        ])
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        generationAborted = true
+        const active = this.#activeGenerations.get(key)
+        if (active?.id === generationId && active.timedOut) {
+          generationError = 'Inline AI request timed out. The original text was restored.'
+        } else {
+          generationAborted = true
+        }
         finalSession =
           input.mode === 'prompt'
             ? sessionAfterInterruptedGeneration(finalSession, baselineSession)
@@ -1681,6 +1769,7 @@ export class InlineRuntime {
 
       const active = this.#activeGenerations.get(key)
       if (active?.id === generationId) {
+        clearTimeout(active.timeoutId)
         this.#activeGenerations.delete(key)
       }
 
@@ -1780,11 +1869,17 @@ export class InlineRuntime {
           generating: true,
           generationId,
           draftText: generated,
+          draftKind: 'continuation',
         }),
         {
           recordInGeneration: active?.id === generationId ? generationId : null,
         }
       )
+
+      // Browser tests use a one-shot deterministic response. Hold an emitted
+      // continuation frame only when explicitly configured so the real
+      // awareness preview can be asserted before finalization.
+      await waitForAbortableDelay(controller, resolveTestInlinePreviewHoldMs())
 
       return {
         session: sessionWithAssistant,

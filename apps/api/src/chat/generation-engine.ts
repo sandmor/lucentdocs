@@ -69,6 +69,9 @@ export interface GenerationCallbacks {
   createRuntimeError: (code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT', message: string) => Error
 }
 
+const CHAT_STREAM_IDLE_TIMEOUT_MS = 120_000
+const CHAT_STREAM_IDLE_ABORT_REASON = 'chat-stream-idle-timeout'
+
 function isTestRuntime(): boolean {
   return (
     configManager.getConfig().runtime.nodeEnv === 'test' || process.env.LUCENTDOCS_TEST_MODE === '1'
@@ -158,9 +161,42 @@ function buildProgressThread(
   }
 }
 
-function extractAssistantParts(message: UIMessage | null): unknown[] {
+function extractAssistantParts(
+  message: UIMessage | null,
+  options?: { terminalStatus?: 'stopped' | 'failed'; message?: string }
+): unknown[] {
   if (!message) return [{ type: 'text', text: '' }]
-  return message.parts as unknown[]
+  const parts = structuredClone(message.parts) as Array<Record<string, unknown>>
+  if (!options?.terminalStatus) return parts
+
+  const terminalParts = parts.map((part) => {
+    const type = typeof part.type === 'string' ? part.type : ''
+    const state = typeof part.state === 'string' ? part.state : ''
+    if (
+      (type === 'dynamic-tool' || type.startsWith('tool-')) &&
+      state !== 'output-available' &&
+      state !== 'output-error' &&
+      state !== 'output-denied'
+    ) {
+      return {
+        ...part,
+        state: 'output-error',
+        errorText:
+          options.terminalStatus === 'stopped'
+            ? 'Canceled by user.'
+            : 'Generation interrupted before the tool completed.',
+      }
+    }
+    return part
+  })
+  terminalParts.push({
+    type: 'data-generation-status',
+    data: {
+      status: options.terminalStatus,
+      ...(options.message ? { message: options.message } : {}),
+    },
+  })
+  return terminalParts
 }
 
 function toPersistedFromService(
@@ -224,6 +260,18 @@ export class GenerationEngine {
     let chunkReader: ReadableStreamDefaultReader<UIMessageChunk> | null = null
     let shouldPersistAssistant = false
     const wasAborted = () => abortController.signal.aborted
+    const wasIdleTimeout = () => abortController.signal.reason === CHAT_STREAM_IDLE_ABORT_REASON
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    const clearIdleTimer = () => {
+      if (idleTimer !== null) clearTimeout(idleTimer)
+      idleTimer = null
+    }
+    const resetIdleTimer = () => {
+      clearIdleTimer()
+      idleTimer = setTimeout(() => {
+        abortController.abort(CHAT_STREAM_IDLE_ABORT_REASON)
+      }, CHAT_STREAM_IDLE_TIMEOUT_MS)
+    }
 
     try {
       const currentDocument = await this.#services.documents.getForProject(
@@ -240,7 +288,14 @@ export class GenerationEngine {
       if (isTestRuntime()) {
         const delayMs = resolveTestChatDelayMs()
         await waitForAbortableDelay(abortController, delayMs)
-        if (!wasAborted()) {
+        if (wasAborted()) {
+          latestAssistantMessage = {
+            id: assistantNodeId,
+            role: 'assistant',
+            parts: [],
+          }
+          shouldPersistAssistant = true
+        } else {
           const promptSeed = extractMessageText(promptMessages[promptMessages.length - 1])
           latestAssistantMessage = {
             id: assistantNodeId,
@@ -300,6 +355,7 @@ export class GenerationEngine {
       })
 
       const [chunkStream, messageStream] = uiMessageStream.tee()
+      resetIdleTimer()
       chunkReader = chunkStream.getReader()
       chunkForwardTask = (async () => {
         const reader = chunkReader
@@ -307,6 +363,7 @@ export class GenerationEngine {
           while (true) {
             const { done, value } = await reader.read()
             if (done) break
+            resetIdleTimer()
             try {
               callbacks.onChunk({
                 generationId,
@@ -334,6 +391,7 @@ export class GenerationEngine {
           id: assistantNodeId,
         }
         shouldPersistAssistant = true
+        resetIdleTimer()
 
         callbacks.onProgress({
           thread: buildProgressThread(baseThread, assistantNodeId, latestAssistantMessage),
@@ -342,12 +400,24 @@ export class GenerationEngine {
         })
       }
     } catch (error) {
-      if (!isAbortError(error) && !wasAborted()) {
+      if (wasIdleTimeout()) {
+        completionError = 'The response stopped after two minutes without progress.'
+      } else if (!isAbortError(error) && !wasAborted()) {
         completionError = error instanceof Error ? error.message : 'Failed to get AI response'
         console.error('AI chat generation failed', error)
       }
-      shouldPersistAssistant = false
+      if (wasAborted()) {
+        latestAssistantMessage ??= {
+          id: assistantNodeId,
+          role: 'assistant',
+          parts: [],
+        }
+        shouldPersistAssistant = true
+      } else {
+        shouldPersistAssistant = false
+      }
     } finally {
+      clearIdleTimer()
       if (chunkReader) {
         try {
           await chunkReader.cancel()
@@ -372,7 +442,10 @@ export class GenerationEngine {
             scope.documentId,
             scope.chatId,
             assistantNodeId,
-            extractAssistantParts(latestAssistantMessage)
+            extractAssistantParts(latestAssistantMessage, {
+              terminalStatus: wasAborted() ? (wasIdleTimeout() ? 'failed' : 'stopped') : undefined,
+              message: wasIdleTimeout() ? (completionError ?? undefined) : undefined,
+            })
           )
         } else if (wasAborted()) {
           saved = await this.#services.chats.savePayload(

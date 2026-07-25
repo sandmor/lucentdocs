@@ -34,9 +34,9 @@ export async function openSelectionAskAI(toolbar: Locator) {
 
 export async function startInlineGeneration(page: PWPage) {
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter')
-  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toBeVisible({
-    timeout: 15_000,
-  })
+  await expect(
+    page.locator('.ai-writer-floating-controls[data-state="processing"]').first()
+  ).toBeVisible({ timeout: 15_000 })
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -3,7 +3,6 @@ import { readUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai'
 interface CreateUIMessageChunkPumpOptions {
   isScopeActive: (scopeId: string) => boolean
   onMessage: (message: UIMessage) => void
-  onGeneratingChange?: (generating: boolean) => void
   onError?: (error: unknown) => void
   emitIntervalMs?: number
 }
@@ -44,7 +43,6 @@ export function createUIMessageChunkPump(
     const nextMessage = pendingMessage
     pendingMessage = null
     latestMessage = nextMessage
-    options.onGeneratingChange?.(true)
     options.onMessage(nextMessage)
   }
 

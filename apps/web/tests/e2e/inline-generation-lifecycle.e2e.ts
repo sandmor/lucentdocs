@@ -26,6 +26,28 @@ test('inline stop aborts an in-flight continuation without inserting output', as
   await expect(editor).not.toContainText('spark')
 })
 
+test('continuation draft is visible through the real ProseMirror shadow preview', async ({
+  page,
+}) => {
+  await createProject(page, 'Inline Shadow Preview')
+
+  const editor = page.locator('.ProseMirror').first()
+  await editor.click()
+  await page.keyboard.type('Once ')
+  await startInlineGeneration(page)
+
+  const preview = page.locator('.ai-zone-draft-preview .ai-generating-text')
+  await expect(preview).toBeVisible({ timeout: 15_000 })
+  await expect(preview).toContainText('spark')
+  await expect(page.locator('.ai-zone-preview-source-hidden')).toHaveCount(1)
+
+  await expect(page.locator('.ai-writer-floating-controls[data-state="processing"]')).toHaveCount(
+    0,
+    { timeout: 20_000 }
+  )
+  await expect(editor).toContainText(/Once\s*spark/)
+})
+
 test('undo during streaming is blocked and leaves the document unchanged', async ({ page }) => {
   await createProject(page, 'Inline Undo Blocked While Streaming')
 

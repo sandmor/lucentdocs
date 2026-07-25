@@ -384,6 +384,7 @@
 /* ProseMirror styles — editorial serif */
 .ProseMirror {
   flex: 1 1 0%;
+  min-width: 0;
   line-height: 1.85;
   font-family: var(--font-serif);
   font-size: 1.05rem;
@@ -391,6 +392,7 @@
   scroll-padding-bottom: var(--ai-inline-mobile-dock-reserve);
   letter-spacing: 0.005em;
   outline: none;
+  overflow-wrap: anywhere;
 }
 
 @media (min-width: 640px) {
@@ -991,23 +993,15 @@
   border-radius: 2px;
 }
 
-.ai-generating-text[data-ai-zone-overlay-active='true'] {
-  background: transparent;
-}
-
 .ai-generating-text[data-ai-zone-control-active='true'] {
   box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--primary) 65%, transparent);
 }
 
-.ai-generating-text__overlay > *:first-child {
-  display: inline;
+.ai-zone-draft-preview {
+  display: contents;
 }
 
-.ai-generating-text__overlay > *:not(:first-child) {
-  margin-top: 0.8em;
-}
-
-[data-ai-zone-overlay-active='true'] > .ai-generating-text__content {
+.ai-zone-preview-source-hidden {
   display: none;
 }
 
@@ -1411,13 +1405,24 @@
 .chat-markdown {
   min-width: 0;
   max-width: 100%;
+  max-inline-size: 100%;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .chat-markdown pre {
+  min-width: 0;
   max-width: 100%;
+  max-inline-size: 100%;
   overflow-x: auto;
   white-space: pre;
+}
+
+.chat-markdown > *,
+.chat-markdown :is(blockquote, li, p, h1, h2, h3, h4, h5, h6, dd, figcaption) {
+  min-width: 0;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
 }
 
 .chat-markdown :not(pre) > code {
@@ -1427,7 +1432,9 @@
 
 .chat-markdown table {
   display: block;
+  min-width: 0;
   max-width: 100%;
+  max-inline-size: 100%;
   overflow-x: auto;
 }
 
@@ -1439,4 +1446,14 @@
 .chat-markdown img {
   max-width: 100%;
   height: auto;
+}
+
+.chat-markdown :is(svg, .katex-display) {
+  max-width: 100%;
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+
+[data-chat-panel='true'] {
+  contain: inline-size;
 }
