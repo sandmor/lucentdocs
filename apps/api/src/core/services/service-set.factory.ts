@@ -19,6 +19,7 @@ import { createDocumentDeleteCleanupScheduler } from './document-delete-cleanup-
 import { createAuthService } from './auth.service.js'
 import { createEditorPreferencesService } from './editorPreferences.service.js'
 import { createAssistantPreferencesService } from './assistantPreferences.service.js'
+import { createMcpSettingsService } from './mcpSettings.service.js'
 import type { ServiceSet } from './types.js'
 
 export function createCoreServiceSet(dependencies: {
@@ -31,6 +32,7 @@ export function createCoreServiceSet(dependencies: {
   const aiModelSelection = createAiModelSelectionService(dependencies.repositories)
   const embeddingModelSelection = createEmbeddingModelSelectionService(dependencies.repositories)
   const indexingSettings = createIndexingSettingsService(dependencies.repositories)
+  const mcpSettings = createMcpSettingsService(dependencies.repositories)
   const embeddingIndex = createEmbeddingIndexService(
     dependencies.repositories,
     dependencies.transaction,
@@ -73,6 +75,7 @@ export function createCoreServiceSet(dependencies: {
     aiModelSelection,
     embeddingModelSelection,
     indexingSettings,
+    mcpSettings,
     embeddingIndex,
     auth: createAuthService(dependencies.repositories, dependencies.transaction),
     editorPreferences: createEditorPreferencesService(dependencies.repositories),

@@ -12,6 +12,7 @@ import { aiModelSelectionRouter } from './routers/aiModelSelection.js'
 import { embeddingModelSelectionRouter } from './routers/embeddingModelSelection.js'
 import { editorPreferencesRouter } from './routers/editorPreferences.js'
 import { assistantPreferencesRouter } from './routers/assistantPreferences.js'
+import { mcpRouter } from './routers/mcp.js'
 
 export const appRouter = router({
   projects: projectsRouter,
@@ -28,6 +29,7 @@ export const appRouter = router({
   embeddingModelSelection: embeddingModelSelectionRouter,
   editorPreferences: editorPreferencesRouter,
   assistantPreferences: assistantPreferencesRouter,
+  mcp: mcpRouter,
 })
 
 export type AppRouter = typeof appRouter

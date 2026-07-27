@@ -22,6 +22,7 @@ import {
 } from './tree.js'
 import { buildEditTools, buildReadTools, buildWriteTools } from './tools.js'
 import { DocumentEditSession } from './tools/document-edit-session.js'
+import { McpToolRuntime } from '../mcp/runtime.js'
 import {
   buildCurrentFileContextWithAnnotations,
   isAbortError,
@@ -262,6 +263,7 @@ export class GenerationEngine {
     const wasAborted = () => abortController.signal.aborted
     const wasIdleTimeout = () => abortController.signal.reason === CHAT_STREAM_IDLE_ABORT_REASON
     let idleTimer: ReturnType<typeof setTimeout> | null = null
+    let mcpSession: Awaited<ReturnType<McpToolRuntime['acquire']>> | null = null
     const clearIdleTimer = () => {
       if (idleTimer !== null) clearTimeout(idleTimer)
       idleTimer = null
@@ -336,11 +338,17 @@ export class GenerationEngine {
       const modelMessages = await convertToModelMessages(toModelMessages(promptMessages))
       const runtimeLimits = configManager.getConfig().limits
 
+      mcpSession = await new McpToolRuntime(this.#services.mcpSettings).acquire(
+        editingEnabled ? 'agent' : 'ask'
+      )
       const result = streamText({
         model,
         system: `${rendered.systemPrompt}\n\n${rendered.userPrompt}`,
         messages: modelMessages,
-        tools: this.buildTools({ ...scope, documentId: contextDocumentId }, editingEnabled),
+        tools: {
+          ...this.buildTools({ ...scope, documentId: contextDocumentId }, editingEnabled),
+          ...mcpSession.tools,
+        },
         stopWhen: stepCountIs(runtimeLimits.aiToolSteps),
         maxOutputTokens: rendered.definition.defaults.maxOutputTokens,
         temperature: rendered.definition.defaults.temperature,
@@ -418,6 +426,7 @@ export class GenerationEngine {
       }
     } finally {
       clearIdleTimer()
+      if (mcpSession) await mcpSession.close()
       if (chunkReader) {
         try {
           await chunkReader.cancel()

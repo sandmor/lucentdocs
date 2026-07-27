@@ -46,6 +46,7 @@ interface ProviderCardProps {
   providerOptions: ProviderOption[]
   apiKeys: AiApiKeySummary[]
   showActiveControls: boolean
+  headerResetToken: string
   isActive: boolean
   canRemove: boolean
   onUpdate: (id: string, patch: Partial<AiProviderDraft>) => void
@@ -64,6 +65,7 @@ export function ProviderCard({
   providerOptions,
   apiKeys,
   showActiveControls,
+  headerResetToken,
   isActive,
   canRemove,
   onUpdate,
@@ -447,8 +449,9 @@ export function ProviderCard({
         </Field>
 
         <CustomHeadersEditor
-          providerId={provider.id}
+          ownerId={provider.id}
           headers={provider.customHeaders}
+          resetToken={headerResetToken}
           onChange={(customHeaders) => {
             onUpdate(provider.id, { customHeaders })
           }}

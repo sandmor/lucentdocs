@@ -59,6 +59,7 @@ import {
 } from './constants'
 import { ProviderCard } from './provider-card'
 import { ApiKeyManager } from './api-key-manager'
+import { McpServersSettings } from './mcp-servers'
 
 export function AdminConfigPage() {
   const navigate = useNavigate()
@@ -75,6 +76,8 @@ export function AdminConfigPage() {
   // AI provider draft state
   const [generationDraft, setGenerationDraft] = useState<AiDraftState | null>(null)
   const [embeddingDraft, setEmbeddingDraft] = useState<AiDraftState | null>(null)
+  const [generationHeadersRevision, setGenerationHeadersRevision] = useState(0)
+  const [embeddingHeadersRevision, setEmbeddingHeadersRevision] = useState(0)
   const [activeModelAnchor, setActiveModelAnchor] = useState<HTMLButtonElement | null>(null)
 
   const configQuery = trpc.config.get.useQuery()
@@ -225,10 +228,12 @@ export function AdminConfigPage() {
 
     if (kind === 'embedding') {
       setEmbeddingDraft(nextDraft)
+      setEmbeddingHeadersRevision((current) => current + 1)
       return
     }
 
     setGenerationDraft(nextDraft)
+    setGenerationHeadersRevision((current) => current + 1)
   }
 
   const saveDraft = (kind: ProviderSectionKind) => {
@@ -716,6 +721,7 @@ export function AdminConfigPage() {
     draft: AiDraftState
     entries: ProviderWithCatalog[]
     providerOptions: ProviderOption[]
+    headerResetRevision: number
     isDirty: boolean
     isSaving: boolean
   }) => {
@@ -857,6 +863,12 @@ export function AdminConfigPage() {
               providerOptions={options.providerOptions}
               apiKeys={aiSettingsQuery.data.apiKeys}
               showActiveControls={showActiveControls}
+              headerResetToken={`${options.headerResetRevision}:${JSON.stringify(
+                (options.kind === 'embedding'
+                  ? aiSettingsQuery.data.embeddingProviders
+                  : aiSettingsQuery.data.generationProviders
+                ).find((provider) => provider.id === entry.provider.id)?.customHeaders ?? {}
+              )}`}
               isActive={showActiveControls && options.draft.activeProviderId === entry.provider.id}
               canRemove={options.draft.providers.length > 1}
               onUpdate={(id, patch) => updateProvider(options.kind, id, patch)}
@@ -914,6 +926,7 @@ export function AdminConfigPage() {
             draft: generationDraft,
             entries: generationProvidersWithCatalog,
             providerOptions,
+            headerResetRevision: generationHeadersRevision,
             isDirty: generationDirty,
             isSaving:
               updateProvidersMutation.isPending &&
@@ -928,6 +941,7 @@ export function AdminConfigPage() {
             draft: embeddingDraft,
             entries: embeddingProvidersWithCatalog,
             providerOptions: embeddingProviderOptions,
+            headerResetRevision: embeddingHeadersRevision,
             isDirty: embeddingDirty,
             isSaving:
               updateProvidersMutation.isPending &&
@@ -1040,6 +1054,8 @@ export function AdminConfigPage() {
               />
             </CardContent>
           </Card>
+
+          <McpServersSettings />
 
           <form id="config-form" className="grid gap-6" onSubmit={onSubmit}>
             {form.formState.isDirty && (

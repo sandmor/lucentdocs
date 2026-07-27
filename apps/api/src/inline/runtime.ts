@@ -42,6 +42,7 @@ import {
   restoreAcceptedSessionZoneInDoc,
 } from './zone-write.js'
 import { getPromptContextForRange, type InlinePromptContextResult } from './context.js'
+import { McpToolRuntime } from '../mcp/runtime.js'
 
 export interface InlineObserveState extends InlineScope {
   sessionId: string
@@ -1436,6 +1437,7 @@ export class InlineRuntime {
     let zoneDraftText = input.mode === 'prompt' ? (input.selectedText ?? '') : ''
     let generationError: string | null = null
     let generationAborted = false
+    let mcpSession: Awaited<ReturnType<McpToolRuntime['acquire']>> | null = null
 
     try {
       if (isTestRuntime()) {
@@ -1596,9 +1598,11 @@ export class InlineRuntime {
             })
           : {}
 
+        mcpSession = await new McpToolRuntime(this.#services.mcpSettings).acquire('inline')
         const tools = {
           ...readTools,
           ...writeTools,
+          ...mcpSession.tools,
         }
 
         const result = streamText({
@@ -1708,6 +1712,7 @@ export class InlineRuntime {
             : baselineSession
       }
     } finally {
+      if (mcpSession) await mcpSession.close()
       if (generationAborted || generationError !== null) {
         try {
           await this.#enqueueSessionWrite(input, async () => {

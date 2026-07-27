@@ -10,6 +10,7 @@ import type { IndexingSettingsService } from './indexingSettings.service.js'
 import type { DocumentNotesService } from './documentNotes.service.js'
 import { createEditorPreferencesService } from './editorPreferences.service.js'
 import { createAssistantPreferencesService } from './assistantPreferences.service.js'
+import type { McpSettingsService } from './mcpSettings.service.js'
 
 export interface ServiceSet {
   projects: ProjectsService
@@ -20,6 +21,7 @@ export interface ServiceSet {
   aiModelSelection: AiModelSelectionService
   embeddingModelSelection: AiProviderSelectionService
   indexingSettings: IndexingSettingsService
+  mcpSettings: McpSettingsService
   embeddingIndex: EmbeddingIndexService
   auth: AuthService
   editorPreferences: ReturnType<typeof createEditorPreferencesService>

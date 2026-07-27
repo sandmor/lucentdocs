@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
+    "@ai-sdk/mcp": "^1.0.64",
     "@ai-sdk/openai": "^3.0.41",
     "@ai-sdk/openai-compatible": "^2.0.35",
     "@lucentdocs/core": "workspace:*",
     "@lucentdocs/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@trpc/server": "^11.10.0",
     "@y/websocket-server": "0.1.1",
     "ai": "^6.0.116",

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -34,21 +35,51 @@ function rowsToHeaders(rows: HeaderRow[]): Record<string, string> {
 }
 
 interface CustomHeadersEditorProps {
-  providerId: string
+  ownerId: string
   headers: Record<string, string>
   onChange: (headers: Record<string, string>) => void
+  description?: string
+  resetToken: string | number
 }
 
-export function CustomHeadersEditor({ providerId, headers, onChange }: CustomHeadersEditorProps) {
-  const rows = headersToRows(headers)
+export function CustomHeadersEditor({
+  ownerId,
+  headers,
+  onChange,
+  description = 'Optional headers sent with every request to this provider. Built-in auth headers take precedence on conflicts.',
+  resetToken,
+}: CustomHeadersEditorProps) {
+  return (
+    <HeaderRowsEditor
+      key={resetToken}
+      ownerId={ownerId}
+      initialHeaders={headers}
+      onChange={onChange}
+      description={description}
+    />
+  )
+}
+
+function HeaderRowsEditor({
+  ownerId,
+  initialHeaders,
+  onChange,
+  description,
+}: Omit<CustomHeadersEditorProps, 'headers' | 'resetToken'> & {
+  initialHeaders: Record<string, string>
+  description: string
+}) {
+  const [rows, setRows] = useState(() => headersToRows(initialHeaders))
 
   const updateRows = (nextRows: HeaderRow[]) => {
-    onChange(rowsToHeaders(nextRows))
+    setRows(nextRows)
+    const nextHeaders = rowsToHeaders(nextRows)
+    onChange(nextHeaders)
   }
 
   return (
     <Field className="sm:col-span-2">
-      <FieldLabel htmlFor={`provider-custom-headers-${providerId}`}>Custom HTTP headers</FieldLabel>
+      <FieldLabel htmlFor={`custom-headers-${ownerId}`}>Custom HTTP headers</FieldLabel>
       <div className="space-y-2">
         {rows.map((row, index) => (
           <div key={row.id} className="flex items-start gap-2">
@@ -95,10 +126,7 @@ export function CustomHeadersEditor({ providerId, headers, onChange }: CustomHea
         ))}
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
-        <FieldDescription>
-          Optional headers sent with every request to this provider. Built-in auth headers take
-          precedence on conflicts.
-        </FieldDescription>
+        <FieldDescription>{description}</FieldDescription>
         <Button
           type="button"
           variant="outline"
