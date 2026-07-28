@@ -81,10 +81,7 @@ describe('chat message revisions', () => {
   })
 
   test('deletes only the selected message', () => {
-    expect(deleteMessageAt(messages, 'assistant-1', 'only')).toEqual([
-      messages[0],
-      messages[2],
-    ])
+    expect(deleteMessageAt(messages, 'assistant-1', 'only')).toEqual([messages[0], messages[2]])
   })
 
   test('deletes the selected message and everything after it', () => {

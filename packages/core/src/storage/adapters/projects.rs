@@ -27,14 +27,15 @@ fn row_to_dto(row: ProjectRow) -> ProjectDto {
   }
 }
 
-pub async fn find_all(engine: &StorageEngine, tx_id: Option<&str>) -> StorageResult<Vec<ProjectDto>> {
+pub async fn find_all(
+  engine: &StorageEngine,
+  tx_id: Option<&str>,
+) -> StorageResult<Vec<ProjectDto>> {
   engine
     .with_conn(tx_id, async |conn| {
-      let rows = sqlx::query_as::<_, ProjectRow>(
-        "SELECT * FROM projects ORDER BY updatedAt DESC",
-      )
-      .fetch_all(&mut *conn)
-      .await?;
+      let rows = sqlx::query_as::<_, ProjectRow>("SELECT * FROM projects ORDER BY updatedAt DESC")
+        .fetch_all(&mut *conn)
+        .await?;
       Ok(rows.into_iter().map(row_to_dto).collect())
     })
     .await

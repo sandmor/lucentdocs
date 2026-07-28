@@ -9,10 +9,7 @@ export function escapeXmlAttribute(value: string): string {
 }
 
 export function escapeXmlText(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
 function formatXmlAttributes(attributes: Record<string, XmlAttributeValue>): string {
@@ -49,9 +46,7 @@ export function formatXmlElement(
   } = {}
 ): string {
   const body =
-    options.text !== undefined
-      ? escapeXmlText(options.text)
-      : (options.children ?? []).join('\n')
+    options.text !== undefined ? escapeXmlText(options.text) : (options.children ?? []).join('\n')
 
   return `${formatXmlOpenTag(tag, options.attributes)}\n${body}\n${formatXmlCloseTag(tag)}`
 }

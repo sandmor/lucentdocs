@@ -66,10 +66,12 @@ export function placeAIZoneCard({
     { x: editor.left - AI_ZONE_CARD_GAP - width, y, side: 'left' as const },
     { x: viewport.right - width, y, side: 'right' as const },
     { x: viewport.left, y, side: 'left' as const },
-  ].map((candidate): AIZonePlacement => ({
-    ...candidate,
-    x: clamp(candidate.x, viewport.left, Math.max(viewport.left, viewport.right - width)),
-  }))
+  ].map(
+    (candidate): AIZonePlacement => ({
+      ...candidate,
+      x: clamp(candidate.x, viewport.left, Math.max(viewport.left, viewport.right - width)),
+    })
+  )
 
   const sideCandidates = preferredSide
     ? horizontalCandidates.filter((candidate) => candidate.side === preferredSide)
@@ -82,8 +84,22 @@ export function placeAIZoneCard({
     return [
       candidate,
       ...nearby.flatMap((obstacle) => [
-        { ...candidate, y: clamp(obstacle.top - height - 8, viewport.top, Math.max(viewport.top, viewport.bottom - height)) },
-        { ...candidate, y: clamp(obstacle.bottom + 8, viewport.top, Math.max(viewport.top, viewport.bottom - height)) },
+        {
+          ...candidate,
+          y: clamp(
+            obstacle.top - height - 8,
+            viewport.top,
+            Math.max(viewport.top, viewport.bottom - height)
+          ),
+        },
+        {
+          ...candidate,
+          y: clamp(
+            obstacle.bottom + 8,
+            viewport.top,
+            Math.max(viewport.top, viewport.bottom - height)
+          ),
+        },
       ]),
     ]
   })
@@ -92,12 +108,20 @@ export function placeAIZoneCard({
 
   function score(candidate: AIZonePlacement): number {
     const candidateRect = rect(candidate.x, candidate.y, width, height)
-    const obstacleOverlap = obstacles.reduce((sum, obstacle) => sum + overlap(candidateRect, obstacle), 0)
+    const obstacleOverlap = obstacles.reduce(
+      (sum, obstacle) => sum + overlap(candidateRect, obstacle),
+      0
+    )
     const editorOverlap = overlap(candidateRect, editor)
     const distance = Math.abs(candidate.x - (anchor.left + anchor.width / 2))
     // Avoid other floating UI first, then document overlap, then prefer the
     // closest side. The tiny right-side bias makes ties deterministic.
-    return obstacleOverlap * 10000 + editorOverlap * 10 + distance + (candidate.side === 'right' ? 0 : 0.01)
+    return (
+      obstacleOverlap * 10000 +
+      editorOverlap * 10 +
+      distance +
+      (candidate.side === 'right' ? 0 : 0.01)
+    )
   }
 }
 
@@ -106,8 +130,10 @@ export function rect(left: number, top: number, width: number, height: number): 
 }
 
 function overlap(left: FloatingRect, right: FloatingRect): number {
-  return Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left)) *
+  return (
+    Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left)) *
     Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top))
+  )
 }
 
 function clamp(value: number, min: number, max: number): number {

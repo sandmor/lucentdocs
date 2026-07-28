@@ -1,8 +1,5 @@
 import * as Y from 'yjs'
-import {
-  prosemirrorJSONToYXmlFragment,
-  yXmlFragmentToProseMirrorRootNode,
-} from 'y-prosemirror'
+import { prosemirrorJSONToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
 import {
   noteRecordToSnapshot,
   noteSnapshotToRecord,
@@ -61,10 +58,15 @@ export function reconcileNotesAfterDocumentEdit(
   const migratedFrom = new Set(options.blockIdMigrations.map((entry) => entry.from))
 
   for (const migration of options.blockIdMigrations) {
-    reanchorNotesForAnchorInMap(notesMap, migration.from, {
-      anchorKind: 'block',
-      anchorId: migration.to,
-    }, { anchorKind: 'block' })
+    reanchorNotesForAnchorInMap(
+      notesMap,
+      migration.from,
+      {
+        anchorKind: 'block',
+        anchorId: migration.to,
+      },
+      { anchorKind: 'block' }
+    )
   }
 
   for (const anchorId of options.deletedBlockIds) {
@@ -108,8 +110,14 @@ export function serializeNotesMap(doc: Y.Doc): SerializedNoteFromYjs[] {
       anchorId,
       content: yXmlFragmentToProseMirrorRootNode(body, noteSchema).toJSON() as JsonObject,
       authorUserId,
-      createdAt: typeof value.get('createdAt') === 'number' ? (value.get('createdAt') as number) : Date.now(),
-      updatedAt: typeof value.get('updatedAt') === 'number' ? (value.get('updatedAt') as number) : Date.now(),
+      createdAt:
+        typeof value.get('createdAt') === 'number'
+          ? (value.get('createdAt') as number)
+          : Date.now(),
+      updatedAt:
+        typeof value.get('updatedAt') === 'number'
+          ? (value.get('updatedAt') as number)
+          : Date.now(),
     })
   })
 

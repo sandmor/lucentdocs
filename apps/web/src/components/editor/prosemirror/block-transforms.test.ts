@@ -50,7 +50,10 @@ describe('block turn-into transforms', () => {
   })
 
   test('turning fenced text into an equation removes one display fence pair', () => {
-    const paragraph = schema.nodes.paragraph.create({ id: 'math-1' }, schema.text('$$\n\\frac{a}{b}\n$$'))
+    const paragraph = schema.nodes.paragraph.create(
+      { id: 'math-1' },
+      schema.text('$$\n\\frac{a}{b}\n$$')
+    )
     const { view, getState } = createView(paragraph)
 
     handleBlockAction(view, 'turn-into-math', {

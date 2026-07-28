@@ -51,9 +51,7 @@ function createMultiSegmentZoneDoc() {
       createZoneNode('zone-a', 'session-1', 'intro'),
     ]),
     schema.nodes.code_block.create({ language: 'ts' }, [schema.text('const x = 1')]),
-    schema.nodes.paragraph.create(null, [
-      createZoneNode('zone-a', 'session-1', 'outro'),
-    ]),
+    schema.nodes.paragraph.create(null, [createZoneNode('zone-a', 'session-1', 'outro')]),
   ])
 }
 
@@ -178,9 +176,7 @@ describe('shouldFilterAIZoneDocumentTransaction', () => {
 describe('transactionTouchesProtectedZones', () => {
   test('detects overlap using per-step mapping rather than the full transaction mapping', () => {
     const doc = schema.node('doc', null, [
-      schema.node('paragraph', null, [
-        schema.text('0123456789abcdefghij'),
-      ]),
+      schema.node('paragraph', null, [schema.text('0123456789abcdefghij')]),
     ])
     const state = EditorState.create({ schema, doc })
     const ranges = [{ from: 15, to: 20 }]
@@ -191,9 +187,7 @@ describe('transactionTouchesProtectedZones', () => {
 
   test('ignores earlier steps when a later step only edits outside the protected range', () => {
     const doc = schema.node('doc', null, [
-      schema.node('paragraph', null, [
-        schema.text('0123456789abcdefghij'),
-      ]),
+      schema.node('paragraph', null, [schema.text('0123456789abcdefghij')]),
     ])
     const state = EditorState.create({ schema, doc })
     const ranges = [{ from: 15, to: 20 }]

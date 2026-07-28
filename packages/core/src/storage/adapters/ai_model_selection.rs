@@ -35,17 +35,17 @@ pub async fn get(
 ) -> StorageResult<Option<AiModelSelectionDto>> {
   engine
     .with_conn(tx_id, async |conn| {
-        let row = sqlx::query_as::<_, AiModelSelectionRow>(
-          "SELECT usage, scopeType, scopeId, providerConfigId, updatedAt
+      let row = sqlx::query_as::<_, AiModelSelectionRow>(
+        "SELECT usage, scopeType, scopeId, providerConfigId, updatedAt
              FROM ai_model_selection_settings
             WHERE usage = ? AND scopeType = ? AND scopeId = ?",
-        )
-        .bind(usage)
-        .bind(scope_type)
-        .bind(scope_id)
-        .fetch_optional(&mut *conn)
-        .await?;
-        Ok(row.map(row_to_dto))
+      )
+      .bind(usage)
+      .bind(scope_type)
+      .bind(scope_id)
+      .fetch_optional(&mut *conn)
+      .await?;
+      Ok(row.map(row_to_dto))
     })
     .await
 }
@@ -71,8 +71,8 @@ pub async fn get_many(
 
   engine
     .with_conn(tx_id, async |conn| {
-        let rows = sqlx::query_as::<_, AiModelSelectionRow>(
-          "WITH requested AS (
+      let rows = sqlx::query_as::<_, AiModelSelectionRow>(
+        "WITH requested AS (
              SELECT value AS scopeId
                FROM json_each(?)
            )
@@ -80,13 +80,13 @@ pub async fn get_many(
              FROM ai_model_selection_settings AS s
              JOIN requested ON requested.scopeId = s.scopeId
             WHERE s.usage = ? AND s.scopeType = ?",
-        )
-        .bind(ids_json(&unique_scope_ids))
-        .bind(usage)
-        .bind(scope_type)
-        .fetch_all(&mut *conn)
-        .await?;
-        Ok(rows.into_iter().map(row_to_dto).collect())
+      )
+      .bind(ids_json(&unique_scope_ids))
+      .bind(usage)
+      .bind(scope_type)
+      .fetch_all(&mut *conn)
+      .await?;
+      Ok(rows.into_iter().map(row_to_dto).collect())
     })
     .await
 }
@@ -98,22 +98,22 @@ pub async fn upsert(
 ) -> StorageResult<AiModelSelectionDto> {
   engine
     .with_conn(tx_id, async |conn| {
-        sqlx::query(
-          "INSERT INTO ai_model_selection_settings
+      sqlx::query(
+        "INSERT INTO ai_model_selection_settings
              (usage, scopeType, scopeId, providerConfigId, updatedAt)
            VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(usage, scopeType, scopeId) DO UPDATE SET
              providerConfigId = excluded.providerConfigId,
              updatedAt = excluded.updatedAt",
-        )
-        .bind(&input.usage)
-        .bind(&input.scope_type)
-        .bind(&input.scope_id)
-        .bind(&input.provider_config_id)
-        .bind(input.updated_at)
-        .execute(&mut *conn)
-        .await?;
-        Ok(())
+      )
+      .bind(&input.usage)
+      .bind(&input.scope_type)
+      .bind(&input.scope_id)
+      .bind(&input.provider_config_id)
+      .bind(input.updated_at)
+      .execute(&mut *conn)
+      .await?;
+      Ok(())
     })
     .await?;
 
@@ -137,15 +137,15 @@ pub async fn delete(
 ) -> StorageResult<()> {
   engine
     .with_conn(tx_id, async |conn| {
-        sqlx::query(
-          "DELETE FROM ai_model_selection_settings WHERE usage = ? AND scopeType = ? AND scopeId = ?",
-        )
-        .bind(usage)
-        .bind(scope_type)
-        .bind(scope_id)
-        .execute(&mut *conn)
-        .await?;
-        Ok(())
+      sqlx::query(
+        "DELETE FROM ai_model_selection_settings WHERE usage = ? AND scopeType = ? AND scopeId = ?",
+      )
+      .bind(usage)
+      .bind(scope_type)
+      .bind(scope_id)
+      .execute(&mut *conn)
+      .await?;
+      Ok(())
     })
     .await
 }

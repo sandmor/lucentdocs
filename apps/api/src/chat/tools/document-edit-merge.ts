@@ -1,7 +1,4 @@
-import {
-  ensureBlockIds,
-  type JsonObject,
-} from '@lucentdocs/shared'
+import { ensureBlockIds, type JsonObject } from '@lucentdocs/shared'
 import { markdownToProseMirrorDoc } from '../../core/markdown/native.js'
 
 const NOTE_MARKER_TYPE = 'note_marker'
@@ -30,7 +27,9 @@ function readBlockId(node: JsonObject): string | null {
 }
 
 function copyBlockId(node: JsonObject, blockId: string): JsonObject {
-  const attrs = isRecord(node.attrs) ? { ...node.attrs, [BLOCK_ID_ATTR]: blockId } : { [BLOCK_ID_ATTR]: blockId }
+  const attrs = isRecord(node.attrs)
+    ? { ...node.attrs, [BLOCK_ID_ATTR]: blockId }
+    : { [BLOCK_ID_ATTR]: blockId }
   return { ...node, attrs }
 }
 
@@ -72,12 +71,10 @@ function mergeContentBlocks(
     return copyBlockId(block, blockId)
   })
 
-  const removedBlockIds = originalBlocks
-    .slice(newBlocks.length)
-    .flatMap((block) => {
-      const blockId = readBlockId(block)
-      return blockId ? [blockId] : []
-    })
+  const removedBlockIds = originalBlocks.slice(newBlocks.length).flatMap((block) => {
+    const blockId = readBlockId(block)
+    return blockId ? [blockId] : []
+  })
 
   return { blocks, removedBlockIds }
 }
@@ -133,7 +130,9 @@ export function mergeEditedManuscript(
   )
 
   const warnings: DocumentEditMergeWarning[] = []
-  const orphanedBlockIds = removedBlockIds.filter((blockId) => options.blockAnchoredIds.has(blockId))
+  const orphanedBlockIds = removedBlockIds.filter((blockId) =>
+    options.blockAnchoredIds.has(blockId)
+  )
   if (orphanedBlockIds.length > 0) {
     warnings.push({
       code: 'orphaned_block_notes',

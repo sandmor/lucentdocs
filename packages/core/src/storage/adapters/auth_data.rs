@@ -110,14 +110,16 @@ pub async fn count_admin_users(engine: &StorageEngine, tx_id: Option<&str>) -> S
     .await
 }
 
-pub async fn list_users(engine: &StorageEngine, tx_id: Option<&str>) -> StorageResult<Vec<AuthUserDto>> {
+pub async fn list_users(
+  engine: &StorageEngine,
+  tx_id: Option<&str>,
+) -> StorageResult<Vec<AuthUserDto>> {
   engine
     .with_conn(tx_id, async |conn| {
-      let rows = sqlx::query_as::<_, AuthUserRow>(
-        "SELECT * FROM auth_users ORDER BY createdAt DESC",
-      )
-      .fetch_all(&mut *conn)
-      .await?;
+      let rows =
+        sqlx::query_as::<_, AuthUserRow>("SELECT * FROM auth_users ORDER BY createdAt DESC")
+          .fetch_all(&mut *conn)
+          .await?;
       Ok(rows.into_iter().map(user_row_to_dto).collect())
     })
     .await
@@ -261,12 +263,11 @@ pub async fn find_invitation_by_id(
 ) -> StorageResult<Option<AuthInvitationDto>> {
   engine
     .with_conn(tx_id, async |conn| {
-      let row = sqlx::query_as::<_, AuthInvitationRow>(
-        "SELECT * FROM auth_invitations WHERE id = ?",
-      )
-      .bind(id)
-      .fetch_optional(&mut *conn)
-      .await?;
+      let row =
+        sqlx::query_as::<_, AuthInvitationRow>("SELECT * FROM auth_invitations WHERE id = ?")
+          .bind(id)
+          .fetch_optional(&mut *conn)
+          .await?;
       Ok(row.map(invitation_row_to_dto))
     })
     .await
@@ -279,12 +280,11 @@ pub async fn find_invitation_by_token(
 ) -> StorageResult<Option<AuthInvitationDto>> {
   engine
     .with_conn(tx_id, async |conn| {
-      let row = sqlx::query_as::<_, AuthInvitationRow>(
-        "SELECT * FROM auth_invitations WHERE token = ?",
-      )
-      .bind(token)
-      .fetch_optional(&mut *conn)
-      .await?;
+      let row =
+        sqlx::query_as::<_, AuthInvitationRow>("SELECT * FROM auth_invitations WHERE token = ?")
+          .bind(token)
+          .fetch_optional(&mut *conn)
+          .await?;
       Ok(row.map(invitation_row_to_dto))
     })
     .await

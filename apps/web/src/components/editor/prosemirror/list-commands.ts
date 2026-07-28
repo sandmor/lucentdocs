@@ -190,7 +190,9 @@ function isLucentClipboardHtml(html: string): boolean {
  * Upgrades recognizably Markdown plain text on paste. Internal Lucent HTML is
  * intentionally left to ProseMirror's DOM parser so rich copies stay rich.
  */
-export function createMarkdownClipboardPlugin(options: { target?: 'document' | 'note' } = {}): Plugin {
+export function createMarkdownClipboardPlugin(
+  options: { target?: 'document' | 'note' } = {}
+): Plugin {
   const target = options.target ?? 'document'
   return new Plugin({
     props: {

@@ -72,7 +72,10 @@ export function createCoreServiceSet(dependencies: {
   return {
     projects,
     documents,
-    documentSharing: createDocumentSharingService(dependencies.repositories, dependencies.transaction),
+    documentSharing: createDocumentSharingService(
+      dependencies.repositories,
+      dependencies.transaction
+    ),
     documentNotes: createDocumentNotesService(dependencies.repositories),
     chats: createChatsService(dependencies.repositories),
     aiSettings,

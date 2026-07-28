@@ -1267,7 +1267,12 @@ describe('buildEditTools', () => {
     )
     if (!document) throw new Error('Expected test document to be created.')
 
-    const context = createEditContext(adapter, project.id, document.id, createTestYjsRuntime(adapter))
+    const context = createEditContext(
+      adapter,
+      project.id,
+      document.id,
+      createTestYjsRuntime(adapter)
+    )
     const readExecute = buildReadTools(context).read.execute as
       | ((input: { path: string }) => Promise<unknown>)
       | undefined
@@ -1353,12 +1358,19 @@ describe('buildWriteTools', () => {
     const writeExecute = buildWriteTools(
       createEditContext(adapter, project.id, active.id, yjsRuntime)
     ).write.execute as
-      | ((input: { path: string; content: string; overwrite?: boolean }) => Promise<{ action: string }>)
+      | ((input: {
+          path: string
+          content: string
+          overwrite?: boolean
+        }) => Promise<{ action: string }>)
       | undefined
     expect(writeExecute).toBeDefined()
     if (!writeExecute) return
 
-    const result = await writeExecute({ path: 'chapters/Chapter 2', content: 'The storm returned.' })
+    const result = await writeExecute({
+      path: 'chapters/Chapter 2',
+      content: 'The storm returned.',
+    })
     expect(result.action).toBe('created')
 
     const documents = await adapter.services.documents.listForProject(project.id)
@@ -1385,19 +1397,25 @@ describe('buildWriteTools', () => {
       | ((input: { path: string }) => Promise<unknown>)
       | undefined
     const writeExecute = buildWriteTools(context).write.execute as
-      | ((input: { path: string; content: string; overwrite?: boolean }) => Promise<{ action: string }>)
+      | ((input: {
+          path: string
+          content: string
+          overwrite?: boolean
+        }) => Promise<{ action: string }>)
       | undefined
     expect(readExecute).toBeDefined()
     expect(writeExecute).toBeDefined()
     if (!readExecute || !writeExecute) return
 
     await readExecute({ path: 'Chapter 2' })
-    await expect(writeExecute({ path: 'Chapter 2', content: 'A new beginning.' })).resolves.toMatchObject({
+    await expect(
+      writeExecute({ path: 'Chapter 2', content: 'A new beginning.' })
+    ).resolves.toMatchObject({
       action: 'populated',
     })
-    await expect(writeExecute({ path: 'Chapter 2', content: 'A complete rewrite.' })).rejects.toThrow(
-      /overwrite=true/
-    )
+    await expect(
+      writeExecute({ path: 'Chapter 2', content: 'A complete rewrite.' })
+    ).rejects.toThrow(/overwrite=true/)
     await expect(
       writeExecute({ path: 'Chapter 2', content: 'A complete rewrite.', overwrite: true })
     ).resolves.toMatchObject({ action: 'overwritten' })
@@ -1410,7 +1428,11 @@ describe('buildWriteTools', () => {
     const adapter = createTestAdapter()
     const yjsRuntime = createTestYjsRuntime(adapter)
     const project = await adapter.services.projects.create('Novel', { ownerUserId: 'owner_1' })
-    const document = await adapter.services.documents.createForProject(project.id, 'Chapter 2', toEditorContent(''))
+    const document = await adapter.services.documents.createForProject(
+      project.id,
+      'Chapter 2',
+      toEditorContent('')
+    )
     if (!document) throw new Error('Expected test document.')
 
     await yjsRuntime.ensureDocumentLoaded(document.id)
@@ -1431,14 +1453,24 @@ describe('buildWriteTools', () => {
     expect(await adapter.services.documentNotes.listByDocumentId(document.id)).toHaveLength(0)
 
     const context = createEditContext(adapter, project.id, document.id, yjsRuntime)
-    const readExecute = buildReadTools(context).read.execute as ((input: { path: string }) => Promise<unknown>)
-    const writeExecute = buildWriteTools(context).write.execute as unknown as (
-      input: { path: string; content: string; overwrite?: boolean }
-    ) => Promise<{ annotationsDeleted: number }>
+    const readExecute = buildReadTools(context).read.execute as (input: {
+      path: string
+    }) => Promise<unknown>
+    const writeExecute = buildWriteTools(context).write.execute as unknown as (input: {
+      path: string
+      content: string
+      overwrite?: boolean
+    }) => Promise<{ annotationsDeleted: number }>
     await readExecute({ path: 'Chapter 2' })
 
-    await expect(writeExecute({ path: 'Chapter 2', content: 'Fresh prose.' })).rejects.toThrow(/overwrite=true/)
-    const result = await writeExecute({ path: 'Chapter 2', content: 'Fresh prose.', overwrite: true })
+    await expect(writeExecute({ path: 'Chapter 2', content: 'Fresh prose.' })).rejects.toThrow(
+      /overwrite=true/
+    )
+    const result = await writeExecute({
+      path: 'Chapter 2',
+      content: 'Fresh prose.',
+      overwrite: true,
+    })
     expect(result.annotationsDeleted).toBe(1)
     expect(notesMapToRecords(document.id, liveDoc)).toHaveLength(0)
   })

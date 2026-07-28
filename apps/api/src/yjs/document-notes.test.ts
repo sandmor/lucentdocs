@@ -55,9 +55,11 @@ describe('document notes integration', () => {
     )
     yjsRuntime.initialize()
     documentsService = adapter.services.documents
-    projectId = (await adapter.services.projects.create('Document notes fixtures', {
-      ownerUserId: 'notes-test-user',
-    })).id
+    projectId = (
+      await adapter.services.projects.create('Document notes fixtures', {
+        ownerUserId: 'notes-test-user',
+      })
+    ).id
   })
 
   afterEach(() => {

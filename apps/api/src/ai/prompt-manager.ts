@@ -108,9 +108,7 @@ function ensureDefaultPromptsAndBindings(store: PromptStore): PromptStore {
 
     const existing = prompts[existingIndex]
     if (existing.isSystem) {
-      const updatedAt = promptEqualsEditable(existing, systemPrompt)
-        ? existing.updatedAt
-        : nowIso
+      const updatedAt = promptEqualsEditable(existing, systemPrompt) ? existing.updatedAt : nowIso
       prompts[existingIndex] = {
         ...systemPrompt,
         createdAt: existing.createdAt,

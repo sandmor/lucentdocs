@@ -42,7 +42,8 @@ export function MathControls({
       if (!(dom instanceof HTMLElement)) return
       const rect = dom.getBoundingClientRect()
       const editorRect = view.dom.getBoundingClientRect()
-      const surfaceWidth = context === 'note' ? 240 : active.node.type.name === 'math_block' ? 320 : 280
+      const surfaceWidth =
+        context === 'note' ? 240 : active.node.type.name === 'math_block' ? 320 : 280
       const minLeft = context === 'note' ? 12 : Math.max(12, editorRect.left + 14)
       const maxLeft =
         context === 'note'
@@ -50,7 +51,8 @@ export function MathControls({
           : Math.min(window.innerWidth - surfaceWidth - 12, editorRect.right - surfaceWidth - 14)
       const anchorLeft = active.node.type.name === 'math_block' ? rect.left : rect.left - 10
       const preferredTop = rect.bottom + 14
-      const top = preferredTop + 132 > window.innerHeight ? Math.max(12, rect.top - 132) : preferredTop
+      const top =
+        preferredTop + 132 > window.innerHeight ? Math.max(12, rect.top - 132) : preferredTop
       setPosition({
         left: Math.max(minLeft, Math.min(anchorLeft, maxLeft)),
         top,
@@ -93,9 +95,7 @@ export function MathControls({
     const current = view.state.doc.nodeAt(active.pos)
     const currentSize = current?.nodeSize ?? active.node.nodeSize
     const isEmpty = !String(current?.attrs.latex ?? active.node.attrs.latex ?? '').trim()
-    const tr = isEmpty
-      ? view.state.tr.delete(active.pos, active.pos + currentSize)
-      : view.state.tr
+    const tr = isEmpty ? view.state.tr.delete(active.pos, active.pos + currentSize) : view.state.tr
     const boundary = isEmpty
       ? active.pos
       : side === 'before'
@@ -118,7 +118,9 @@ export function MathControls({
     view.focus()
   }
 
-  const handleSourceKeyDown = (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleSourceKeyDown = (
+    event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
     const input = event.currentTarget
     if (event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey) {
       if (isBlock && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -143,7 +145,12 @@ export function MathControls({
       moveCaretOutOfMath('after')
       return
     }
-    if (isBlock && collapsed && event.key === 'ArrowUp' && input.value.lastIndexOf('\n', start - 1) < 0) {
+    if (
+      isBlock &&
+      collapsed &&
+      event.key === 'ArrowUp' &&
+      input.value.lastIndexOf('\n', start - 1) < 0
+    ) {
       event.preventDefault()
       moveCaretOutOfMath('before')
       return

@@ -38,9 +38,11 @@ describe('YjsRuntime', () => {
     )
     yjsRuntime.initialize()
     documentsService = adapter.services.documents
-    projectId = (await adapter.services.projects.create('Yjs runtime fixtures', {
-      ownerUserId: 'yjs-test-user',
-    })).id
+    projectId = (
+      await adapter.services.projects.create('Yjs runtime fixtures', {
+        ownerUserId: 'yjs-test-user',
+      })
+    ).id
   })
 
   afterEach(async () => {

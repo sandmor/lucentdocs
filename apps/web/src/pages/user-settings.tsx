@@ -116,7 +116,10 @@ export function UserSettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Project Assistant</CardTitle>
-                <CardDescription>Choose how new project conversations start. You can still switch mode in each chat.</CardDescription>
+                <CardDescription>
+                  Choose how new project conversations start. You can still switch mode in each
+                  chat.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {assistantQuery.data ? (
@@ -128,7 +131,9 @@ export function UserSettingsPage() {
                     onSave={(overrides) => assistantMutation.mutate({ overrides })}
                     isSaving={assistantMutation.isPending}
                   />
-                ) : <PageLoader variant="inline" message="Loading assistant defaults…" />}
+                ) : (
+                  <PageLoader variant="inline" message="Loading assistant defaults…" />
+                )}
               </CardContent>
             </Card>
             <Card>

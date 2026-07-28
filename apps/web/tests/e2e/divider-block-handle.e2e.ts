@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test'
 import { createProject } from './helpers/inline-ai'
 
-test('divider exposes the desktop block handle without becoming text-editable', async ({ page }) => {
+test('divider exposes the desktop block handle without becoming text-editable', async ({
+  page,
+}) => {
   await createProject(page, 'Divider handle')
   const editor = page.locator('.ProseMirror')
   await editor.click()

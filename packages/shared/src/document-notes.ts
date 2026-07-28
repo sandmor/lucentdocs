@@ -63,7 +63,9 @@ export function serializeNoteBody(content: JsonObject): string {
   return JSON.stringify(content)
 }
 
-export function parseVersionSnapshotBundle(content: string | null | undefined): VersionSnapshotBundle {
+export function parseVersionSnapshotBundle(
+  content: string | null | undefined
+): VersionSnapshotBundle {
   const strict = parseVersionSnapshotBundleStrict(content)
   if (strict) return strict
   return { doc: { type: 'doc', content: [{ type: 'paragraph' }] }, notes: [] }

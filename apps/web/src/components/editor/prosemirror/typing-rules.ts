@@ -92,7 +92,12 @@ function mathBlockRule(): InputRule {
 }
 
 export function buildMarkdownTypingRules(): InputRule[] {
-  const rules: InputRule[] = [dividerRule(), mathBlockRule(), completedMathBlockRule(), inlineMathRule(schema)]
+  const rules: InputRule[] = [
+    dividerRule(),
+    mathBlockRule(),
+    completedMathBlockRule(),
+    inlineMathRule(schema),
+  ]
   const code = schema.marks.code
   const strong = schema.marks.strong
   const em = schema.marks.em

@@ -121,7 +121,9 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
       <Card>
         <CardHeader>
           <CardTitle>Project Assistant</CardTitle>
-          <CardDescription>Set the default mode for new shared project conversations.</CardDescription>
+          <CardDescription>
+            Set the default mode for new shared project conversations.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {assistantQuery.data ? (
@@ -133,7 +135,9 @@ export function ProjectSettings({ projectId }: ProjectSettings) {
               onSave={(overrides) => assistantMutation.mutate({ projectId, overrides })}
               isSaving={assistantMutation.isPending}
             />
-          ) : <div className="text-muted-foreground text-sm">Loading assistant defaults…</div>}
+          ) : (
+            <div className="text-muted-foreground text-sm">Loading assistant defaults…</div>
+          )}
         </CardContent>
       </Card>
       <Card>

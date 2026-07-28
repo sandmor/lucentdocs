@@ -12,7 +12,12 @@ import {
 import { formatPathNotFound } from './errors.js'
 import { buildPaginationMeta } from './meta.js'
 import { hashManuscriptText } from './document-manuscript.js'
-import { listDirectoryEntries, loadProjectFileIndex, resolveNormalizedPath, suggestPaths } from './paths.js'
+import {
+  listDirectoryEntries,
+  loadProjectFileIndex,
+  resolveNormalizedPath,
+  suggestPaths,
+} from './paths.js'
 import { DEFAULT_READ_LINE_LIMIT, type BuildReadToolsContext } from './types.js'
 
 export function createReadTool(context: BuildReadToolsContext) {
@@ -117,19 +122,15 @@ async function readProjectFile(
 
   const annotationsBlock =
     options.includeAnnotations && loaded.noteRows.length > 0
-      ? buildAnnotationBlockForSlice(
-          loaded.noteRows,
-          sliceLines.join('\n'),
-          loaded.aliasToNoteId
-        )
+      ? buildAnnotationBlockForSlice(loaded.noteRows, sliceLines.join('\n'), loaded.aliasToNoteId)
       : ''
 
-      const truncated = lineTruncated || charTruncated
-      const nextOffset = lineTruncated ? endLine + 1 : charTruncated ? startLine : null
+  const truncated = lineTruncated || charTruncated
+  const nextOffset = lineTruncated ? endLine + 1 : charTruncated ? startLine : null
 
-      context.editSession?.recordRead(normalizedPath, hashManuscriptText(loaded.plainManuscript))
+  context.editSession?.recordRead(normalizedPath, hashManuscriptText(loaded.plainManuscript))
 
-      return {
+  return {
     kind: 'file' as const,
     path: normalizedPath,
     start_line: startLine,

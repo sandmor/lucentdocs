@@ -1,6 +1,11 @@
 import type { NativeStorageEngine } from '@lucentdocs/core'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
-import { currentTxId, registerAfterCommit, runWithTxId, takeAfterCommitCallbacks } from './tx-scope.js'
+import {
+  currentTxId,
+  registerAfterCommit,
+  runWithTxId,
+  takeAfterCommitCallbacks,
+} from './tx-scope.js'
 
 export class RustTransaction implements TransactionPort {
   #queue: Promise<void> = Promise.resolve()

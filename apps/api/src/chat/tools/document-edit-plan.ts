@@ -159,7 +159,11 @@ function applySingleRangeEdit(
   newString: string
 ): SingleRangeEditResult {
   const projection = projectDocumentEntries(doc)
-  const { from, to, entries: affectedContent } = resolveManuscriptRangeToDocRange(projection, start, end)
+  const {
+    from,
+    to,
+    entries: affectedContent,
+  } = resolveManuscriptRangeToDocRange(projection, start, end)
   const sliceEntries = sliceTopLevelEntries(projection, affectedContent)
   const warnings: string[] = []
 
@@ -183,7 +187,8 @@ function applySingleRangeEdit(
   }
 
   const sliceFrom = sliceEntries[0].pos
-  const sliceTo = sliceEntries[sliceEntries.length - 1].pos + sliceEntries[sliceEntries.length - 1].nodeSize
+  const sliceTo =
+    sliceEntries[sliceEntries.length - 1].pos + sliceEntries[sliceEntries.length - 1].nodeSize
   const originalContent = sliceEntries
     .filter((entry) => entry.kind === 'content')
     .map((entry) => entry.node)

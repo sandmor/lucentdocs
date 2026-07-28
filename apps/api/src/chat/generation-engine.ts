@@ -104,7 +104,9 @@ function resolveTestChatDelayMs(promptSeed: string): number {
   const envDelay = Number(
     (normalizedPrompt.includes('slow')
       ? process.env.LUCENTDOCS_TEST_CHAT_SLOW_DELAY_MS
-      : undefined) ?? process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS ?? ''
+      : undefined) ??
+      process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS ??
+      ''
   )
   if (Number.isFinite(envDelay) && envDelay > 0) {
     return Math.round(envDelay)
@@ -361,7 +363,11 @@ export class GenerationEngine {
         system: `${rendered.systemPrompt}\n\n${rendered.userPrompt}`,
         messages: modelMessages,
         tools: {
-          ...this.buildTools({ ...scope, documentId: contextDocumentId }, editingEnabled, actorUserId),
+          ...this.buildTools(
+            { ...scope, documentId: contextDocumentId },
+            editingEnabled,
+            actorUserId
+          ),
           ...mcpSession.tools,
         },
         stopWhen: stepCountIs(runtimeLimits.aiToolSteps),

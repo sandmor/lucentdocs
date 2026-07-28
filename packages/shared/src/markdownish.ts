@@ -55,23 +55,23 @@ markdownIt.block.ruler.before('fence', 'lucent-math-block', (state, startLine, e
 
 function registerInlineMathRule(parser: MarkdownIt) {
   parser.inline.ruler.before('emphasis', 'lucent-inline-math', (state, silent) => {
-  const start = state.pos
-  if (state.src.charCodeAt(start) !== 0x24 /* $ */) return false
-  if (state.src.charCodeAt(start + 1) === 0x24) return false
-  if (start > 0 && state.src.charCodeAt(start - 1) === 0x5c /* \\ */) return false
+    const start = state.pos
+    if (state.src.charCodeAt(start) !== 0x24 /* $ */) return false
+    if (state.src.charCodeAt(start + 1) === 0x24) return false
+    if (start > 0 && state.src.charCodeAt(start - 1) === 0x5c /* \\ */) return false
 
-  const end = state.src.indexOf('$', start + 1)
-  if (end < 0) return false
-  const source = state.src.slice(start + 1, end)
-  if (!source || /[\n\r]/.test(source) || /^\s|\s$/.test(source)) return false
-  if (state.src.charCodeAt(end - 1) === 0x5c /* \\ */) return false
+    const end = state.src.indexOf('$', start + 1)
+    if (end < 0) return false
+    const source = state.src.slice(start + 1, end)
+    if (!source || /[\n\r]/.test(source) || /^\s|\s$/.test(source)) return false
+    if (state.src.charCodeAt(end - 1) === 0x5c /* \\ */) return false
 
-  if (!silent) {
-    const token = state.push('math_inline', 'math', 0)
-    token.content = source
-  }
-  state.pos = end + 1
-  return true
+    if (!silent) {
+      const token = state.push('math_inline', 'math', 0)
+      token.content = source
+    }
+    state.pos = end + 1
+    return true
   })
 }
 

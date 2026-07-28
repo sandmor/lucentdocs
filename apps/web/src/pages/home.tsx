@@ -49,7 +49,13 @@ import {
 } from 'lucide-react'
 import { parseProjectsListSyncEvent } from '@/lib/project-sync-events'
 import { ShareInvitations } from '@/components/documents/share-invitations'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 function getInitials(name: string): string {
   return name
@@ -112,7 +118,9 @@ export function HomePage() {
   const [newTitle, setNewTitle] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<{ id: string; title: string } | null>(null)
-  const [deletionResolutions, setDeletionResolutions] = useState<Record<string, { action: 'delete' } | { action: 'rehome'; projectId: string; path: string }>>({})
+  const [deletionResolutions, setDeletionResolutions] = useState<
+    Record<string, { action: 'delete' } | { action: 'rehome'; projectId: string; path: string }>
+  >({})
   const utils = trpc.useUtils()
   const configQuery = trpc.config.get.useQuery()
   const authEnabled = Boolean(configQuery.data?.fields.authEnabled.effectiveValue)
@@ -219,8 +227,14 @@ export function HomePage() {
               </Button>
             ) : null}
             {authEnabled && meQuery.data?.role === 'admin' ? (
-              <Button variant="outline" size="sm" className="sm:size-auto sm:px-3 sm:py-2" onClick={() => navigate('/admin/documents')}>
-                <FileText data-icon="inline-start" /><span className="hidden sm:inline">Documents</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="sm:size-auto sm:px-3 sm:py-2"
+                onClick={() => navigate('/admin/documents')}
+              >
+                <FileText data-icon="inline-start" />
+                <span className="hidden sm:inline">Documents</span>
               </Button>
             ) : null}
             {authEnabled ? (
@@ -332,30 +346,72 @@ export function HomePage() {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete project?</AlertDialogTitle>
               <AlertDialogDescription>
-                {deletionPlan.isLoading ? 'Inspecting documents…' : deletionPlan.data?.homeDocuments.length
-                  ? 'Choose what happens to documents owned by this project. Documents mounted here from elsewhere will only be removed from this project.'
-                  : `"${projectToDelete?.title}" will be permanently deleted.`}
+                {deletionPlan.isLoading
+                  ? 'Inspecting documents…'
+                  : deletionPlan.data?.homeDocuments.length
+                    ? 'Choose what happens to documents owned by this project. Documents mounted here from elsewhere will only be removed from this project.'
+                    : `"${projectToDelete?.title}" will be permanently deleted.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
-            {deletionPlan.data?.homeDocuments.length ? <div className="max-h-72 space-y-3 overflow-y-auto py-1">
-              {deletionPlan.data.homeDocuments.map(({ document, path }) => {
-                const resolution = deletionResolutions[document.id] ?? { action: 'delete' as const }
-                return <div key={document.id} className="rounded-lg border p-3 text-sm">
-                  <p className="mb-2 font-medium">{path}</p>
-                  <Select value={resolution.action === 'delete' ? 'delete' : resolution.projectId} onValueChange={(value) => setDeletionResolutions((current) => ({ ...current, [document.id]: !value || value === 'delete' ? { action: 'delete' } : { action: 'rehome', projectId: value, path } }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="delete">Delete everywhere</SelectItem>
-                      {projectsQuery.data?.filter((project) => project.id !== projectToDelete?.id).map((project) => <SelectItem key={project.id} value={project.id}>Move to {project.title}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  {resolution.action === 'rehome' && <Input className="mt-2" aria-label={`New path for ${path}`} value={resolution.path} onChange={(event) => setDeletionResolutions((current) => ({ ...current, [document.id]: { ...resolution, path: event.target.value } }))} />}
-                </div>
-              })}
-            </div> : null}
+            {deletionPlan.data?.homeDocuments.length ? (
+              <div className="max-h-72 space-y-3 overflow-y-auto py-1">
+                {deletionPlan.data.homeDocuments.map(({ document, path }) => {
+                  const resolution = deletionResolutions[document.id] ?? {
+                    action: 'delete' as const,
+                  }
+                  return (
+                    <div key={document.id} className="rounded-lg border p-3 text-sm">
+                      <p className="mb-2 font-medium">{path}</p>
+                      <Select
+                        value={resolution.action === 'delete' ? 'delete' : resolution.projectId}
+                        onValueChange={(value) =>
+                          setDeletionResolutions((current) => ({
+                            ...current,
+                            [document.id]:
+                              !value || value === 'delete'
+                                ? { action: 'delete' }
+                                : { action: 'rehome', projectId: value, path },
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="delete">Delete everywhere</SelectItem>
+                          {projectsQuery.data
+                            ?.filter((project) => project.id !== projectToDelete?.id)
+                            .map((project) => (
+                              <SelectItem key={project.id} value={project.id}>
+                                Move to {project.title}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      {resolution.action === 'rehome' && (
+                        <Input
+                          className="mt-2"
+                          aria-label={`New path for ${path}`}
+                          value={resolution.path}
+                          onChange={(event) =>
+                            setDeletionResolutions((current) => ({
+                              ...current,
+                              [document.id]: { ...resolution, path: event.target.value },
+                            }))
+                          }
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction disabled={deleteMutation.isPending || deletionPlan.isLoading} onClick={confirmProjectDelete}>
+              <AlertDialogAction
+                disabled={deleteMutation.isPending || deletionPlan.isLoading}
+                onClick={confirmProjectDelete}
+              >
                 {deleteMutation.isPending ? 'Deleting…' : 'Delete project'}
               </AlertDialogAction>
             </AlertDialogFooter>

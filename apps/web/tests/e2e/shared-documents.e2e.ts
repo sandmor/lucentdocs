@@ -47,10 +47,17 @@ async function createInvitedUser(
   return { context, page }
 }
 
-test('an invited editor mounts a shared document into another project and edits the same content', async ({ browser, page }) => {
+test('an invited editor mounts a shared document into another project and edits the same content', async ({
+  browser,
+  page,
+}) => {
   await login(page, 'admin@lucentdocs.test', 'admin12345')
   const { context: editorContext, page: editor } = await createInvitedUser(
-    page, browser, 'editor@lucentdocs.test', 'Editor', 'editor-password-123'
+    page,
+    browser,
+    'editor@lucentdocs.test',
+    'Editor',
+    'editor-password-123'
   )
   try {
     await test.step('recipient creates a destination project', async () => {
@@ -62,7 +69,9 @@ test('an invited editor mounts a shared document into another project and edits 
       await page.goto('/')
       // Sharing documents must not turn the recipient's project into an
       // administrator-visible/shared project.
-      await expect(page.locator('#root').getByText('Editor research', { exact: true })).toHaveCount(0)
+      await expect(page.locator('#root').getByText('Editor research', { exact: true })).toHaveCount(
+        0
+      )
       await createProject(page, 'Owner manuscript')
       await page.locator('.ProseMirror').click()
       await page.keyboard.type('Canonical shared sentence')
@@ -72,7 +81,9 @@ test('an invited editor mounts a shared document into another project and edits 
       await shareDialog.getByRole('button', { name: 'Send invitation' }).click()
       const toast = page.locator('[data-sonner-toast]').filter({ hasText: 'Invitation sent' })
       await expect(toast).toBeVisible()
-      await expect.poll(() => toast.evaluate((element) => element.closest('#root') === null)).toBe(true)
+      await expect
+        .poll(() => toast.evaluate((element) => element.closest('#root') === null))
+        .toBe(true)
       await shareDialog.getByRole('button', { name: 'Done' }).click()
     })
 
@@ -82,11 +93,16 @@ test('an invited editor mounts a shared document into another project and edits 
       await editor.getByRole('button', { name: 'Accept invitation' }).click()
       await editor.getByRole('dialog').getByRole('combobox').click()
       await editor.getByRole('option', { name: 'Editor research' }).click()
-      await expect(editor.getByRole('dialog').getByRole('combobox')).toContainText('Editor research')
+      await expect(editor.getByRole('dialog').getByRole('combobox')).toContainText(
+        'Editor research'
+      )
       await editor.getByLabel('File path in that project').fill('sources/owner-copy.md')
       await editor.getByRole('button', { name: 'Add to project' }).click()
       await expect(editor.getByText('Document added to your project')).toBeVisible()
-      await editor.locator('#root').getByText('Editor research', { exact: true }).click({ timeout: 8_000 })
+      await editor
+        .locator('#root')
+        .getByText('Editor research', { exact: true })
+        .click({ timeout: 8_000 })
       await editor.getByRole('button', { name: /sources/ }).click()
       await editor.getByRole('button', { name: /owner-copy\.md/ }).click({ timeout: 8_000 })
       await expect(editor.locator('.ProseMirror')).toContainText('Canonical shared sentence')
@@ -96,13 +112,22 @@ test('an invited editor mounts a shared document into another project and edits 
       await editor.keyboard.type(' — edited remotely')
       await expect(page.locator('.ProseMirror')).toContainText('edited remotely')
     })
-  } finally { await editorContext.close() }
+  } finally {
+    await editorContext.close()
+  }
 })
 
-test('a viewer can read a mounted document but revocation removes it without touching the owner copy', async ({ browser, page }) => {
+test('a viewer can read a mounted document but revocation removes it without touching the owner copy', async ({
+  browser,
+  page,
+}) => {
   await login(page, 'admin@lucentdocs.test', 'admin12345')
   const { context: viewerContext, page: viewer } = await createInvitedUser(
-    page, browser, 'viewer@lucentdocs.test', 'Viewer', 'viewer-password-123'
+    page,
+    browser,
+    'viewer@lucentdocs.test',
+    'Viewer',
+    'viewer-password-123'
   )
   try {
     await createProject(viewer, 'Viewer references')
@@ -127,7 +152,10 @@ test('a viewer can read a mounted document but revocation removes it without tou
     await viewer.getByRole('option', { name: 'Viewer references' }).click()
     await viewer.getByLabel('File path in that project').fill('sources/read-only.md')
     await viewer.getByRole('button', { name: 'Add to project' }).click()
-    await viewer.locator('#root').getByText('Viewer references', { exact: true }).click({ timeout: 8_000 })
+    await viewer
+      .locator('#root')
+      .getByText('Viewer references', { exact: true })
+      .click({ timeout: 8_000 })
     await viewer.getByRole('button', { name: /sources/ }).click()
     await viewer.getByRole('button', { name: /read-only\.md/ }).click({ timeout: 8_000 })
     await expect(viewer.locator('.ProseMirror')).toContainText('The owner copy remains canonical')
@@ -142,6 +170,10 @@ test('a viewer can read a mounted document but revocation removes it without tou
 
     await viewer.goto('/')
     await viewer.locator('#root').getByText('Viewer references', { exact: true }).click()
-    await expect(viewer.locator('.ProseMirror')).not.toContainText('The owner copy remains canonical')
-  } finally { await viewerContext.close() }
+    await expect(viewer.locator('.ProseMirror')).not.toContainText(
+      'The owner copy remains canonical'
+    )
+  } finally {
+    await viewerContext.close()
+  }
 })

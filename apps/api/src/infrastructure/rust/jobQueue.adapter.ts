@@ -73,8 +73,7 @@ export class RustJobQueueAdapter implements JobQueuePort {
         now: input.now,
         leaseDurationMs: input.leaseDurationMs,
         limit: input.limit,
-        typesJson:
-          input.types && input.types.length > 0 ? JSON.stringify(input.types) : undefined,
+        typesJson: input.types && input.types.length > 0 ? JSON.stringify(input.types) : undefined,
       })
     })
 
@@ -121,11 +120,7 @@ export class RustJobQueueAdapter implements JobQueuePort {
   ): Promise<Array<QueueJobEnvelope<TPayload>>> {
     if (dedupeKeys.length === 0) return []
 
-    const rows = await this.engine.jobQueueGetByTypeAndDedupeKeys(
-      currentTxId(),
-      type,
-      dedupeKeys
-    )
+    const rows = await this.engine.jobQueueGetByTypeAndDedupeKeys(currentTxId(), type, dedupeKeys)
     return rows.map((row) => queueJobFromDto<TPayload>(row))
   }
 

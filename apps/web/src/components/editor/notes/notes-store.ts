@@ -36,8 +36,10 @@ function parseNoteEntry(noteId: string, value: unknown): DocumentNoteViewModel |
     anchorKind,
     anchorId,
     authorUserId,
-    createdAt: typeof value.get('createdAt') === 'number' ? (value.get('createdAt') as number) : Date.now(),
-    updatedAt: typeof value.get('updatedAt') === 'number' ? (value.get('updatedAt') as number) : Date.now(),
+    createdAt:
+      typeof value.get('createdAt') === 'number' ? (value.get('createdAt') as number) : Date.now(),
+    updatedAt:
+      typeof value.get('updatedAt') === 'number' ? (value.get('updatedAt') as number) : Date.now(),
     body,
     yMap: value,
   }

@@ -81,11 +81,7 @@ export function computeNoteGutterDesiredTop(
   anchor: ResolvedNoteAnchor,
   options: { containerTop: number; orbSize: number }
 ): number {
-  return (
-    anchor.top -
-    options.containerTop +
-    (anchor.height - options.orbSize) / 2
-  )
+  return anchor.top - options.containerTop + (anchor.height - options.orbSize) / 2
 }
 
 export function resolveNoteAnchorLayout(
@@ -125,13 +121,7 @@ export function resolveNoteAnchorLayout(
   const pos = resolveNoteAnchorPos(view, anchorId, effectiveAnchorKind, index) ?? blockPos
 
   if (isMarker) {
-    const markerLayout = resolveMarkerDomLayout(
-      view,
-      blockPos,
-      anchorId,
-      effectiveAnchorKind,
-      pos
-    )
+    const markerLayout = resolveMarkerDomLayout(view, blockPos, anchorId, effectiveAnchorKind, pos)
     if (markerLayout) return markerLayout
   }
 

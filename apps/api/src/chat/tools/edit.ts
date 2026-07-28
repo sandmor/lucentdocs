@@ -2,10 +2,7 @@ import { tool } from 'ai'
 import { z } from 'zod/v4'
 import { projectSyncBus } from '../../trpc/project-sync.js'
 import { EDIT_DESCRIPTION } from './descriptions/index.js'
-import {
-  applyDocumentManuscriptEdits,
-  assertMarkerAnchorsPreserved,
-} from './document-edit-plan.js'
+import { applyDocumentManuscriptEdits, assertMarkerAnchorsPreserved } from './document-edit-plan.js'
 import { hashManuscriptText, projectDocumentManuscript } from './document-manuscript.js'
 import { EditGuardError } from './document-edit-session.js'
 import { withDocumentLock } from './document-lock.js'

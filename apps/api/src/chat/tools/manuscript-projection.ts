@@ -84,7 +84,10 @@ export function resolveManuscriptRangeToDocRange(
   const first = affected[0]
   const last = affected[affected.length - 1]
   const firstOffset = Math.max(0, start - (first.textStart ?? 0))
-  const lastOffset = Math.min((last.textEnd ?? 0) - (last.textStart ?? 0), end - (last.textStart ?? 0))
+  const lastOffset = Math.min(
+    (last.textEnd ?? 0) - (last.textStart ?? 0),
+    end - (last.textStart ?? 0)
+  )
 
   const from = first.pos + 1 + offsetToInnerPos(first.node, firstOffset)
   const to = last.pos + 1 + offsetToInnerPos(last.node, lastOffset)

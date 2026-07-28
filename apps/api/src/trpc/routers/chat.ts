@@ -20,8 +20,13 @@ async function assertChatGenerationAccess(
   input: { projectId: string; documentId: string; chatId: string }
 ): Promise<void> {
   const thread = await ctx.services.chats.getById(input.projectId, input.documentId, input.chatId)
-  if (!thread) throw new TRPCError({ code: 'NOT_FOUND', message: `Chat thread ${input.chatId} not found` })
-  await assertMountedDocumentAccess(ctx, input, thread.settings.editingEnabled ? 'editor' : 'viewer')
+  if (!thread)
+    throw new TRPCError({ code: 'NOT_FOUND', message: `Chat thread ${input.chatId} not found` })
+  await assertMountedDocumentAccess(
+    ctx,
+    input,
+    thread.settings.editingEnabled ? 'editor' : 'viewer'
+  )
 }
 
 function publishChatChangedEvent(
@@ -394,10 +399,15 @@ export const chatRouter = router({
       await assertChatGenerationAccess(ctx, input)
 
       try {
-        const started = await ctx.chatRuntime.regenerateFromMessage(input, input.messageId, ctx.user.id, {
-          selectionFrom: input.selectionFrom,
-          selectionTo: input.selectionTo,
-        })
+        const started = await ctx.chatRuntime.regenerateFromMessage(
+          input,
+          input.messageId,
+          ctx.user.id,
+          {
+            selectionFrom: input.selectionFrom,
+            selectionTo: input.selectionTo,
+          }
+        )
         return { accepted: true, generationId: started.generationId }
       } catch (error) {
         throw mapRuntimeError(error)
@@ -461,7 +471,11 @@ export const chatRouter = router({
       }
 
       try {
-        const started = await ctx.chatRuntime.startGeneration({ ...input, message, actorUserId: ctx.user.id })
+        const started = await ctx.chatRuntime.startGeneration({
+          ...input,
+          message,
+          actorUserId: ctx.user.id,
+        })
         return { accepted: true, generationId: started.generationId }
       } catch (error) {
         throw mapRuntimeError(error)

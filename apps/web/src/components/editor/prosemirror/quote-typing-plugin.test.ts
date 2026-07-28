@@ -2,10 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { schema } from '@lucentdocs/shared'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import type { Transaction } from 'prosemirror-state'
-import {
-  createQuoteTypingPlugin,
-  type QuoteTypingPreferences,
-} from './quote-typing-plugin.js'
+import { createQuoteTypingPlugin, type QuoteTypingPreferences } from './quote-typing-plugin.js'
 
 interface TestView {
   state: EditorState
@@ -27,11 +24,20 @@ function createView(preferences: QuoteTypingPreferences): {
   return { plugin, view }
 }
 
-function typeText(view: TestView, plugin: ReturnType<typeof createQuoteTypingPlugin>, text: string) {
+function typeText(
+  view: TestView,
+  plugin: ReturnType<typeof createQuoteTypingPlugin>,
+  text: string
+) {
   for (const character of text) {
     const { from, to } = view.state.selection
-    const handled = plugin.props.handleTextInput?.call(plugin, view as never, from, to, character, () =>
-      view.state.tr.insertText(character, from, to)
+    const handled = plugin.props.handleTextInput?.call(
+      plugin,
+      view as never,
+      from,
+      to,
+      character,
+      () => view.state.tr.insertText(character, from, to)
     )
     if (!handled) view.dispatch(view.state.tr.insertText(character, from, to))
   }
@@ -77,10 +83,16 @@ describe('smart quote typing', () => {
 
   test('does not rewrite quotes in an inline code mark', () => {
     const code = schema.marks.code.create()
-    const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('code', [code])])])
+    const doc = schema.node('doc', null, [
+      schema.node('paragraph', null, [schema.text('code', [code])]),
+    ])
     const plugin = createQuoteTypingPlugin(() => smart)
     const view: TestView = {
-      state: EditorState.create({ doc, selection: TextSelection.create(doc, 3), plugins: [plugin] }),
+      state: EditorState.create({
+        doc,
+        selection: TextSelection.create(doc, 3),
+        plugins: [plugin],
+      }),
       dispatch(tr) {
         this.state = this.state.apply(tr)
       },

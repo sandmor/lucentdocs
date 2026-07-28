@@ -6,7 +6,9 @@ import type {
 } from '../../core/ports/documentCollaborators.port.js'
 import { currentTxId } from './tx-scope.js'
 
-function collaboratorFromDto(dto: import('@lucentdocs/core').DocumentCollaboratorDto): DocumentCollaborator {
+function collaboratorFromDto(
+  dto: import('@lucentdocs/core').DocumentCollaboratorDto
+): DocumentCollaborator {
   return {
     documentId: dto.documentId,
     userId: dto.userId,
@@ -18,7 +20,9 @@ function collaboratorFromDto(dto: import('@lucentdocs/core').DocumentCollaborato
   }
 }
 
-function invitationFromDto(dto: import('@lucentdocs/core').DocumentShareInvitationDto): DocumentShareInvitation {
+function invitationFromDto(
+  dto: import('@lucentdocs/core').DocumentShareInvitationDto
+): DocumentShareInvitation {
   return {
     id: dto.id,
     documentId: dto.documentId,
@@ -36,11 +40,15 @@ export class DocumentCollaboratorsRepository implements DocumentCollaboratorsRep
   constructor(private readonly engine: NativeStorageEngine) {}
 
   async listForDocument(documentId: string) {
-    return (await this.engine.documentCollaboratorsListForDocument(currentTxId(), documentId)).map(collaboratorFromDto)
+    return (await this.engine.documentCollaboratorsListForDocument(currentTxId(), documentId)).map(
+      collaboratorFromDto
+    )
   }
 
   async listForUser(userId: string) {
-    return (await this.engine.documentCollaboratorsListForUser(currentTxId(), userId)).map(collaboratorFromDto)
+    return (await this.engine.documentCollaboratorsListForUser(currentTxId(), userId)).map(
+      collaboratorFromDto
+    )
   }
 
   async find(documentId: string, userId: string) {
@@ -66,7 +74,9 @@ export class DocumentCollaboratorsRepository implements DocumentCollaboratorsRep
   }
 
   async listInvitationsForUser(userId: string) {
-    return (await this.engine.documentShareInvitationsListForUser(currentTxId(), userId)).map(invitationFromDto)
+    return (await this.engine.documentShareInvitationsListForUser(currentTxId(), userId)).map(
+      invitationFromDto
+    )
   }
 
   async findInvitation(id: string) {
@@ -74,7 +84,11 @@ export class DocumentCollaboratorsRepository implements DocumentCollaboratorsRep
     return row ? invitationFromDto(row) : undefined
   }
 
-  async setInvitationState(id: string, state: 'acceptedAt' | 'declinedAt' | 'revokedAt', at: number) {
+  async setInvitationState(
+    id: string,
+    state: 'acceptedAt' | 'declinedAt' | 'revokedAt',
+    at: number
+  ) {
     await this.engine.documentShareInvitationsSetState(currentTxId(), id, state, at)
   }
 }

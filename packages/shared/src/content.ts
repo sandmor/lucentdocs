@@ -62,5 +62,9 @@ export function createDefaultContent(): string {
   return JSON.stringify({ doc: DEFAULT_DOC, aiDraft: null })
 }
 
-export { parseVersionSnapshotBundle, parseVersionSnapshotBundleStrict, serializeVersionSnapshotBundle }
+export {
+  parseVersionSnapshotBundle,
+  parseVersionSnapshotBundleStrict,
+  serializeVersionSnapshotBundle,
+}
 export type { VersionSnapshotBundle }

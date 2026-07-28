@@ -1,8 +1,4 @@
-import {
-  parseNoteBodyContent,
-  proseMirrorDocToMarkdown,
-  type JsonObject,
-} from '@lucentdocs/shared'
+import { parseNoteBodyContent, proseMirrorDocToMarkdown, type JsonObject } from '@lucentdocs/shared'
 import { renderDocumentContentToMarkdown } from '../../core/services/documentContent.js'
 import { parseDocumentNode } from '../../core/services/documentContent.js'
 import type { ServiceSet } from '../../core/services/types.js'
@@ -74,7 +70,9 @@ export function stripAnnotationMarkup(text: string): string {
 
 function noteBodyToMarkdown(note: AiAnnotationNote): string {
   const content =
-    typeof note.content === 'string' ? parseNoteBodyContent(note.content) : (note.content as JsonObject)
+    typeof note.content === 'string'
+      ? parseNoteBodyContent(note.content)
+      : (note.content as JsonObject)
   const rendered = proseMirrorDocToMarkdown(content)
   if (rendered.ok) return rendered.value.trim()
   return ''

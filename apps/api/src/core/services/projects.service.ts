@@ -1,5 +1,11 @@
 import { nanoid } from 'nanoid'
-import { isValidId, normalizeDocumentPath, type Document, type Project, type JsonObject } from '@lucentdocs/shared'
+import {
+  isValidId,
+  normalizeDocumentPath,
+  type Document,
+  type Project,
+  type JsonObject,
+} from '@lucentdocs/shared'
 import type { RepositorySet } from '../../core/ports/types.js'
 import type { TransactionPort } from '../../core/ports/transaction.port.js'
 
@@ -208,8 +214,13 @@ export function createProjectsService(
       if (!isValidId(input.projectId) || !input.targetOwnerUserId.trim()) return null
       const plan = await getDeletionPlan(input.projectId)
       if (!plan || plan.project.ownerUserId !== input.targetOwnerUserId) return null
-      const resolutions = new Map(input.resolutions.map((resolution) => [resolution.documentId, resolution]))
-      if (resolutions.size !== plan.homeDocuments.length || plan.homeDocuments.some(({ document }) => !resolutions.has(document.id))) {
+      const resolutions = new Map(
+        input.resolutions.map((resolution) => [resolution.documentId, resolution])
+      )
+      if (
+        resolutions.size !== plan.homeDocuments.length ||
+        plan.homeDocuments.some(({ document }) => !resolutions.has(document.id))
+      ) {
         return null
       }
 
@@ -233,7 +244,12 @@ export function createProjectsService(
           if (!path) throw new Error('A destination path is required')
           let paths = targetPaths.get(target.id)
           if (!paths) {
-            paths = new Map((await repos.projectDocuments.listByProject(target.id)).map((mount) => [mount.path, mount.documentId]))
+            paths = new Map(
+              (await repos.projectDocuments.listByProject(target.id)).map((mount) => [
+                mount.path,
+                mount.documentId,
+              ])
+            )
             targetPaths.set(target.id, paths)
           }
           const existingDocumentId = paths.get(path)
@@ -262,7 +278,9 @@ export function createProjectsService(
           const path = normalizeDocumentPath(resolution.path)
           if (!path) throw new Error('A destination path is required')
           const targetMounts = await repos.projectDocuments.listByProject(target.id)
-          if (targetMounts.some((mount) => mount.path === path && mount.documentId !== document.id)) {
+          if (
+            targetMounts.some((mount) => mount.path === path && mount.documentId !== document.id)
+          ) {
             throw new Error(`Path ${path} already exists in the destination project`)
           }
           const existingMount = targetMounts.find((mount) => mount.documentId === document.id)
@@ -270,9 +288,19 @@ export function createProjectsService(
             await repos.projectDocuments.updatePath(target.id, document.id, path, Date.now())
           } else {
             const now = Date.now()
-            await repos.projectDocuments.insert({ projectId: target.id, documentId: document.id, path, addedByUserId: input.targetOwnerUserId, addedAt: now, updatedAt: now })
+            await repos.projectDocuments.insert({
+              projectId: target.id,
+              documentId: document.id,
+              path,
+              addedByUserId: input.targetOwnerUserId,
+              addedAt: now,
+              updatedAt: now,
+            })
           }
-          await repos.documents.update(document.id, { homeProjectId: target.id, updatedAt: Date.now() })
+          await repos.documents.update(document.id, {
+            homeProjectId: target.id,
+            updatedAt: Date.now(),
+          })
           rehomedDocumentIds.push(document.id)
         }
         await repos.projects.deleteById(input.projectId)

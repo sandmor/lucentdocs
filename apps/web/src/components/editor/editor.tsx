@@ -181,7 +181,14 @@ interface EditorProps {
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { projectId, documentId, readOnly = false, onConnectionChange, className, searchResultMarkers = [] },
+  {
+    projectId,
+    documentId,
+    readOnly = false,
+    onConnectionChange,
+    className,
+    searchResultMarkers = [],
+  },
   ref
 ) {
   const [editorShell, setEditorShell] = useState<HTMLDivElement | null>(null)
@@ -812,13 +819,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         markers={searchResultMarkers}
       />
       <SideElementsProvider view={editorView} container={editorShell}>
-        {!readOnly && <BlockHandle
-          view={editorView}
-          container={editorShell}
-          notesMap={notesMap}
-          noteCreatorUserId={noteCreatorUserId}
-          onNoteCreated={(noteId, anchorId) => setJustCreatedNote({ id: noteId, anchorId })}
-        />}
+        {!readOnly && (
+          <BlockHandle
+            view={editorView}
+            container={editorShell}
+            notesMap={notesMap}
+            noteCreatorUserId={noteCreatorUserId}
+            onNoteCreated={(noteId, anchorId) => setJustCreatedNote({ id: noteId, anchorId })}
+          />
+        )}
         <NotesGutter
           view={editorView}
           container={editorShell}

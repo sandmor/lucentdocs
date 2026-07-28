@@ -46,7 +46,10 @@ async function readStoredFingerprint(engine: NativeStorageEngine): Promise<strin
   return value && value.length > 0 ? value : undefined
 }
 
-async function writeStoredFingerprint(engine: NativeStorageEngine, fingerprint: string): Promise<void> {
+async function writeStoredFingerprint(
+  engine: NativeStorageEngine,
+  fingerprint: string
+): Promise<void> {
   const now = Date.now()
   await engine.appConfigUpsertMany(
     null,

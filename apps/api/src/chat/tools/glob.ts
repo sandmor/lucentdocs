@@ -8,11 +8,7 @@ import { buildPaginationMeta } from './meta.js'
 import { loadProjectFileIndex, resolveNormalizedPath } from './paths.js'
 import type { BuildReadToolsContext } from './types.js'
 
-function entryMatchesScope(
-  entry: string,
-  scopedPrefix: string,
-  index: ProjectFileIndex
-): boolean {
+function entryMatchesScope(entry: string, scopedPrefix: string, index: ProjectFileIndex): boolean {
   if (!scopedPrefix) return true
   if (index.files.has(scopedPrefix)) return entry === scopedPrefix
   return entry.startsWith(`${scopedPrefix}/`)
@@ -37,12 +33,7 @@ export function createGlobTool(context: BuildReadToolsContext) {
         .min(1)
         .optional()
         .describe('1-based index into the sorted match list for pagination.'),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe('Maximum number of paths to return.'),
+      limit: z.number().int().min(1).optional().describe('Maximum number of paths to return.'),
     }),
     execute: async ({ pattern, path, offset, limit }) => {
       const index = await loadProjectFileIndex(context.scope.projectId, context.services)

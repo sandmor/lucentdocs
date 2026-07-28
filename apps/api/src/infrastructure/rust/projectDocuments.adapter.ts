@@ -23,8 +23,19 @@ export class ProjectDocumentsRepository implements ProjectDocumentsRepositoryPor
     return rows.map(projectDocumentFromDto)
   }
 
-  async updatePath(projectId: string, documentId: string, path: string, updatedAt: number): Promise<boolean> {
-    return this.engine.projectDocumentsUpdatePath(currentTxId(), projectId, documentId, path, updatedAt)
+  async updatePath(
+    projectId: string,
+    documentId: string,
+    path: string,
+    updatedAt: number
+  ): Promise<boolean> {
+    return this.engine.projectDocumentsUpdatePath(
+      currentTxId(),
+      projectId,
+      documentId,
+      path,
+      updatedAt
+    )
   }
 
   async delete(projectId: string, documentId: string): Promise<boolean> {

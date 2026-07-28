@@ -804,9 +804,7 @@ export function appConfigFromEntries(entries: AppConfigEntryDto[]): Partial<Pers
   return persisted
 }
 
-export function appConfigToEntries(
-  values: Partial<PersistedAppConfig>
-): AppConfigEntryDto[] {
+export function appConfigToEntries(values: Partial<PersistedAppConfig>): AppConfigEntryDto[] {
   return Object.entries(values)
     .filter((entry): entry is [PersistedConfigKey, PersistedConfigValue] => entry[1] !== undefined)
     .map(([key, value]) => ({

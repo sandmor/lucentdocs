@@ -2,7 +2,7 @@ services:
   lucentdocs:
     image: sandmor/lucentdocs:latest
     ports:
-      - "5677:5677"
+      - '5677:5677'
     env_file:
       - .env
     environment:
@@ -16,9 +16,9 @@ services:
     healthcheck:
       test:
         [
-          "CMD",
-          "bun",
-          "-e",
+          'CMD',
+          'bun',
+          '-e',
           "fetch('http://127.0.0.1:5677/.well-known/docker-health').then((r)=>process.exit(r.status===204?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 30s
@@ -31,7 +31,7 @@ services:
       - qdrant
     image: qdrant/qdrant:latest
     ports:
-      - "6333:6333"
+      - '6333:6333'
     volumes:
       - qdrant-data:/qdrant/storage
     restart: unless-stopped

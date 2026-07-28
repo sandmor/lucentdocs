@@ -1,10 +1,6 @@
 import { tool } from 'ai'
 import { z } from 'zod/v4'
-import {
-  parseNoteBodyContent,
-  proseMirrorDocToMarkdown,
-  type JsonObject,
-} from '@lucentdocs/shared'
+import { parseNoteBodyContent, proseMirrorDocToMarkdown, type JsonObject } from '@lucentdocs/shared'
 import { GREP_DESCRIPTION } from './descriptions/index.js'
 import type { AiAnnotationNote } from '../../ai/annotation-context.js'
 import { loadDocumentText, stripAnnotationMarkup } from './document-text.js'
@@ -27,17 +23,16 @@ export function createGrepTool(context: BuildReadToolsContext) {
   return tool({
     description: GREP_DESCRIPTION,
     inputSchema: z.object({
-      pattern: z.string().describe('Substring or regular expression to search for in document text.'),
+      pattern: z
+        .string()
+        .describe('Substring or regular expression to search for in document text.'),
       path: z
         .string()
         .optional()
         .describe(
           'Optional file or directory prefix to scope the search (project-relative, no leading slash).'
         ),
-      include: z
-        .string()
-        .optional()
-        .describe('Optional path glob filter, e.g. "*.md".'),
+      include: z.string().optional().describe('Optional path glob filter, e.g. "*.md".'),
       regex: z
         .boolean()
         .optional()
@@ -80,7 +75,11 @@ export function createGrepTool(context: BuildReadToolsContext) {
         .filter((entry) => {
           if (scopedPath) {
             if (index.files.has(scopedPath) && entry !== scopedPath) return false
-            if (index.directories.has(scopedPath) && entry !== scopedPath && !entry.startsWith(`${scopedPath}/`)) {
+            if (
+              index.directories.has(scopedPath) &&
+              entry !== scopedPath &&
+              !entry.startsWith(`${scopedPath}/`)
+            ) {
               return false
             }
           }
@@ -190,7 +189,9 @@ function buildLineMatcher(pattern: string, regex: boolean): (line: string) => bo
 
 function annotationBodyToText(note: AiAnnotationNote): string {
   const content =
-    typeof note.content === 'string' ? parseNoteBodyContent(note.content) : (note.content as JsonObject)
+    typeof note.content === 'string'
+      ? parseNoteBodyContent(note.content)
+      : (note.content as JsonObject)
   const rendered = proseMirrorDocToMarkdown(content)
   if (rendered.ok) return rendered.value.trim()
   return ''
@@ -201,7 +202,9 @@ function formatGrepOutput(matches: GrepMatch[], truncated: boolean): string {
     return 'No matches found. Try a different pattern, broaden path, or use search for semantic lookup.'
   }
 
-  const lines = [`Found ${matches.length} match${matches.length === 1 ? '' : 'es'}${truncated ? ' (truncated)' : ''}`]
+  const lines = [
+    `Found ${matches.length} match${matches.length === 1 ? '' : 'es'}${truncated ? ' (truncated)' : ''}`,
+  ]
   let currentPath = ''
 
   for (const match of matches) {
@@ -220,7 +223,10 @@ function formatGrepOutput(matches: GrepMatch[], truncated: boolean): string {
   }
 
   if (truncated) {
-    lines.push('', '(Results truncated. Use a more specific path, include filter, or smaller scope.)')
+    lines.push(
+      '',
+      '(Results truncated. Use a more specific path, include filter, or smaller scope.)'
+    )
   }
 
   return lines.join('\n')

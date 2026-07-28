@@ -1,10 +1,5 @@
 import { useCallback } from 'react'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { EditorView } from 'prosemirror-view'
@@ -63,27 +58,23 @@ function NoteSheetItem({
     <div className="rounded-lg border border-border/70 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span
-            className="size-2 rounded-full"
-            style={{ backgroundColor: authorColor }}
-          />
+          <span className="size-2 rounded-full" style={{ backgroundColor: authorColor }} />
           <span className="text-sm font-medium">{authorLabel}</span>
         </div>
-        {!readOnly && <button
-          type="button"
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-          aria-label="Delete note"
-          onClick={onDelete}
-        >
-          <Trash2 className="size-4" />
-        </button>}
+        {!readOnly && (
+          <button
+            type="button"
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            aria-label="Delete note"
+            onClick={onDelete}
+          >
+            <Trash2 className="size-4" />
+          </button>
+        )}
       </div>
 
       <div
-        className={cn(
-          isEditing ? 'min-h-16' : 'min-h-0',
-          !isEditing && 'cursor-text'
-        )}
+        className={cn(isEditing ? 'min-h-16' : 'min-h-0', !isEditing && 'cursor-text')}
         onClick={readOnly ? undefined : handleBodyClick}
       >
         <NoteEditor
@@ -153,16 +144,18 @@ export function NoteSheet({
           )}
         </div>
         <div className="pt-1 border-t border-border/50">
-          {!readOnly && <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start gap-2 text-muted-foreground"
-            onClick={handleAddNote}
-          >
-            <Plus className="size-4" />
-            Add note
-          </Button>}
+          {!readOnly && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start gap-2 text-muted-foreground"
+              onClick={handleAddNote}
+            >
+              <Plus className="size-4" />
+              Add note
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

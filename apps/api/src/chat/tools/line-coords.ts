@@ -21,7 +21,10 @@ export function selectionRangeToLineRange(
     return { start_line: approximateLine, end_line: approximateLine }
   }
 
-  const selectedLines = selectedText.split('\n').map((line) => line.trim()).filter(Boolean)
+  const selectedLines = selectedText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
   const anchor = selectedLines[0]
   if (!anchor) return null
 

@@ -10,7 +10,11 @@ import { hashManuscriptText, projectDocumentManuscript } from './document-manusc
 import { EditToolError } from './edit-errors.js'
 import { validateEditReplacement } from './edit-input.js'
 import { loadProjectFileIndex, resolveNormalizedPath } from './paths.js'
-import { formatXmlCloseTag, formatXmlOpenTag, formatXmlSelfClosingTag } from './structured-output.js'
+import {
+  formatXmlCloseTag,
+  formatXmlOpenTag,
+  formatXmlSelfClosingTag,
+} from './structured-output.js'
 import type { BuildEditToolsContext } from './types.js'
 
 function parseManuscript(content: string) {
@@ -53,11 +57,15 @@ export function createWriteTool(context: BuildEditToolsContext) {
     inputSchema: z.object({
       path: z.string().describe('Project-relative document path without a leading slash.'),
       content: z.string().describe('Complete replacement manuscript Markdown.'),
-      overwrite: z.boolean().optional().describe('Required to replace a non-empty or annotated existing document.'),
+      overwrite: z
+        .boolean()
+        .optional()
+        .describe('Required to replace a non-empty or annotated existing document.'),
     }),
     execute: async ({ path, content, overwrite = false }) => {
       const normalizedPath = resolveNormalizedPath(path)
-      if (!normalizedPath) throw new EditToolError('invalid_path', 'A non-empty file path is required.')
+      if (!normalizedPath)
+        throw new EditToolError('invalid_path', 'A non-empty file path is required.')
 
       const replacementDoc = parseManuscript(content)
       const index = await loadProjectFileIndex(context.scope.projectId, context.services)
@@ -66,7 +74,10 @@ export function createWriteTool(context: BuildEditToolsContext) {
       if (!documentId) {
         await context.assertCanCreateDocument()
         if (index.directories.has(normalizedPath)) {
-          throw new EditToolError('path_conflict', `Cannot create "${normalizedPath}" because it is a directory.`)
+          throw new EditToolError(
+            'path_conflict',
+            `Cannot create "${normalizedPath}" because it is a directory.`
+          )
         }
         const created = await context.services.documents.createForProject(
           context.scope.projectId,
@@ -74,19 +85,39 @@ export function createWriteTool(context: BuildEditToolsContext) {
           JSON.stringify({ doc: replacementDoc.toJSON() as JsonObject, aiDraft: null })
         )
         if (!created) {
-          throw new EditToolError('path_conflict', `Cannot create document at "${normalizedPath}" due to a path conflict.`, {
-            hint: 'Choose an unused path that does not conflict with a file or directory.',
-          })
+          throw new EditToolError(
+            'path_conflict',
+            `Cannot create document at "${normalizedPath}" due to a path conflict.`,
+            {
+              hint: 'Choose an unused path that does not conflict with a file or directory.',
+            }
+          )
         }
-        context.editSession.markEdited(normalizedPath, hashManuscriptText(projectDocumentManuscript(replacementDoc)))
-        const defaultDocumentId = await context.services.documents.getDefaultDocumentIdForProject(context.scope.projectId)
+        context.editSession.markEdited(
+          normalizedPath,
+          hashManuscriptText(projectDocumentManuscript(replacementDoc))
+        )
+        const defaultDocumentId = await context.services.documents.getDefaultDocumentIdForProject(
+          context.scope.projectId
+        )
         projectSyncBus.publish({
-          type: 'documents.changed', projectId: context.scope.projectId, reason: 'chat.write',
-          changedDocumentIds: [created.id], deletedDocumentIds: [], defaultDocumentId,
+          type: 'documents.changed',
+          projectId: context.scope.projectId,
+          reason: 'chat.write',
+          changedDocumentIds: [created.id],
+          deletedDocumentIds: [],
+          defaultDocumentId,
         })
         return {
-          kind: 'write' as const, path: normalizedPath, action: 'created' as const, annotationsDeleted: 0,
-          output: formatWriteOutput({ path: normalizedPath, action: 'created', annotationsDeleted: 0 }),
+          kind: 'write' as const,
+          path: normalizedPath,
+          action: 'created' as const,
+          annotationsDeleted: 0,
+          output: formatWriteOutput({
+            path: normalizedPath,
+            action: 'created',
+            annotationsDeleted: 0,
+          }),
           meta: { suggested_next: 'read', path: normalizedPath },
         }
       }
@@ -95,24 +126,34 @@ export function createWriteTool(context: BuildEditToolsContext) {
       await context.assertCanEditDocument(documentId)
       return withDocumentLock(documentId, async () => {
         const transformed = await context.yjsRuntime.applyProsemirrorTransform(documentId, {
-          origin: 'chat-write', clearNotes: overwrite,
+          origin: 'chat-write',
+          clearNotes: overwrite,
           transform: (currentDoc, { notes }) => {
             const manuscript = projectDocumentManuscript(currentDoc)
             try {
               context.editSession.assertHashCurrent(normalizedPath, hashManuscriptText(manuscript))
             } catch (error) {
               if (error instanceof EditGuardError && error.code === 'content_changed') {
-                throw new EditToolError('stale_read', error.message, { hint: 'Re-read the file and retry the write with fresh manuscript text.' })
+                throw new EditToolError('stale_read', error.message, {
+                  hint: 'Re-read the file and retry the write with fresh manuscript text.',
+                })
               }
               throw error
             }
             if ((manuscript.length > 0 || notes.length > 0) && !overwrite) {
-              throw new EditToolError('overwrite_required', `"${normalizedPath}" is not empty. Set overwrite=true to replace its complete content.`, {
-                hint: 'Use edit for a targeted change, or set overwrite=true for an intentional full rewrite.',
-              })
+              throw new EditToolError(
+                'overwrite_required',
+                `"${normalizedPath}" is not empty. Set overwrite=true to replace its complete content.`,
+                {
+                  hint: 'Use edit for a targeted change, or set overwrite=true for an intentional full rewrite.',
+                }
+              )
             }
             if (manuscript === content.trimEnd()) {
-              throw new EditToolError('no_changes', 'No changes to apply: content already matches the manuscript.')
+              throw new EditToolError(
+                'no_changes',
+                'No changes to apply: content already matches the manuscript.'
+              )
             }
             return {
               changed: true,
@@ -121,15 +162,25 @@ export function createWriteTool(context: BuildEditToolsContext) {
             }
           },
         })
-        context.editSession.markEdited(normalizedPath, hashManuscriptText(projectDocumentManuscript(transformed.nextDoc)))
+        context.editSession.markEdited(
+          normalizedPath,
+          hashManuscriptText(projectDocumentManuscript(transformed.nextDoc))
+        )
         const annotationsDeleted = transformed.result.annotationsDeleted
         const action = overwrite ? 'overwritten' : 'populated'
         projectSyncBus.publish({
-          type: 'documents.changed', projectId: context.scope.projectId, reason: 'chat.write',
-          changedDocumentIds: [documentId], deletedDocumentIds: [], defaultDocumentId: null,
+          type: 'documents.changed',
+          projectId: context.scope.projectId,
+          reason: 'chat.write',
+          changedDocumentIds: [documentId],
+          deletedDocumentIds: [],
+          defaultDocumentId: null,
         })
         return {
-          kind: 'write' as const, path: normalizedPath, action, annotationsDeleted,
+          kind: 'write' as const,
+          path: normalizedPath,
+          action,
+          annotationsDeleted,
           output: formatWriteOutput({ path: normalizedPath, action, annotationsDeleted }),
           meta: { suggested_next: 'read', path: normalizedPath },
         }

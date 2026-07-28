@@ -63,7 +63,11 @@ function seedAssistantBranchThread() {
 describe('chat tree', () => {
   test('resolveActivePath walks selected children from root', () => {
     const payload = seedLinearThread()
-    expect(resolveActivePath(payload).map((node) => node.id)).toEqual(['user-1', 'asst-1', 'user-2'])
+    expect(resolveActivePath(payload).map((node) => node.id)).toEqual([
+      'user-1',
+      'asst-1',
+      'user-2',
+    ])
     expect(pathToUIMessages(resolveActivePath(payload)).map((message) => message.role)).toEqual([
       'user',
       'assistant',
@@ -96,7 +100,11 @@ describe('chat tree', () => {
     const { payload: forked, forkNodeId } = forkRegeneration(payload, 'asst-1')
     const switched = selectBranch(forked, 'asst-1')
 
-    expect(resolveActivePath(switched).map((node) => node.id)).toEqual(['user-1', 'asst-1', 'user-2'])
+    expect(resolveActivePath(switched).map((node) => node.id)).toEqual([
+      'user-1',
+      'asst-1',
+      'user-2',
+    ])
     expect(forked.nodes[forkNodeId]).toBeDefined()
   })
 
@@ -117,10 +125,7 @@ describe('chat tree', () => {
     payload = appended.payload
     payload = setAssistantOnActiveLeaf(payload, 'asst-1', [{ type: 'text', text: 'Reply' }])
 
-    expect(resolveActivePath(payload).map((node) => node.id)).toEqual([
-      appended.nodeId,
-      'asst-1',
-    ])
+    expect(resolveActivePath(payload).map((node) => node.id)).toEqual([appended.nodeId, 'asst-1'])
   })
 
   test('setAssistantOnActiveLeaf updates an assistant placeholder on the active path', () => {
@@ -150,7 +155,11 @@ describe('chat tree', () => {
     const deleted = deleteNode(forked, forkNodeId, 'branch')
 
     expect(deleted.nodes[forkNodeId]).toBeUndefined()
-    expect(resolveActivePath(deleted).map((node) => node.id)).toEqual(['user-1', 'asst-1', 'user-2'])
+    expect(resolveActivePath(deleted).map((node) => node.id)).toEqual([
+      'user-1',
+      'asst-1',
+      'user-2',
+    ])
   })
 
   test('deleteNode only promotes the active child and prunes inactive child branches', () => {

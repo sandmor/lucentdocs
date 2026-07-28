@@ -3,8 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::storage::adapters::{normalize_base_url, with_transaction};
 use crate::storage::dto::{
   DocumentEmbeddingDto, DocumentVectorPayloadContextDto, EmbeddingSearchMetadataDto,
-  EmbeddingVectorReferenceDto, ReplaceDocumentEmbeddingsInputDto,
-  ReplaceEmbeddingMetadataChunkDto,
+  EmbeddingVectorReferenceDto, ReplaceDocumentEmbeddingsInputDto, ReplaceEmbeddingMetadataChunkDto,
 };
 use crate::storage::engine::StorageEngine;
 use crate::storage::error::{StorageError, StorageResult};
@@ -179,7 +178,13 @@ pub async fn find_embeddings(
 
   engine
     .with_conn(tx_id, async |conn| {
-      list_embedding_rows(&mut *conn, document_id, &normalized_base_url, normalized_model).await
+      list_embedding_rows(
+        &mut *conn,
+        document_id,
+        &normalized_base_url,
+        normalized_model,
+      )
+      .await
     })
     .await
 }
@@ -234,17 +239,21 @@ pub async fn list_vector_references(
       .fetch_all(&mut *conn)
       .await?;
 
-      Ok(rows
-        .into_iter()
-        .map(|(vector_key, base_url, model, dimensions)| EmbeddingVectorReferenceDto {
-          document_id: document_id.to_string(),
-          vector_key,
-          base_url,
-          model,
-          dimensions,
-          vector_row_id: None,
-        })
-        .collect())
+      Ok(
+        rows
+          .into_iter()
+          .map(
+            |(vector_key, base_url, model, dimensions)| EmbeddingVectorReferenceDto {
+              document_id: document_id.to_string(),
+              vector_key,
+              base_url,
+              model,
+              dimensions,
+              vector_row_id: None,
+            },
+          )
+          .collect(),
+      )
     })
     .await
 }
@@ -323,7 +332,13 @@ pub async fn replace_embeddings(
           .await?;
         }
 
-        list_embedding_rows(&mut *conn, &input.document_id, &normalized_base_url, &normalized_model).await
+        list_embedding_rows(
+          &mut *conn,
+          &input.document_id,
+          &normalized_base_url,
+          &normalized_model,
+        )
+        .await
       })
       .await
   })
@@ -411,19 +426,21 @@ pub async fn list_vector_references_by_document_ids(
       .fetch_all(&mut *conn)
       .await?;
 
-      Ok(rows
-        .into_iter()
-        .map(
-          |(document_id, vector_key, base_url, model, dimensions)| EmbeddingVectorReferenceDto {
-            document_id,
-            vector_key,
-            base_url,
-            model,
-            dimensions,
-            vector_row_id: None,
-          },
-        )
-        .collect())
+      Ok(
+        rows
+          .into_iter()
+          .map(|(document_id, vector_key, base_url, model, dimensions)| {
+            EmbeddingVectorReferenceDto {
+              document_id,
+              vector_key,
+              base_url,
+              model,
+              dimensions,
+              vector_row_id: None,
+            }
+          })
+          .collect(),
+      )
     })
     .await
 }
@@ -558,28 +575,30 @@ pub async fn list_search_metadata_by_vector_keys(
       .fetch_all(&mut *conn)
       .await?;
 
-      Ok(rows
-        .into_iter()
-        .map(|row| {
-          (
-            row.vector_key.clone(),
-            EmbeddingSearchMetadataDto {
-              vector_key: row.vector_key,
-              document_id: row.document_id,
-              title: row.title,
-              created_at: row.created_at,
-              updated_at: row.updated_at,
-              strategy_type: row.strategy_type,
-              chunk_ordinal: row.chunk_ordinal,
-              chunk_start: row.chunk_start,
-              chunk_end: row.chunk_end,
-              selection_from: row.selection_from,
-              selection_to: row.selection_to,
-              chunk_text: row.chunk_text,
-            },
-          )
-        })
-        .collect())
+      Ok(
+        rows
+          .into_iter()
+          .map(|row| {
+            (
+              row.vector_key.clone(),
+              EmbeddingSearchMetadataDto {
+                vector_key: row.vector_key,
+                document_id: row.document_id,
+                title: row.title,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                strategy_type: row.strategy_type,
+                chunk_ordinal: row.chunk_ordinal,
+                chunk_start: row.chunk_start,
+                chunk_end: row.chunk_end,
+                selection_from: row.selection_from,
+                selection_to: row.selection_to,
+                chunk_text: row.chunk_text,
+              },
+            )
+          })
+          .collect(),
+      )
     })
     .await
 }

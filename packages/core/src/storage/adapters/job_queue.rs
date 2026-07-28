@@ -43,9 +43,7 @@ fn notify_waiters(job_type: &str, available_at: i64) {
 
 fn is_sqlite_lock_error(err: &StorageError) -> bool {
   let msg = err.to_string();
-  msg.contains("database is locked")
-    || msg.contains("SQLITE_BUSY")
-    || msg.contains("SQLITE_LOCKED")
+  msg.contains("database is locked") || msg.contains("SQLITE_BUSY") || msg.contains("SQLITE_LOCKED")
 }
 
 async fn with_lock_retry<F, Fut, T>(operation: F) -> StorageResult<T>
@@ -225,26 +223,26 @@ pub async fn enqueue(
 
     let row = engine
       .with_conn(tx_id, async |conn| {
-          sqlx::query(
-            "INSERT INTO job_queue (
+        sqlx::query(
+          "INSERT INTO job_queue (
                id, type, dedupeKey, payloadJson, availableAt,
                leaseOwner, leaseUntil, attempt, maxAttempts, priority,
                createdAt, updatedAt, lastError
              ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL)",
-          )
-          .bind(&id)
-          .bind(&input.r#type)
-          .bind(&input.dedupe_key)
-          .bind(&input.payload_json)
-          .bind(available_at)
-          .bind(max_attempts)
-          .bind(priority)
-          .bind(now)
-          .bind(now)
-          .execute(&mut *conn)
-          .await?;
+        )
+        .bind(&id)
+        .bind(&input.r#type)
+        .bind(&input.dedupe_key)
+        .bind(&input.payload_json)
+        .bind(available_at)
+        .bind(max_attempts)
+        .bind(priority)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *conn)
+        .await?;
 
-          fetch_queue_row(&mut *conn, &id).await
+        fetch_queue_row(&mut *conn, &id).await
       })
       .await?;
 
@@ -267,21 +265,21 @@ pub async fn upsert_unique(
     let row = with_transaction(engine, tx_id, async |engine, tx| {
       engine
         .with_conn(Some(tx), async |conn| {
-            let existing = sqlx::query_as::<_, QueueRow>(
-              "SELECT *
+          let existing = sqlx::query_as::<_, QueueRow>(
+            "SELECT *
                  FROM job_queue
                 WHERE type = ? AND dedupeKey = ?
                 LIMIT 1",
-            )
-            .bind(&input.r#type)
-            .bind(&input.dedupe_key)
-            .fetch_optional(&mut *conn)
-            .await?;
+          )
+          .bind(&input.r#type)
+          .bind(&input.dedupe_key)
+          .fetch_optional(&mut *conn)
+          .await?;
 
-            if let Some(existing) = existing {
-              let updated_at = next_updated_at(existing.updated_at, now);
-              sqlx::query(
-                "UPDATE job_queue
+          if let Some(existing) = existing {
+            let updated_at = next_updated_at(existing.updated_at, now);
+            sqlx::query(
+              "UPDATE job_queue
                     SET payloadJson = ?,
                         availableAt = ?,
                         leaseOwner = NULL,
@@ -292,40 +290,40 @@ pub async fn upsert_unique(
                         updatedAt = ?,
                         lastError = NULL
                   WHERE id = ?",
-              )
-              .bind(&input.payload_json)
-              .bind(input.run_at)
-              .bind(max_attempts)
-              .bind(priority)
-              .bind(updated_at)
-              .bind(&existing.id)
-              .execute(&mut *conn)
-              .await?;
+            )
+            .bind(&input.payload_json)
+            .bind(input.run_at)
+            .bind(max_attempts)
+            .bind(priority)
+            .bind(updated_at)
+            .bind(&existing.id)
+            .execute(&mut *conn)
+            .await?;
 
-              fetch_queue_row(&mut *conn, &existing.id).await
-            } else {
-              let id = nanoid::nanoid!();
-              sqlx::query(
-                "INSERT INTO job_queue (
+            fetch_queue_row(&mut *conn, &existing.id).await
+          } else {
+            let id = nanoid::nanoid!();
+            sqlx::query(
+              "INSERT INTO job_queue (
                    id, type, dedupeKey, payloadJson, availableAt,
                    leaseOwner, leaseUntil, attempt, maxAttempts, priority,
                    createdAt, updatedAt, lastError
                  ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL)",
-              )
-              .bind(&id)
-              .bind(&input.r#type)
-              .bind(&input.dedupe_key)
-              .bind(&input.payload_json)
-              .bind(input.run_at)
-              .bind(max_attempts)
-              .bind(priority)
-              .bind(now)
-              .bind(now)
-              .execute(&mut *conn)
-              .await?;
+            )
+            .bind(&id)
+            .bind(&input.r#type)
+            .bind(&input.dedupe_key)
+            .bind(&input.payload_json)
+            .bind(input.run_at)
+            .bind(max_attempts)
+            .bind(priority)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *conn)
+            .await?;
 
-              fetch_queue_row(&mut *conn, &id).await
-            }
+            fetch_queue_row(&mut *conn, &id).await
+          }
         })
         .await
     })
@@ -350,33 +348,33 @@ pub async fn lease(
     with_transaction(engine, tx_id, async |engine, tx| {
       engine
         .with_conn(Some(tx), async |conn| {
-            let types = parse_types_json(input.types_json.as_deref())?;
-            let (type_filter_sql, type_params) = build_type_filter(types.as_deref());
+          let types = parse_types_json(input.types_json.as_deref())?;
+          let (type_filter_sql, type_params) = build_type_filter(types.as_deref());
 
-            let candidate_sql = format!(
-              "SELECT id
+          let candidate_sql = format!(
+            "SELECT id
                  FROM job_queue
                 WHERE availableAt <= ?
                   AND (leaseUntil IS NULL OR leaseUntil <= ?)
                   {type_filter_sql}
                 ORDER BY priority DESC, availableAt ASC, createdAt ASC
                 LIMIT ?"
-            );
+          );
 
-            let mut candidate_query = sqlx::query_as::<_, (String,)>(&candidate_sql)
-              .bind(input.now)
-              .bind(input.now);
-            for value in &type_params {
-              candidate_query = candidate_query.bind(value);
-            }
-            candidate_query = candidate_query.bind(input.limit);
+          let mut candidate_query = sqlx::query_as::<_, (String,)>(&candidate_sql)
+            .bind(input.now)
+            .bind(input.now);
+          for value in &type_params {
+            candidate_query = candidate_query.bind(value);
+          }
+          candidate_query = candidate_query.bind(input.limit);
 
-            let candidates = candidate_query.fetch_all(&mut *conn).await?;
-            let mut leased = Vec::new();
+          let candidates = candidate_query.fetch_all(&mut *conn).await?;
+          let mut leased = Vec::new();
 
-            for (candidate_id,) in candidates {
-              let result = sqlx::query(
-                "UPDATE job_queue
+          for (candidate_id,) in candidates {
+            let result = sqlx::query(
+              "UPDATE job_queue
                     SET leaseOwner = ?,
                         leaseUntil = ?,
                         attempt = attempt + 1,
@@ -384,32 +382,30 @@ pub async fn lease(
                   WHERE id = ?
                     AND availableAt <= ?
                     AND (leaseUntil IS NULL OR leaseUntil <= ?)",
-              )
-              .bind(&input.worker_id)
-              .bind(input.now + input.lease_duration_ms)
-              .bind(input.now)
-              .bind(&candidate_id)
-              .bind(input.now)
-              .bind(input.now)
-              .execute(&mut *conn)
-              .await?;
+            )
+            .bind(&input.worker_id)
+            .bind(input.now + input.lease_duration_ms)
+            .bind(input.now)
+            .bind(&candidate_id)
+            .bind(input.now)
+            .bind(input.now)
+            .execute(&mut *conn)
+            .await?;
 
-              if result.rows_affected() == 0 {
-                continue;
-              }
+            if result.rows_affected() == 0 {
+              continue;
+            }
 
-              if let Some(row) = sqlx::query_as::<_, QueueRow>(
-                "SELECT * FROM job_queue WHERE id = ?",
-              )
+            if let Some(row) = sqlx::query_as::<_, QueueRow>("SELECT * FROM job_queue WHERE id = ?")
               .bind(&candidate_id)
               .fetch_optional(&mut *conn)
               .await?
-              {
-                leased.push(row_to_dto(row));
-              }
+            {
+              leased.push(row_to_dto(row));
             }
+          }
 
-            Ok(leased)
+          Ok(leased)
         })
         .await
     })
@@ -427,48 +423,48 @@ pub async fn complete(
     with_transaction(engine, tx_id, async |engine, tx| {
       engine
         .with_conn(Some(tx), async |conn| {
-            let row = sqlx::query_as::<_, QueueRow>("SELECT * FROM job_queue WHERE id = ?")
-              .bind(&input.id)
-              .fetch_optional(&mut *conn)
-              .await?;
+          let row = sqlx::query_as::<_, QueueRow>("SELECT * FROM job_queue WHERE id = ?")
+            .bind(&input.id)
+            .fetch_optional(&mut *conn)
+            .await?;
 
-            let Some(row) = row else {
-              return Ok("missing".to_string());
-            };
+          let Some(row) = row else {
+            return Ok("missing".to_string());
+          };
 
-            if row.lease_owner.as_deref() != Some(input.worker_id.as_str()) {
-              if let Some(expected) = input.expected_updated_at {
-                if row.updated_at != expected {
-                  return Ok("released".to_string());
-                }
-              }
-              return Ok("missing".to_string());
-            }
-
+          if row.lease_owner.as_deref() != Some(input.worker_id.as_str()) {
             if let Some(expected) = input.expected_updated_at {
               if row.updated_at != expected {
-                sqlx::query(
-                  "UPDATE job_queue
-                      SET leaseOwner = NULL,
-                          leaseUntil = NULL
-                    WHERE id = ? AND leaseOwner = ?",
-                )
-                .bind(&input.id)
-                .bind(&input.worker_id)
-                .execute(&mut *conn)
-                .await?;
-                notify_waiters(&row.r#type, row.available_at);
                 return Ok("released".to_string());
               }
             }
+            return Ok("missing".to_string());
+          }
 
-            sqlx::query("DELETE FROM job_queue WHERE id = ? AND leaseOwner = ?")
+          if let Some(expected) = input.expected_updated_at {
+            if row.updated_at != expected {
+              sqlx::query(
+                "UPDATE job_queue
+                      SET leaseOwner = NULL,
+                          leaseUntil = NULL
+                    WHERE id = ? AND leaseOwner = ?",
+              )
               .bind(&input.id)
               .bind(&input.worker_id)
               .execute(&mut *conn)
               .await?;
+              notify_waiters(&row.r#type, row.available_at);
+              return Ok("released".to_string());
+            }
+          }
 
-            Ok("completed".to_string())
+          sqlx::query("DELETE FROM job_queue WHERE id = ? AND leaseOwner = ?")
+            .bind(&input.id)
+            .bind(&input.worker_id)
+            .execute(&mut *conn)
+            .await?;
+
+          Ok("completed".to_string())
         })
         .await
     })
@@ -486,64 +482,64 @@ pub async fn fail(
     with_transaction(engine, tx_id, async |engine, tx| {
       engine
         .with_conn(Some(tx), async |conn| {
-            let row = sqlx::query_as::<_, QueueRow>(
-              "SELECT * FROM job_queue WHERE id = ? AND leaseOwner = ?",
-            )
-            .bind(&input.id)
-            .bind(&input.worker_id)
-            .fetch_optional(&mut *conn)
-            .await?;
+          let row = sqlx::query_as::<_, QueueRow>(
+            "SELECT * FROM job_queue WHERE id = ? AND leaseOwner = ?",
+          )
+          .bind(&input.id)
+          .bind(&input.worker_id)
+          .fetch_optional(&mut *conn)
+          .await?;
 
-            let Some(row) = row else {
-              return Ok("missing".to_string());
-            };
+          let Some(row) = row else {
+            return Ok("missing".to_string());
+          };
 
-            if row.attempt >= row.max_attempts {
-              sqlx::query(
-                "INSERT INTO job_queue_dead_letters (
+          if row.attempt >= row.max_attempts {
+            sqlx::query(
+              "INSERT INTO job_queue_dead_letters (
                    id, type, dedupeKey, payloadJson, attempt, maxAttempts,
                    lastError, failedAt, createdAt
                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-              )
+            )
+            .bind(&row.id)
+            .bind(&row.r#type)
+            .bind(&row.dedupe_key)
+            .bind(&row.payload_json)
+            .bind(row.attempt)
+            .bind(row.max_attempts)
+            .bind(&input.error)
+            .bind(input.now)
+            .bind(row.created_at)
+            .execute(&mut *conn)
+            .await?;
+
+            sqlx::query("DELETE FROM job_queue WHERE id = ?")
               .bind(&row.id)
-              .bind(&row.r#type)
-              .bind(&row.dedupe_key)
-              .bind(&row.payload_json)
-              .bind(row.attempt)
-              .bind(row.max_attempts)
-              .bind(&input.error)
-              .bind(input.now)
-              .bind(row.created_at)
               .execute(&mut *conn)
               .await?;
 
-              sqlx::query("DELETE FROM job_queue WHERE id = ?")
-                .bind(&row.id)
-                .execute(&mut *conn)
-                .await?;
+            return Ok("dead".to_string());
+          }
 
-              return Ok("dead".to_string());
-            }
-
-            let available_at = input.now + input.retry_delay_ms;
-            sqlx::query(
-              "UPDATE job_queue
+          let available_at = input.now + input.retry_delay_ms;
+          sqlx::query(
+            "UPDATE job_queue
                   SET leaseOwner = NULL,
                       leaseUntil = NULL,
                       availableAt = ?,
                       updatedAt = ?,
                       lastError = ?
                 WHERE id = ?",
-            )
-            .bind(available_at)
-            .bind(input.now)
-            .bind(&input.error)
-            .bind(&row.id)
-            .execute(&mut *conn)
-            .await?;
+          )
+          .bind(available_at)
+          .bind(input.now)
+          .bind(&input.error)
+          .bind(&row.id)
+          .execute(&mut *conn)
+          .await?;
 
-            notify_waiters(&row.r#type, available_at);
-            Ok("retrying".to_string())
+          notify_waiters(&row.r#type, available_at);
+          Ok("retrying".to_string())
         })
         .await
     })
@@ -560,17 +556,17 @@ pub async fn get_by_type_and_dedupe_key(
 ) -> StorageResult<Option<QueueJobDto>> {
   engine
     .with_conn(tx_id, async |conn| {
-        let row = sqlx::query_as::<_, QueueRow>(
-          "SELECT *
+      let row = sqlx::query_as::<_, QueueRow>(
+        "SELECT *
              FROM job_queue
             WHERE type = ? AND dedupeKey = ?
             LIMIT 1",
-        )
-        .bind(job_type)
-        .bind(dedupe_key)
-        .fetch_optional(&mut *conn)
-        .await?;
-        Ok(row.map(row_to_dto))
+      )
+      .bind(job_type)
+      .bind(dedupe_key)
+      .fetch_optional(&mut *conn)
+      .await?;
+      Ok(row.map(row_to_dto))
     })
     .await
 }
@@ -597,12 +593,12 @@ pub async fn get_by_type_and_dedupe_keys(
 
   engine
     .with_conn(tx_id, async |conn| {
-        let mut query = sqlx::query_as::<_, QueueRow>(&sql).bind(job_type);
-        for key in dedupe_keys {
-          query = query.bind(key);
-        }
-        let rows = query.fetch_all(&mut *conn).await?;
-        Ok(rows.into_iter().map(row_to_dto).collect())
+      let mut query = sqlx::query_as::<_, QueueRow>(&sql).bind(job_type);
+      for key in dedupe_keys {
+        query = query.bind(key);
+      }
+      let rows = query.fetch_all(&mut *conn).await?;
+      Ok(rows.into_iter().map(row_to_dto).collect())
     })
     .await
 }
@@ -614,16 +610,16 @@ pub async fn list_queued_by_type(
 ) -> StorageResult<Vec<QueueJobDto>> {
   engine
     .with_conn(tx_id, async |conn| {
-        let rows = sqlx::query_as::<_, QueueRow>(
-          "SELECT *
+      let rows = sqlx::query_as::<_, QueueRow>(
+        "SELECT *
              FROM job_queue
             WHERE type = ?
             ORDER BY createdAt ASC",
-        )
-        .bind(job_type)
-        .fetch_all(&mut *conn)
-        .await?;
-        Ok(rows.into_iter().map(row_to_dto).collect())
+      )
+      .bind(job_type)
+      .fetch_all(&mut *conn)
+      .await?;
+      Ok(rows.into_iter().map(row_to_dto).collect())
     })
     .await
 }
@@ -650,12 +646,12 @@ pub async fn delete_queued_by_type_and_dedupe_keys(
 
     engine
       .with_conn(tx_id, async |conn| {
-          let mut query = sqlx::query(&sql).bind(job_type);
-          for key in dedupe_keys {
-            query = query.bind(key);
-          }
-          query.execute(&mut *conn).await?;
-          Ok(())
+        let mut query = sqlx::query(&sql).bind(job_type);
+        for key in dedupe_keys {
+          query = query.bind(key);
+        }
+        query.execute(&mut *conn).await?;
+        Ok(())
       })
       .await
   })
@@ -669,23 +665,23 @@ pub async fn get_type_stats(
 ) -> StorageResult<JobQueueTypeStatsDto> {
   engine
     .with_conn(tx_id, async |conn| {
-        let row = sqlx::query_as::<_, (i64, Option<i64>, Option<i64>)>(
-          "SELECT
+      let row = sqlx::query_as::<_, (i64, Option<i64>, Option<i64>)>(
+        "SELECT
              COUNT(*) AS totalQueued,
              MIN(availableAt) AS nextAvailableAt,
              MIN(createdAt) AS oldestQueuedAt
            FROM job_queue
            WHERE type = ?",
-        )
-        .bind(job_type)
-        .fetch_one(&mut *conn)
-        .await?;
+      )
+      .bind(job_type)
+      .fetch_one(&mut *conn)
+      .await?;
 
-        Ok(JobQueueTypeStatsDto {
-          total_queued: row.0 as i32,
-          next_available_at: row.1,
-          oldest_queued_at: row.2,
-        })
+      Ok(JobQueueTypeStatsDto {
+        total_queued: row.0 as i32,
+        next_available_at: row.1,
+        oldest_queued_at: row.2,
+      })
     })
     .await
 }
@@ -704,7 +700,9 @@ pub async fn wait_for_available(
   let types = parse_types_json(types_json)?;
 
   if engine
-    .with_conn(tx_id, async |conn| { has_due_jobs_conn(&mut *conn, now, types.as_deref()).await })
+    .with_conn(tx_id, async |conn| {
+      has_due_jobs_conn(&mut *conn, now, types.as_deref()).await
+    })
     .await?
   {
     return Ok("due".to_string());
@@ -712,7 +710,9 @@ pub async fn wait_for_available(
 
   let max_wake_at = now + timeout_ms;
   let next_available_at = engine
-    .with_conn(tx_id, async |conn| { get_next_available_at_conn(&mut *conn, now, types.as_deref()).await })
+    .with_conn(tx_id, async |conn| {
+      get_next_available_at_conn(&mut *conn, now, types.as_deref()).await
+    })
     .await?;
 
   let wake_at = match next_available_at {
@@ -724,7 +724,9 @@ pub async fn wait_for_available(
   let mut receiver = notifier().sender.subscribe();
 
   if engine
-    .with_conn(tx_id, async |conn| { has_due_jobs_conn(&mut *conn, now_ms(), types.as_deref()).await })
+    .with_conn(tx_id, async |conn| {
+      has_due_jobs_conn(&mut *conn, now_ms(), types.as_deref()).await
+    })
     .await?
   {
     return Ok("due".to_string());

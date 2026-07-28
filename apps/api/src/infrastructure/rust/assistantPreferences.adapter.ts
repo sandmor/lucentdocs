@@ -1,12 +1,19 @@
 import type { NativeStorageEngine } from '@lucentdocs/core'
 import { assistantPreferenceOverridesSchema } from '@lucentdocs/shared'
-import type { AssistantPreferenceScope, AssistantPreferencesRepositoryPort, AssistantPreferenceSetting } from '../../core/ports/assistantPreferences.port.js'
+import type {
+  AssistantPreferenceScope,
+  AssistantPreferencesRepositoryPort,
+  AssistantPreferenceSetting,
+} from '../../core/ports/assistantPreferences.port.js'
 import { currentTxId } from './tx-scope.js'
 
 export class AssistantPreferencesRepository implements AssistantPreferencesRepositoryPort {
   constructor(private engine: NativeStorageEngine) {}
 
-  async get(scopeType: AssistantPreferenceScope, scopeId: string): Promise<AssistantPreferenceSetting | undefined> {
+  async get(
+    scopeType: AssistantPreferenceScope,
+    scopeId: string
+  ): Promise<AssistantPreferenceSetting | undefined> {
     const row = await this.engine.assistantGetPreference(currentTxId(), scopeType, scopeId)
     if (!row) return undefined
     const parsed = assistantPreferenceOverridesSchema.safeParse(JSON.parse(row.overridesJson))

@@ -15,7 +15,11 @@ function isMathNode(node: ProseMirrorNode | null | undefined): boolean {
   return node?.type.name === 'math_inline' || node?.type.name === 'math_block'
 }
 
-function selectMath(view: import('prosemirror-view').EditorView, pos: number, entryEdge: MathEntryEdge) {
+function selectMath(
+  view: import('prosemirror-view').EditorView,
+  pos: number,
+  entryEdge: MathEntryEdge
+) {
   const tr = view.state.tr
     .setSelection(NodeSelection.create(view.state.doc, pos))
     .setMeta(mathNavigationPluginKey, { pos, entryEdge } satisfies MathNavigationState)

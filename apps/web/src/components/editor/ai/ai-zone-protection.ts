@@ -111,9 +111,7 @@ function positionStrictlyInsideRange(position: number, range: ProtectedZoneRange
 
 /** Strict open interval on inline segment bounds; boundary positions are outside zone content. */
 export function positionStrictlyInsideZoneContent(position: number, zone: AIZone): boolean {
-  return zone.segments.some(
-    (segment) => position > segment.nodeFrom && position < segment.nodeTo
-  )
+  return zone.segments.some((segment) => position > segment.nodeFrom && position < segment.nodeTo)
 }
 
 export function selectionHeadStrictlyInsideZones(
@@ -158,8 +156,10 @@ export function transactionTouchesProtectedZones(
   for (let stepIndex = 0; stepIndex < tr.steps.length; stepIndex += 1) {
     const step = tr.steps[stepIndex]
     const json = step.toJSON() as { from?: number; to?: number; pos?: number }
-    const from = typeof json.from === 'number' ? json.from : typeof json.pos === 'number' ? json.pos : null
-    const to = typeof json.to === 'number' ? json.to : typeof json.pos === 'number' ? json.pos : null
+    const from =
+      typeof json.from === 'number' ? json.from : typeof json.pos === 'number' ? json.pos : null
+    const to =
+      typeof json.to === 'number' ? json.to : typeof json.pos === 'number' ? json.pos : null
     if (from === null || to === null) {
       return true
     }

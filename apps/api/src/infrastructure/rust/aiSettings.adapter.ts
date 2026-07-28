@@ -67,10 +67,6 @@ export class AiSettingsRepository implements AiSettingsRepositoryPort {
   }
 
   async clearProviderApiKeyReferences(apiKeyId: string, updatedAt: number): Promise<void> {
-    await this.engine.aiSettingsClearProviderApiKeyReferences(
-      currentTxId(),
-      apiKeyId,
-      updatedAt
-    )
+    await this.engine.aiSettingsClearProviderApiKeyReferences(currentTxId(), apiKeyId, updatedAt)
   }
 }

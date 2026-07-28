@@ -11,7 +11,8 @@ fn main() {
       println!(
         "cargo:warning=core: using system SQLite {} from {}",
         lib.version,
-        lib.link_paths
+        lib
+          .link_paths
           .first()
           .map(|path| path.display().to_string())
           .unwrap_or_else(|| "pkg-config".to_string())

@@ -42,7 +42,9 @@ describe('getHighlightedHTMLAsync', () => {
   })
 
   test('falls back to escaped text for unknown languages', async () => {
-    expect(await getHighlightedHTMLAsync('fn main() {}', 'not-a-real-language')).toBe('fn main() {}')
+    expect(await getHighlightedHTMLAsync('fn main() {}', 'not-a-real-language')).toBe(
+      'fn main() {}'
+    )
   })
 
   test('dedupes concurrent grammar loads', async () => {

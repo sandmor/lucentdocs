@@ -58,11 +58,7 @@ export function SideElement({
         top: `${Math.round(top)}px`,
       }}
     >
-      {measureTarget === 'child' ? (
-        <div ref={measureRef}>{children}</div>
-      ) : (
-        children
-      )}
+      {measureTarget === 'child' ? <div ref={measureRef}>{children}</div> : children}
     </motion.div>
   )
 }

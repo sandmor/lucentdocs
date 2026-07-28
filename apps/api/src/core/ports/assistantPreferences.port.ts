@@ -10,6 +10,9 @@ export interface AssistantPreferenceSetting {
 }
 
 export interface AssistantPreferencesRepositoryPort {
-  get(scopeType: AssistantPreferenceScope, scopeId: string): Promise<AssistantPreferenceSetting | undefined>
+  get(
+    scopeType: AssistantPreferenceScope,
+    scopeId: string
+  ): Promise<AssistantPreferenceSetting | undefined>
   upsert(setting: AssistantPreferenceSetting): Promise<void>
 }

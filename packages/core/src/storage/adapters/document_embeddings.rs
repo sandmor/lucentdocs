@@ -160,7 +160,9 @@ fn validate_embedding_vector(values: &[f32]) -> StorageResult<()> {
 
 fn validate_search_limit(limit: i32) -> StorageResult<i32> {
   if limit <= 0 {
-    return Err(StorageError::new("Search limit must be a positive integer."));
+    return Err(StorageError::new(
+      "Search limit must be a positive integer.",
+    ));
   }
   Ok(limit.min(200))
 }
@@ -349,7 +351,9 @@ async fn list_embedding_rows(
 }
 
 enum SearchScope<'a> {
-  Document { document_id: &'a str },
+  Document {
+    document_id: &'a str,
+  },
   Project {
     project_id: &'a str,
     directory_path: Option<&'a str>,
@@ -403,7 +407,8 @@ async fn search_matches(
           if directory_exact {
             scope_fragments.push(
               "               AND pd.path LIKE ? ESCAPE '\\'
-                   AND pd.path NOT LIKE ? ESCAPE '\\'".to_string(),
+                   AND pd.path NOT LIKE ? ESCAPE '\\'"
+                .to_string(),
             );
             scope_params.push(format!("{escaped}/%"));
             scope_params.push(format!("{escaped}/%/%"));
@@ -413,7 +418,7 @@ async fn search_matches(
                     pd.path = ?
                     OR pd.path LIKE ? ESCAPE '\\'
                   )"
-                .to_string(),
+              .to_string(),
             );
             scope_params.push(path.to_string());
             scope_params.push(format!("{escaped}/%"));
@@ -488,7 +493,13 @@ pub async fn find_embeddings(
 
   engine
     .with_conn(tx_id, async |conn| {
-      list_embedding_rows(&mut *conn, document_id, &normalized_base_url, normalized_model).await
+      list_embedding_rows(
+        &mut *conn,
+        document_id,
+        &normalized_base_url,
+        normalized_model,
+      )
+      .await
     })
     .await
 }
@@ -504,7 +515,8 @@ pub async fn search(
   engine
     .with_conn(tx_id, async |conn| {
       if let Some(document_id) = input.document_id.as_deref() {
-        return search_matches(&mut *conn,
+        return search_matches(
+          &mut *conn,
           input,
           &input.query_embedding_json,
           &normalized_base_url,
@@ -520,7 +532,8 @@ pub async fn search(
         .ok_or_else(|| StorageError::new("project_id or document_id is required for search."))?;
 
       let directory_exact = input.scope_type == "directory";
-      search_matches(&mut *conn,
+      search_matches(
+        &mut *conn,
         input,
         &input.query_embedding_json,
         &normalized_base_url,
@@ -562,9 +575,13 @@ pub async fn replace_embeddings(
 
         if let Some(stored) = latest.0 {
           if stored > input.document_timestamp {
-            let embeddings =
-              list_embedding_rows(&mut *conn, &input.document_id, &normalized_base_url, &normalized_model)
-                .await?;
+            let embeddings = list_embedding_rows(
+              &mut *conn,
+              &input.document_id,
+              &normalized_base_url,
+              &normalized_model,
+            )
+            .await?;
             return Ok(ReplaceDocumentEmbeddingsResultDto {
               status: "stale".to_string(),
               embeddings,
@@ -572,9 +589,13 @@ pub async fn replace_embeddings(
           }
         }
 
-        let existing =
-          list_embedding_vector_rows(&mut *conn, &input.document_id, &normalized_base_url, &normalized_model)
-            .await?;
+        let existing = list_embedding_vector_rows(
+          &mut *conn,
+          &input.document_id,
+          &normalized_base_url,
+          &normalized_model,
+        )
+        .await?;
         for (row_id, _, dimensions) in existing {
           let table = vec_extension::vector_table_name(dimensions)?;
           sqlx::query(&format!("DELETE FROM {table} WHERE rowid = ?"))
@@ -668,16 +689,22 @@ pub async fn replace_embeddings(
             .bind(vector_row_id)
             .execute(&mut *conn)
             .await?;
-          sqlx::query(&format!("INSERT INTO {table} (rowid, embedding) VALUES (?, ?)"))
-            .bind(vector_row_id)
-            .bind(embedding_f32_to_bytes(&embedding))
-            .execute(&mut *conn)
-            .await?;
+          sqlx::query(&format!(
+            "INSERT INTO {table} (rowid, embedding) VALUES (?, ?)"
+          ))
+          .bind(vector_row_id)
+          .bind(embedding_f32_to_bytes(&embedding))
+          .execute(&mut *conn)
+          .await?;
         }
 
-        let embeddings =
-          list_embedding_rows(&mut *conn, &input.document_id, &normalized_base_url, &normalized_model)
-            .await?;
+        let embeddings = list_embedding_rows(
+          &mut *conn,
+          &input.document_id,
+          &normalized_base_url,
+          &normalized_model,
+        )
+        .await?;
         Ok(ReplaceDocumentEmbeddingsResultDto {
           status: "applied".to_string(),
           embeddings,
@@ -726,21 +753,23 @@ pub async fn list_vector_references_by_document_ids(
       .fetch_all(&mut *conn)
       .await?;
 
-      Ok(rows
-        .into_iter()
-        .map(
-          |(document_id, vector_key, base_url, model, dimensions, vector_row_id)| {
-            EmbeddingVectorReferenceDto {
-              document_id,
-              vector_key,
-              base_url,
-              model,
-              dimensions,
-              vector_row_id,
-            }
-          },
-        )
-        .collect())
+      Ok(
+        rows
+          .into_iter()
+          .map(
+            |(document_id, vector_key, base_url, model, dimensions, vector_row_id)| {
+              EmbeddingVectorReferenceDto {
+                document_id,
+                vector_key,
+                base_url,
+                model,
+                dimensions,
+                vector_row_id,
+              }
+            },
+          )
+          .collect(),
+      )
     })
     .await
 }
@@ -759,9 +788,7 @@ pub async fn delete_vectors_by_references(
   for reference in references {
     if reference.vector_key.is_empty()
       || reference.dimensions <= 0
-      || reference
-        .vector_row_id
-        .is_some_and(|row_id| row_id <= 0)
+      || reference.vector_row_id.is_some_and(|row_id| row_id <= 0)
     {
       continue;
     }
@@ -835,10 +862,8 @@ pub async fn delete_vectors_by_references(
           .await?;
 
           if !rows.is_empty() {
-            resolved_row_ids_by_dimensions.insert(
-              dimensions,
-              rows.into_iter().map(|(id,)| id).collect(),
-            );
+            resolved_row_ids_by_dimensions
+              .insert(dimensions, rows.into_iter().map(|(id,)| id).collect());
           }
         }
 
@@ -906,7 +931,7 @@ pub async fn delete_vectors_by_references(
         if !has_vector_table(&mut *conn, &table).await? {
           continue;
         }
-        let count = sqlx::query_as::<_, (i64,)>( &format!("SELECT COUNT(*) AS count FROM {table}"))
+        let count = sqlx::query_as::<_, (i64,)>(&format!("SELECT COUNT(*) AS count FROM {table}"))
           .fetch_one(&mut *conn)
           .await?;
         if count.0 == 0 {
@@ -925,7 +950,7 @@ pub async fn delete_embeddings_by_document_id(
   tx_id: Option<&str>,
   document_id: &str,
 ) -> StorageResult<()> {
-  let references = list_vector_references_by_document_ids(engine, tx_id, &[document_id.to_string()])
-    .await?;
+  let references =
+    list_vector_references_by_document_ids(engine, tx_id, &[document_id.to_string()]).await?;
   delete_vectors_by_references(engine, tx_id, &references).await
 }

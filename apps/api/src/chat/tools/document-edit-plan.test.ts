@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { ensureBlockIds, schema } from '@lucentdocs/shared'
-import {
-  applyDocumentManuscriptEdits,
-  assertMarkerAnchorsPreserved,
-} from './document-edit-plan.js'
+import { applyDocumentManuscriptEdits, assertMarkerAnchorsPreserved } from './document-edit-plan.js'
 import { projectDocumentManuscript } from './document-manuscript.js'
 
 const BLOCK_ONE = 'block-one'

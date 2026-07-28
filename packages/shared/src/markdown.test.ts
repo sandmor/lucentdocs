@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { proseMirrorDocToMarkdown } from './markdown.js'
-import { hasRecognizedMarkdownSyntax, parseMarkdownishToFragment, parseMarkdownishToSlice } from './markdownish.js'
+import {
+  hasRecognizedMarkdownSyntax,
+  parseMarkdownishToFragment,
+  parseMarkdownishToSlice,
+} from './markdownish.js'
 
 describe('list Markdown serialization', () => {
   test('serializes nested checklists as GFM tasks', () => {

@@ -70,7 +70,11 @@ function createEmptyAnchorGroups(): NotesByAnchor {
 }
 
 function compareNotes(left: AiAnnotationNote, right: AiAnnotationNote): number {
-  return left.createdAt - right.createdAt || left.updatedAt - right.updatedAt || left.id.localeCompare(right.id)
+  return (
+    left.createdAt - right.createdAt ||
+    left.updatedAt - right.updatedAt ||
+    left.id.localeCompare(right.id)
+  )
 }
 
 function groupNotesByAnchor(notes: readonly AiAnnotationNote[]): Map<string, NotesByAnchor> {

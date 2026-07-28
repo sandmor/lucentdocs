@@ -128,9 +128,10 @@ export function NotesGutter({
 
   const decorationCacheKey = useMemo(
     () =>
-      [activeHighlightedAnchorId ?? '', notes.map((note) => `${note.id}:${note.updatedAt}:${note.anchorId}`).join('|')].join(
-        ';'
-      ),
+      [
+        activeHighlightedAnchorId ?? '',
+        notes.map((note) => `${note.id}:${note.updatedAt}:${note.anchorId}`).join('|'),
+      ].join(';'),
     [notes, activeHighlightedAnchorId]
   )
 
@@ -180,12 +181,7 @@ export function NotesGutter({
       const representative = anchorNotes[0]
       if (!representative) continue
 
-      const anchor = resolveNoteAnchorLayout(
-        view,
-        anchorId,
-        representative.anchorKind,
-        blockIndex
-      )
+      const anchor = resolveNoteAnchorLayout(view, anchorId, representative.anchorKind, blockIndex)
       if (anchor.orphan) continue
 
       const pos = blockIndex.get(anchorId)
@@ -326,14 +322,16 @@ export function NotesGutter({
                       {authorLabels.getLabel(note.authorUserId)}
                     </span>
                   </div>
-                  {!readOnly && <button
-                    type="button"
-                    className="rounded p-1 text-muted-foreground hover:bg-muted"
-                    aria-label="Delete note"
-                    onClick={() => handleDeleteNote(note)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>}
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      className="rounded p-1 text-muted-foreground hover:bg-muted"
+                      aria-label="Delete note"
+                      onClick={() => handleDeleteNote(note)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  )}
                 </div>
                 <NoteEditor body={note.body} yMap={note.yMap} editable={!readOnly} />
               </div>

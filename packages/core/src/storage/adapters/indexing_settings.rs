@@ -128,13 +128,11 @@ pub async fn delete(
 ) -> StorageResult<()> {
   engine
     .with_conn(tx_id, async |conn| {
-      sqlx::query(
-        "DELETE FROM indexing_strategy_settings WHERE scopeType = ? AND scopeId = ?",
-      )
-      .bind(scope_type)
-      .bind(scope_id)
-      .execute(&mut *conn)
-      .await?;
+      sqlx::query("DELETE FROM indexing_strategy_settings WHERE scopeType = ? AND scopeId = ?")
+        .bind(scope_type)
+        .bind(scope_id)
+        .execute(&mut *conn)
+        .await?;
       Ok(())
     })
     .await

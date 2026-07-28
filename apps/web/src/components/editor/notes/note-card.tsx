@@ -137,18 +137,20 @@ export function NoteCard({
             <span className="truncate text-xs font-medium text-foreground/80">{authorLabel}</span>
           </div>
           <div className="flex items-center gap-1">
-            {!readOnly && <button
-              type="button"
-              title="Minimize note"
-              aria-label="Minimize note"
-              className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation()
-                onCollapse()
-              }}
-            >
-              <Minimize2 className="size-3.5" />
-            </button>}
+            {!readOnly && (
+              <button
+                type="button"
+                title="Minimize note"
+                aria-label="Minimize note"
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCollapse()
+                }}
+              >
+                <Minimize2 className="size-3.5" />
+              </button>
+            )}
             <button
               type="button"
               aria-label="Delete note"

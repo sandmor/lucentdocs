@@ -18,17 +18,17 @@ pub async fn find_by_document_id(
 ) -> StorageResult<Option<DocumentContentDto>> {
   engine
     .with_conn(tx_id, async |conn| {
-        let row = sqlx::query_as::<_, DocumentContentRow>(
-          "SELECT documentId, content, updatedAt FROM document_content WHERE documentId = ?",
-        )
-        .bind(document_id)
-        .fetch_optional(&mut *conn)
-        .await?;
-        Ok(row.map(|row| DocumentContentDto {
-          document_id: row.document_id,
-          content: row.content,
-          updated_at: row.updated_at,
-        }))
+      let row = sqlx::query_as::<_, DocumentContentRow>(
+        "SELECT documentId, content, updatedAt FROM document_content WHERE documentId = ?",
+      )
+      .bind(document_id)
+      .fetch_optional(&mut *conn)
+      .await?;
+      Ok(row.map(|row| DocumentContentDto {
+        document_id: row.document_id,
+        content: row.content,
+        updated_at: row.updated_at,
+      }))
     })
     .await
 }
@@ -42,19 +42,19 @@ pub async fn upsert(
 ) -> StorageResult<()> {
   engine
     .with_conn(tx_id, async |conn| {
-        sqlx::query(
-          "INSERT INTO document_content (documentId, content, updatedAt)
+      sqlx::query(
+        "INSERT INTO document_content (documentId, content, updatedAt)
            VALUES (?, ?, ?)
            ON CONFLICT(documentId) DO UPDATE SET
              content = excluded.content,
              updatedAt = excluded.updatedAt",
-        )
-        .bind(document_id)
-        .bind(content_json)
-        .bind(updated_at)
-        .execute(&mut *conn)
-        .await?;
-        Ok(())
+      )
+      .bind(document_id)
+      .bind(content_json)
+      .bind(updated_at)
+      .execute(&mut *conn)
+      .await?;
+      Ok(())
     })
     .await
 }
@@ -66,11 +66,11 @@ pub async fn delete(
 ) -> StorageResult<()> {
   engine
     .with_conn(tx_id, async |conn| {
-        sqlx::query("DELETE FROM document_content WHERE documentId = ?")
-          .bind(document_id)
-          .execute(&mut *conn)
-          .await?;
-        Ok(())
+      sqlx::query("DELETE FROM document_content WHERE documentId = ?")
+        .bind(document_id)
+        .execute(&mut *conn)
+        .await?;
+      Ok(())
     })
     .await
 }

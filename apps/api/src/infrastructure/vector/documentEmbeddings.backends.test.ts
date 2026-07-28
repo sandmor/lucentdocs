@@ -161,7 +161,11 @@ function createQdrantFetchMock(): typeof fetch {
   }) as typeof fetch
 }
 
-async function insertDocument(engine: NativeStorageEngine, id: string, title: string): Promise<void> {
+async function insertDocument(
+  engine: NativeStorageEngine,
+  id: string,
+  title: string
+): Promise<void> {
   await insertProject(engine, 'project_1')
   await engine.documentsInsert(null, {
     id,

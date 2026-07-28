@@ -21,7 +21,9 @@ function payloadFromRows(thread: AssistantThreadDto, rows: AssistantMessageDto[]
       role: row.role,
       parts: JSON.parse(row.partsJson),
       parentId: row.parentId ?? null,
-      childIds: (children.get(row.id) ?? []).sort((a, b) => a.branchOrdinal - b.branchOrdinal).map((child) => child.id),
+      childIds: (children.get(row.id) ?? [])
+        .sort((a, b) => a.branchOrdinal - b.branchOrdinal)
+        .map((child) => child.id),
       selectedChildId: row.selectedChildId ?? null,
     }
   }
@@ -29,22 +31,50 @@ function payloadFromRows(thread: AssistantThreadDto, rows: AssistantMessageDto[]
     v: 1,
     settings: { editingEnabled: thread.mode === 'agent' },
     nodes,
-    rootChildIds: (children.get(null) ?? []).sort((a, b) => a.branchOrdinal - b.branchOrdinal).map((row) => row.id),
+    rootChildIds: (children.get(null) ?? [])
+      .sort((a, b) => a.branchOrdinal - b.branchOrdinal)
+      .map((row) => row.id),
     selectedRootChildId: thread.selectedRootMessageId ?? null,
   })
 }
 
-function rowsFromPayload(threadId: string, raw: string, now: number): { rows: AssistantMessageDto[]; selectedRootMessageId: string | null } {
+function rowsFromPayload(
+  threadId: string,
+  raw: string,
+  now: number
+): { rows: AssistantMessageDto[]; selectedRootMessageId: string | null } {
   const payload = JSON.parse(raw) as {
-    nodes?: Record<string, { id: string; role: string; parts: unknown[]; parentId: string | null; childIds: string[]; selectedChildId: string | null }>
+    nodes?: Record<
+      string,
+      {
+        id: string
+        role: string
+        parts: unknown[]
+        parentId: string | null
+        childIds: string[]
+        selectedChildId: string | null
+      }
+    >
     rootChildIds?: string[]
     selectedRootChildId?: string | null
   }
   const rootOrder = new Map((payload.rootChildIds ?? []).map((id, index) => [id, index]))
   const rows = Object.values(payload.nodes ?? {}).map((node) => {
     const parent = node.parentId ? payload.nodes?.[node.parentId] : undefined
-    const ordinal = parent ? Math.max(0, parent.childIds.indexOf(node.id)) : (rootOrder.get(node.id) ?? 0)
-    return { id: node.id, threadId, parentId: node.parentId ?? undefined, role: node.role, partsJson: JSON.stringify(node.parts), branchOrdinal: ordinal, selectedChildId: node.selectedChildId ?? undefined, createdAt: now, updatedAt: now }
+    const ordinal = parent
+      ? Math.max(0, parent.childIds.indexOf(node.id))
+      : (rootOrder.get(node.id) ?? 0)
+    return {
+      id: node.id,
+      threadId,
+      parentId: node.parentId ?? undefined,
+      role: node.role,
+      partsJson: JSON.stringify(node.parts),
+      branchOrdinal: ordinal,
+      selectedChildId: node.selectedChildId ?? undefined,
+      createdAt: now,
+      updatedAt: now,
+    }
   })
   const byId = new Map(rows.map((row) => [row.id, row]))
   const depth = (row: AssistantMessageDto): number => {
@@ -62,9 +92,21 @@ function rowsFromPayload(threadId: string, raw: string, now: number): { rows: As
   return { rows, selectedRootMessageId: payload.selectedRootChildId ?? null }
 }
 
-async function toRow(engine: NativeStorageEngine, documentId: string, dto: AssistantThreadDto): Promise<ChatThreadRow> {
+async function toRow(
+  engine: NativeStorageEngine,
+  documentId: string,
+  dto: AssistantThreadDto
+): Promise<ChatThreadRow> {
   const messages = await engine.assistantListMessages(currentTxId(), dto.id)
-  return { id: dto.id, projectId: dto.projectId, documentId, title: dto.title, messages: payloadFromRows(dto, messages), createdAt: dto.createdAt, updatedAt: dto.updatedAt }
+  return {
+    id: dto.id,
+    projectId: dto.projectId,
+    documentId,
+    title: dto.title,
+    messages: payloadFromRows(dto, messages),
+    createdAt: dto.createdAt,
+    updatedAt: dto.updatedAt,
+  }
 }
 
 export class ChatsRepository implements ChatsRepositoryPort {
@@ -91,7 +133,17 @@ export class ChatsRepository implements ChatsRepositoryPort {
 
   async insert(row: ChatThreadRow): Promise<void> {
     const payload = rowsFromPayload(row.id, row.messages, row.createdAt)
-    await this.engine.assistantInsertThread(currentTxId(), { id: row.id, projectId: row.projectId, createdByUserId: 'system', title: row.title, mode: JSON.parse(row.messages).settings?.editingEnabled === false ? 'ask' : 'agent', selectedRootMessageId: payload.selectedRootMessageId ?? undefined, revision: 0, createdAt: row.createdAt, updatedAt: row.updatedAt })
+    await this.engine.assistantInsertThread(currentTxId(), {
+      id: row.id,
+      projectId: row.projectId,
+      createdByUserId: 'system',
+      title: row.title,
+      mode: JSON.parse(row.messages).settings?.editingEnabled === false ? 'ask' : 'agent',
+      selectedRootMessageId: payload.selectedRootMessageId ?? undefined,
+      revision: 0,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    })
     await this.engine.assistantReplaceMessages(currentTxId(), row.id, payload.rows)
   }
 
@@ -109,7 +161,17 @@ export class ChatsRepository implements ChatsRepositoryPort {
       selectedRootMessageId = payload.selectedRootMessageId ?? undefined
       await this.engine.assistantReplaceMessages(currentTxId(), id, payload.rows)
     }
-    return this.engine.assistantUpdateThread(currentTxId(), projectId, id, { title: data.title, mode: data.messages ? (JSON.parse(data.messages).settings?.editingEnabled === false ? 'ask' : 'agent') : undefined, selectedRootMessageId: selectedRootMessageId ?? undefined, revision: existing.revision + 1, updatedAt: data.updatedAt })
+    return this.engine.assistantUpdateThread(currentTxId(), projectId, id, {
+      title: data.title,
+      mode: data.messages
+        ? JSON.parse(data.messages).settings?.editingEnabled === false
+          ? 'ask'
+          : 'agent'
+        : undefined,
+      selectedRootMessageId: selectedRootMessageId ?? undefined,
+      revision: existing.revision + 1,
+      updatedAt: data.updatedAt,
+    })
   }
 
   async deleteById(projectId: string, documentId: string, id: string): Promise<boolean> {

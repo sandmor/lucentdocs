@@ -1,14 +1,14 @@
 pub mod ai_model_selection;
 pub mod ai_settings;
-pub mod assistant;
 pub mod app_config;
+pub mod assistant;
 pub mod auth_data;
+pub mod document_collaborators;
 pub mod document_content;
 pub mod document_embedding_metadata;
 pub mod document_embeddings;
 pub mod document_notes;
 pub mod documents;
-pub mod document_collaborators;
 pub mod indexing_settings;
 pub mod job_queue;
 pub mod persist_bundle;

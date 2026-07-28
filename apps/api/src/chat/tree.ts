@@ -95,10 +95,7 @@ function removeNodesFromPayload(next: ChatThreadPayload, idsToRemove: Set<string
   }
 }
 
-function deleteBranchSubtree(
-  next: ChatThreadPayload,
-  nodeId: string
-): void {
+function deleteBranchSubtree(next: ChatThreadPayload, nodeId: string): void {
   const node = findNode(next, nodeId)
   const { list, isRoot, parent } = getSiblingList(next, node)
   const index = list.indexOf(nodeId)
@@ -309,8 +306,7 @@ export function replaceNodeText(
   const node = findNode(next, nodeId)
   const hasToolParts = node.parts.some((part) => {
     if (typeof part !== 'object' || part === null || Array.isArray(part)) return false
-    const type =
-      'type' in part && typeof part.type === 'string' ? part.type : ''
+    const type = 'type' in part && typeof part.type === 'string' ? part.type : ''
     return type === 'dynamic-tool' || type.startsWith('tool-')
   })
   if (hasToolParts) {
@@ -357,7 +353,11 @@ export function deleteNode(
         next.rootChildIds.splice(rootIndex, 1)
       }
       if (!next.rootChildIds.includes(promotedId)) {
-        next.rootChildIds.splice(rootIndex >= 0 ? rootIndex : next.rootChildIds.length, 0, promotedId)
+        next.rootChildIds.splice(
+          rootIndex >= 0 ? rootIndex : next.rootChildIds.length,
+          0,
+          promotedId
+        )
       }
       if (next.selectedRootChildId === nodeId) {
         next.selectedRootChildId = promotedId

@@ -30,7 +30,12 @@ async function createProjectDocument(
   const project = await adapter.services.projects.create(`Fixture for ${title}`, {
     ownerUserId: 'embedding-test-user',
   })
-  const document = await adapter.services.documents.createForProject(project.id, title, content, type)
+  const document = await adapter.services.documents.createForProject(
+    project.id,
+    title,
+    content,
+    type
+  )
   if (!document) throw new Error(`Expected fixture document ${title} to be created.`)
   return document
 }
@@ -93,7 +98,8 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await createProjectDocument(adapter,
+    const doc = await createProjectDocument(
+      adapter,
       'notes.md',
       JSON.stringify({
         doc: {
@@ -140,7 +146,8 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await createProjectDocument(adapter,
+    const doc = await createProjectDocument(
+      adapter,
       'batch.md',
       JSON.stringify({
         doc: {
@@ -205,7 +212,8 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await createProjectDocument(adapter,
+    const doc = await createProjectDocument(
+      adapter,
       'stale.md',
       JSON.stringify({
         doc: {
@@ -308,7 +316,8 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await createProjectDocument(adapter,
+    const doc = await createProjectDocument(
+      adapter,
       'windowed.md',
       JSON.stringify({
         doc: {
@@ -370,7 +379,8 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await createProjectDocument(adapter,
+    const doc = await createProjectDocument(
+      adapter,
       'empty.md',
       JSON.stringify({ type: 'doc', content: [{ type: 'paragraph' }] })
     )
@@ -599,7 +609,8 @@ describe('EmbeddingIndexService', () => {
       throw new Error(`Unexpected fetch ${url}`)
     }) as typeof fetch
 
-    const doc = await createProjectDocument(adapter,
+    const doc = await createProjectDocument(
+      adapter,
       'notes.md',
       JSON.stringify({
         doc: {
@@ -669,7 +680,8 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await createProjectDocument(adapter,
+    const doc = await createProjectDocument(
+      adapter,
       'delete-during-flush.md',
       JSON.stringify({
         doc: {
@@ -725,7 +737,8 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const docA = await createProjectDocument(adapter,
+    const docA = await createProjectDocument(
+      adapter,
       'target-a.md',
       JSON.stringify({
         doc: {
@@ -735,7 +748,8 @@ describe('EmbeddingIndexService', () => {
         aiDraft: null,
       })
     )
-    const docB = await createProjectDocument(adapter,
+    const docB = await createProjectDocument(
+      adapter,
       'target-b.md',
       JSON.stringify({
         doc: {

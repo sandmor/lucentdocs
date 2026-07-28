@@ -15,7 +15,10 @@ export function formatPathNotFound(path: string, suggestions: readonly string[])
   if (suggestions.length > 0) {
     lines.push('', 'Did you mean one of these?', ...suggestions)
   }
-  lines.push('', 'Use glob to discover paths by pattern, or read on a directory path to list entries.')
+  lines.push(
+    '',
+    'Use glob to discover paths by pattern, or read on a directory path to list entries.'
+  )
   return new Error(lines.join('\n'))
 }
 

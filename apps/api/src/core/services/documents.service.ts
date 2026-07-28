@@ -451,7 +451,10 @@ export function createDocumentsService(
     if (liveDoc) {
       return JSON.stringify(
         ensureBlockIds(
-          yXmlFragmentToProseMirrorRootNode(liveDoc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+          yXmlFragmentToProseMirrorRootNode(
+            liveDoc.getXmlFragment('prosemirror'),
+            schema
+          ).toJSON() as JsonObject
         )
       )
     }
@@ -467,7 +470,10 @@ export function createDocumentsService(
       Y.applyUpdate(doc, new Uint8Array(persisted))
       const content = JSON.stringify(
         ensureBlockIds(
-          yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+          yXmlFragmentToProseMirrorRootNode(
+            doc.getXmlFragment('prosemirror'),
+            schema
+          ).toJSON() as JsonObject
         )
       )
       doc.destroy()
@@ -720,7 +726,9 @@ export function createDocumentsService(
         const documents = await repos.documents.findByIds(
           Array.from(new Set(matches.map((match) => match.documentId)))
         )
-        const pathsByDocumentId = new Map(projectDocuments.map((document) => [document.id, document.path]))
+        const pathsByDocumentId = new Map(
+          projectDocuments.map((document) => [document.id, document.path])
+        )
         bestResults = aggregateProjectSearchMatches(
           matches,
           normalizedQuery,
@@ -881,9 +889,10 @@ export function createDocumentsService(
     ): Promise<ProjectDocumentWithContent | null> {
       const existing = await getProjectScopedDocument(repos, projectId, documentId)
       if (!existing) return null
-      const updated = data.metadata === undefined
-        ? await getDocumentWithContent(documentId)
-        : await this.update(documentId, { metadata: data.metadata })
+      const updated =
+        data.metadata === undefined
+          ? await getDocumentWithContent(documentId)
+          : await this.update(documentId, { metadata: data.metadata })
       if (!updated) return null
       const mount = (await repos.projectDocuments.listByProject(projectId)).find(
         (candidate) => candidate.documentId === documentId
@@ -910,7 +919,10 @@ export function createDocumentsService(
       return true
     },
 
-    async removeFromProject(projectId: string, documentId: string): Promise<'deleted' | 'unmounted' | null> {
+    async removeFromProject(
+      projectId: string,
+      documentId: string
+    ): Promise<'deleted' | 'unmounted' | null> {
       const document = await getProjectScopedDocument(repos, projectId, documentId)
       if (!document) return null
       if (document.homeProjectId === projectId) {
@@ -975,7 +987,9 @@ export function createDocumentsService(
       })
     },
 
-    async openOrCreateDefaultForProject(projectId: string): Promise<ProjectDocumentWithContent | null> {
+    async openOrCreateDefaultForProject(
+      projectId: string
+    ): Promise<ProjectDocumentWithContent | null> {
       const defaultDocumentId = await this.openOrCreateDefaultIdForProject(projectId)
       if (!defaultDocumentId) return null
       return this.getForProject(projectId, defaultDocumentId)
@@ -995,7 +1009,8 @@ export function createDocumentsService(
       if (pathHasSentinelSegment(normalizedDestinationPath)) return null
 
       const normalizedSourcePath = normalizeDocumentPath(sourceDoc.path)
-      if (normalizedSourcePath === normalizedDestinationPath) return this.getForProject(projectId, documentId)
+      if (normalizedSourcePath === normalizedDestinationPath)
+        return this.getForProject(projectId, documentId)
 
       const docs = await listDocumentsForProject(projectId)
       const finalPaths = docs.map((d) => {
@@ -1159,7 +1174,9 @@ export function createDocumentsService(
       await transaction.run(async () => {
         for (const doc of docsToDelete) {
           if (doc.homeProjectId === projectId) {
-            const references = await repos.documentEmbeddings.listVectorReferencesByDocumentIds([doc.id])
+            const references = await repos.documentEmbeddings.listVectorReferencesByDocumentIds([
+              doc.id,
+            ])
             await repos.documents.deleteById(doc.id)
             await repos.yjsDocuments.delete(doc.id)
             transaction.afterCommit(() => dispatchDocumentsDeleted([doc.id], references))
@@ -1262,7 +1279,10 @@ export function createDocumentsService(
       if (liveDoc) {
         bundle = {
           doc: ensureBlockIds(
-            yXmlFragmentToProseMirrorRootNode(liveDoc.getXmlFragment('prosemirror'), schema).toJSON() as JsonObject
+            yXmlFragmentToProseMirrorRootNode(
+              liveDoc.getXmlFragment('prosemirror'),
+              schema
+            ).toJSON() as JsonObject
           ),
           notes: snapshotsFromRecords(notesMapToRecords(id, liveDoc)),
         }

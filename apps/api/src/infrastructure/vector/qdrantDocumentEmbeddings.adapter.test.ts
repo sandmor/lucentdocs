@@ -134,7 +134,11 @@ describe('QdrantDocumentEmbeddingsRepository', () => {
 
       expect(replacement.status).toBe('applied')
 
-      const stored = await repo.findEmbeddings('doc_1', 'https://openrouter.ai/api/v1', 'test-model')
+      const stored = await repo.findEmbeddings(
+        'doc_1',
+        'https://openrouter.ai/api/v1',
+        'test-model'
+      )
       expect(stored).toHaveLength(1)
       expect(stored[0]?.vectorKey).toBe('doc_1:https://openrouter.ai/api/v1:test-model:0')
 

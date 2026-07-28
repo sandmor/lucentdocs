@@ -92,9 +92,7 @@ export class RustDocumentEmbeddingMetadataStore implements DocumentEmbeddingMeta
     return rows.map(embeddingVectorReferenceFromDto)
   }
 
-  async listVectorReferencesByDocumentIds(
-    documentIds: string[]
-  ): Promise<
+  async listVectorReferencesByDocumentIds(documentIds: string[]): Promise<
     Array<{
       documentId: string
       vectorKey: string

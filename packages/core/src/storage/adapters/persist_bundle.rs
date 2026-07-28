@@ -36,7 +36,10 @@ pub async fn persist(
   input: &PersistBundleInputDto,
 ) -> StorageResult<()> {
   let parsed_notes: Vec<PersistNoteJson> = serde_json::from_str(&input.notes_json)?;
-  let notes: Vec<DocumentNoteDto> = parsed_notes.into_iter().map(DocumentNoteDto::from).collect();
+  let notes: Vec<DocumentNoteDto> = parsed_notes
+    .into_iter()
+    .map(DocumentNoteDto::from)
+    .collect();
   let document_id = input.document_id.clone();
   let yjs_data = input.yjs_data.to_vec();
   let content_json = input.content_json.clone();
@@ -93,11 +96,9 @@ pub async fn persist(
           .await?;
         }
 
-        if let (Some(snapshot_id), Some(snapshot_content), Some(snapshot_created_at)) = (
-          snapshot_id,
-          snapshot_content_json,
-          snapshot_created_at,
-        ) {
+        if let (Some(snapshot_id), Some(snapshot_content), Some(snapshot_created_at)) =
+          (snapshot_id, snapshot_content_json, snapshot_created_at)
+        {
           sqlx::query(
             "INSERT INTO version_snapshots (id, documentId, content, createdAt)
              VALUES (?, ?, ?, ?)",

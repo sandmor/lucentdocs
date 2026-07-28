@@ -52,7 +52,12 @@ export interface ChatsService {
   listForProject(projectId: string): Promise<ChatThreadSummary[]>
   listForDocument(projectId: string, documentId: string): Promise<ChatThreadSummary[]>
   getById(projectId: string, documentId: string, chatId: string): Promise<ChatThread | null>
-  create(projectId: string, documentId: string, title?: string, editingEnabled?: boolean): Promise<ChatThread | null>
+  create(
+    projectId: string,
+    documentId: string,
+    title?: string,
+    editingEnabled?: boolean
+  ): Promise<ChatThread | null>
   savePayload(
     projectId: string,
     documentId: string,

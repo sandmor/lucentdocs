@@ -17,10 +17,7 @@ export function resolveNormalizedPath(rawPath: string): string {
   return normalizeProjectPath(rawPath)
 }
 
-export function resolveDocumentPath(
-  index: ProjectFileIndex,
-  documentId: string
-): string | null {
+export function resolveDocumentPath(index: ProjectFileIndex, documentId: string): string | null {
   for (const [path, id] of index.files) {
     if (id === documentId) return path
   }
@@ -93,7 +90,5 @@ export function listDirectoryEntries(
 
 export function pathsMatchingPrefix(paths: readonly string[], prefix: string): string[] {
   if (!prefix) return [...paths]
-  return paths.filter(
-    (entry) => entry === prefix || entry.startsWith(`${prefix}/`)
-  )
+  return paths.filter((entry) => entry === prefix || entry.startsWith(`${prefix}/`))
 }

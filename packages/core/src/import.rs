@@ -212,7 +212,10 @@ pub async fn import_markdown_documents(
     }
   }
 
-  let tx_id = engine.begin_transaction().await.map_err(storage_err_to_napi)?;
+  let tx_id = engine
+    .begin_transaction()
+    .await
+    .map_err(storage_err_to_napi)?;
   let tx = Some(tx_id.as_str());
 
   for document in request.documents {

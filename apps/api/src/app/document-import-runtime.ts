@@ -125,11 +125,7 @@ export function createDocumentImportJobHandler(options: {
     }
 
     const queuedAt = Date.now()
-    await options.repositories.embeddingIndexQueue.enqueueDocuments(
-      importedIds,
-      queuedAt,
-      queuedAt
-    )
+    await options.repositories.embeddingIndexQueue.enqueueDocuments(importedIds, queuedAt, queuedAt)
 
     const defaultDocumentId = await options.services.documents.getDefaultDocumentIdForProject(
       job.projectId

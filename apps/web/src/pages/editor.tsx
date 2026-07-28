@@ -1006,7 +1006,8 @@ export function EditorPage() {
           projectId={id}
           documentId={currentDocumentId}
           canEditDocument={
-            documentAccessQuery.data?.role === 'owner' || documentAccessQuery.data?.role === 'editor'
+            documentAccessQuery.data?.role === 'owner' ||
+            documentAccessQuery.data?.role === 'editor'
           }
         />
       )}
@@ -1069,7 +1070,14 @@ export function EditorPage() {
                 !currentDocumentIsVisible
               }
             />
-            {documentAccessQuery.data?.role === 'viewer' ? <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-muted-foreground"><Badge variant="secondary" className="mr-2">View only</Badge>Content is shared read-only. You can still organize this file in your project.</div> : null}
+            {documentAccessQuery.data?.role === 'viewer' ? (
+              <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-muted-foreground">
+                <Badge variant="secondary" className="mr-2">
+                  View only
+                </Badge>
+                Content is shared read-only. You can still organize this file in your project.
+              </div>
+            ) : null}
             <Editor
               key={`${currentDocumentId}-${editorSessionKey}`}
               ref={editorRef}

@@ -130,51 +130,71 @@ export const projectsRouter = router({
       return project
     }),
 
-  deletionPlan: protectedProcedure.input(z.object({ id: idSchema })).query(async ({ ctx, input }) => {
-    await assertProjectAccess(ctx, input.id)
-    const plan = await ctx.services.projects.getDeletionPlan(input.id)
-    if (!plan) throw new TRPCError({ code: 'NOT_FOUND', message: `Project ${input.id} not found` })
-    return plan
-  }),
+  deletionPlan: protectedProcedure
+    .input(z.object({ id: idSchema }))
+    .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.id)
+      const plan = await ctx.services.projects.getDeletionPlan(input.id)
+      if (!plan)
+        throw new TRPCError({ code: 'NOT_FOUND', message: `Project ${input.id} not found` })
+      return plan
+    }),
 
-  delete: protectedProcedure.input(z.object({
-    id: idSchema,
-    resolutions: z.array(z.discriminatedUnion('action', [
-      z.object({ documentId: idSchema, action: z.literal('delete') }),
-      z.object({ documentId: idSchema, action: z.literal('rehome'), projectId: idSchema, path: z.string().trim().min(1).max(512) }),
-    ])).default([]),
-  })).mutation(async ({ ctx, input }) => {
-    const project = await assertProjectAccess(ctx, input.id)
-    const plan = await ctx.services.projects.getDeletionPlan(input.id)
-    if (!plan) {
-      throw new TRPCError({
-        code: 'NOT_FOUND',
-        message: `Project ${input.id} not found`,
+  delete: protectedProcedure
+    .input(
+      z.object({
+        id: idSchema,
+        resolutions: z
+          .array(
+            z.discriminatedUnion('action', [
+              z.object({ documentId: idSchema, action: z.literal('delete') }),
+              z.object({
+                documentId: idSchema,
+                action: z.literal('rehome'),
+                projectId: idSchema,
+                path: z.string().trim().min(1).max(512),
+              }),
+            ])
+          )
+          .default([]),
       })
-    }
-    if (plan.homeDocuments.length > 0 && input.resolutions.length === 0) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: 'Resolve every home document before deleting this project',
+    )
+    .mutation(async ({ ctx, input }) => {
+      const project = await assertProjectAccess(ctx, input.id)
+      const plan = await ctx.services.projects.getDeletionPlan(input.id)
+      if (!plan) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Project ${input.id} not found`,
+        })
+      }
+      if (plan.homeDocuments.length > 0 && input.resolutions.length === 0) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'Resolve every home document before deleting this project',
+        })
+      }
+      const result = await ctx.services.projects.deleteWithPlan({
+        projectId: input.id,
+        targetOwnerUserId: project.ownerUserId,
+        resolutions: input.resolutions,
       })
-    }
-    const result = await ctx.services.projects.deleteWithPlan({
-      projectId: input.id,
-      targetOwnerUserId: project.ownerUserId,
-      resolutions: input.resolutions,
-    })
-    if (!result) throw new TRPCError({ code: 'BAD_REQUEST', message: 'The deletion plan is no longer valid' })
+      if (!result)
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'The deletion plan is no longer valid',
+        })
 
-    for (const document of result.deletedDocumentIds) {
-      ctx.yjsRuntime.evictLiveDocument(document)
-    }
-    projectSyncBus.publish({
-      audienceUserIds: [project.ownerUserId],
-      type: 'project.deleted',
-      projectId: input.id,
-      ownerUserId: project.ownerUserId,
-    })
+      for (const document of result.deletedDocumentIds) {
+        ctx.yjsRuntime.evictLiveDocument(document)
+      }
+      projectSyncBus.publish({
+        audienceUserIds: [project.ownerUserId],
+        type: 'project.deleted',
+        projectId: input.id,
+        ownerUserId: project.ownerUserId,
+      })
 
-    return { success: true, ...result }
-  }),
+      return { success: true, ...result }
+    }),
 })

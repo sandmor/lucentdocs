@@ -28,9 +28,7 @@ export function getBranchMeta(tree: ChatTreeSnapshot, nodeId: string): BranchMet
   }
 
   const siblingIds =
-    node.parentId === null
-      ? tree.rootChildIds
-      : (tree.nodes[node.parentId]?.childIds ?? [nodeId])
+    node.parentId === null ? tree.rootChildIds : (tree.nodes[node.parentId]?.childIds ?? [nodeId])
   const index = siblingIds.indexOf(nodeId)
 
   return {

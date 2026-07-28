@@ -2,12 +2,12 @@
 
 Monorepo for the Lucentdocs writing app.
 
-| Package | Role |
-|---------|------|
-| `apps/api` | Express + tRPC backend, Yjs, job workers |
-| `apps/web` | Vite + React frontend |
-| `packages/core` | Rust native module (`@lucentdocs/core`) — SQLite storage, embeddings prep, markdown |
-| `packages/shared` | Shared TypeScript types and config |
+| Package           | Role                                                                                |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `apps/api`        | Express + tRPC backend, Yjs, job workers                                            |
+| `apps/web`        | Vite + React frontend                                                               |
+| `packages/core`   | Rust native module (`@lucentdocs/core`) — SQLite storage, embeddings prep, markdown |
+| `packages/shared` | Shared TypeScript types and config                                                  |
 
 ## Prerequisites
 
@@ -75,9 +75,9 @@ The [Docker workflow](.github/workflows/docker.yml) builds on pull requests and 
 
 Set these repository secrets:
 
-| Secret | Value |
-|--------|-------|
-| `DOCKER_USERNAME` | Docker Hub username |
+| Secret            | Value                   |
+| ----------------- | ----------------------- |
+| `DOCKER_USERNAME` | Docker Hub username     |
 | `DOCKER_PASSWORD` | Docker Hub access token |
 
 On `master`, published tags include `latest` and `sha-<short-sha>`. Version tags (for example `v1.2.3`) also receive semver tags.

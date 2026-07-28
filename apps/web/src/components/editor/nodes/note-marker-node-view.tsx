@@ -48,9 +48,6 @@ export class NoteMarkerNodeView implements NodeView {
 }
 
 export function createNoteMarkerNodeView() {
-  return (
-    node: PMNode,
-    view: EditorView,
-    getPos: () => number | undefined
-  ): NoteMarkerNodeView => new NoteMarkerNodeView(node, view, getPos)
+  return (node: PMNode, view: EditorView, getPos: () => number | undefined): NoteMarkerNodeView =>
+    new NoteMarkerNodeView(node, view, getPos)
 }

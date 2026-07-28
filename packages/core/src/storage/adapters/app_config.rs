@@ -11,11 +11,9 @@ struct ConfigRow {
 pub async fn is_empty(engine: &StorageEngine, tx_id: Option<&str>) -> StorageResult<bool> {
   engine
     .with_conn(tx_id, async |conn| {
-      let row = sqlx::query_as::<_, (String,)>(
-        "SELECT key FROM app_config_values LIMIT 1",
-      )
-      .fetch_optional(&mut *conn)
-      .await?;
+      let row = sqlx::query_as::<_, (String,)>("SELECT key FROM app_config_values LIMIT 1")
+        .fetch_optional(&mut *conn)
+        .await?;
       Ok(row.is_none())
     })
     .await
@@ -30,13 +28,15 @@ pub async fn read_all(
       let rows = sqlx::query_as::<_, ConfigRow>("SELECT key, value FROM app_config_values")
         .fetch_all(&mut *conn)
         .await?;
-      Ok(rows
-        .into_iter()
-        .map(|row| AppConfigEntryDto {
-          key: row.key,
-          value: row.value,
-        })
-        .collect())
+      Ok(
+        rows
+          .into_iter()
+          .map(|row| AppConfigEntryDto {
+            key: row.key,
+            value: row.value,
+          })
+          .collect(),
+      )
     })
     .await
 }
@@ -66,8 +66,8 @@ pub async fn upsert_many(
           .execute(&mut *conn)
           .await?;
           Ok(())
-      })
-      .await?;
+        })
+        .await?;
     }
     Ok(())
   })

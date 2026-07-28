@@ -46,7 +46,9 @@ struct EngineInner {
 impl StorageEngine {
   pub async fn open(db_path: &str) -> StorageResult<Self> {
     if let Err(error) = vec_extension::register_extension() {
-      eprintln!("warning: failed to register sqlite-vec extension: {error}; vector search disabled");
+      eprintln!(
+        "warning: failed to register sqlite-vec extension: {error}; vector search disabled"
+      );
     }
 
     let (storage_path, temp_db) = if db_path == ":memory:" {
@@ -118,11 +120,14 @@ impl StorageEngine {
   pub async fn begin_transaction(&self) -> StorageResult<String> {
     let _queue = self.inner.tx_queue.lock().await;
     let mut conn = self.inner.pool.acquire().await?.detach();
-    sqlx::query("BEGIN IMMEDIATE")
-      .execute(&mut conn)
-      .await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut conn).await?;
     let tx_id = nanoid::nanoid!();
-    self.inner.transactions.lock().await.insert(tx_id.clone(), conn);
+    self
+      .inner
+      .transactions
+      .lock()
+      .await
+      .insert(tx_id.clone(), conn);
     Ok(tx_id)
   }
 

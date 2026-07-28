@@ -31,7 +31,11 @@ type RoleAwareYjsDocument = Y.Doc & {
  * protocol but refuses client update frames for viewers; they may still send a
  * sync step-1 (needed to receive state) and awareness updates.
  */
-function setupRoleAwareConnection(ws: WebSocket, documentId: string, role: 'owner' | 'editor' | 'viewer') {
+function setupRoleAwareConnection(
+  ws: WebSocket,
+  documentId: string,
+  role: 'owner' | 'editor' | 'viewer'
+) {
   if (role !== 'viewer') {
     setupWSConnection(ws, { url: `/api/yjs/${documentId}` } as never, { docName: documentId })
     return
@@ -51,7 +55,10 @@ function setupRoleAwareConnection(ws: WebSocket, documentId: string, role: 'owne
     if (states.size) {
       const awareness = encoding.createEncoder()
       encoding.writeVarUint(awareness, MESSAGE_AWARENESS)
-      encoding.writeVarUint8Array(awareness, awarenessProtocol.encodeAwarenessUpdate(doc.awareness, Array.from(states.keys())))
+      encoding.writeVarUint8Array(
+        awareness,
+        awarenessProtocol.encodeAwarenessUpdate(doc.awareness, Array.from(states.keys()))
+      )
       send(encoding.toUint8Array(awareness))
     }
   }
@@ -132,9 +139,10 @@ export function setupYjsWebSocket(
       host: req.headers.host ?? 'localhost',
       projectId: (() => {
         try {
-          return new URL(req.url ?? '', `http://${req.headers.host ?? 'localhost'}`).searchParams.get(
-            'projectId'
-          )
+          return new URL(
+            req.url ?? '',
+            `http://${req.headers.host ?? 'localhost'}`
+          ).searchParams.get('projectId')
         } catch {
           return null
         }
@@ -146,78 +154,80 @@ export function setupYjsWebSocket(
       transport?.pause()
 
       void (async () => {
-      try {
-        const token = readSessionTokenFromCookieHeader(request.cookie)
-        const user = options.authPort.isEnabled()
-          ? token
-            ? await options.authPort.validateSession(token)
+        try {
+          const token = readSessionTokenFromCookieHeader(request.cookie)
+          const user = options.authPort.isEnabled()
+            ? token
+              ? await options.authPort.validateSession(token)
+              : null
+            : await options.authPort.validateSession('')
+          if (!user) {
+            ws.close(1008, 'Unauthorized')
+            return
+          }
+
+          const repos = runtime.getRepos()
+          // Canonical existence is the persisted ProseMirror content, not the Yjs blob.
+          // The blob is a regenerable cache that is deleted on restore; relying on it here
+          // would reject every reconnection after a restore (regenerated only on load).
+          const [yjsData, contentRow] = await Promise.all([
+            repos.yjsDocuments.getPersisted(documentId),
+            repos.documentContent.findByDocumentId(documentId),
+          ])
+
+          if (!yjsData && !contentRow) {
+            ws.close(1008, 'Document not found')
+            return
+          }
+
+          const projectId = request.projectId
+          if (!projectId || !isValidId(projectId)) {
+            ws.close(1008, 'Invalid project')
+            return
+          }
+
+          const [project, document, isMounted] = await Promise.all([
+            options.projects.findById(projectId),
+            options.documents.findById(documentId),
+            options.projectDocuments.hasProjectDocument(projectId, documentId),
+          ])
+          const homeProject = document
+            ? await options.projects.findById(document.homeProjectId)
             : null
-          : await options.authPort.validateSession('')
-        if (!user) {
-          ws.close(1008, 'Unauthorized')
-          return
-        }
+          const documentRole = document
+            ? homeProject?.ownerUserId === user.id
+              ? 'owner'
+              : (await options.documentCollaborators.find(documentId, user.id))?.role
+            : null
+          if (!project || !isMounted || !canUserAccessProject(user, project) || !documentRole) {
+            ws.close(1008, 'Forbidden')
+            return
+          }
 
-        const repos = runtime.getRepos()
-        // Canonical existence is the persisted ProseMirror content, not the Yjs blob.
-        // The blob is a regenerable cache that is deleted on restore; relying on it here
-        // would reject every reconnection after a restore (regenerated only on load).
-        const [yjsData, contentRow] = await Promise.all([
-          repos.yjsDocuments.getPersisted(documentId),
-          repos.documentContent.findByDocumentId(documentId),
-        ])
+          await runtime.ensureDocumentLoaded(documentId)
+          setupRoleAwareConnection(ws, documentId, documentRole)
 
-        if (!yjsData && !contentRow) {
-          ws.close(1008, 'Document not found')
-          return
-        }
+          const unsubscribe = projectSyncBus.subscribe((event) => {
+            if (event.projectId !== projectId) return
+            if (event.type === 'document.access-changed' && event.documentId === documentId) {
+              ws.close()
+              return
+            }
+            if (event.type !== 'project.updated' && event.type !== 'project.deleted') return
 
-        const projectId = request.projectId
-        if (!projectId || !isValidId(projectId)) {
-          ws.close(1008, 'Invalid project')
-          return
-        }
+            if (event.type === 'project.updated' && event.audienceUserIds.includes(user.id)) {
+              return
+            }
 
-        const [project, document, isMounted] = await Promise.all([
-          options.projects.findById(projectId),
-          options.documents.findById(documentId),
-          options.projectDocuments.hasProjectDocument(projectId, documentId),
-        ])
-        const homeProject = document ? await options.projects.findById(document.homeProjectId) : null
-        const documentRole = document
-          ? homeProject?.ownerUserId === user.id
-            ? 'owner'
-            : (await options.documentCollaborators.find(documentId, user.id))?.role
-          : null
-        if (!project || !isMounted || !canUserAccessProject(user, project) || !documentRole) {
-          ws.close(1008, 'Forbidden')
-          return
-        }
-
-        await runtime.ensureDocumentLoaded(documentId)
-        setupRoleAwareConnection(ws, documentId, documentRole)
-
-        const unsubscribe = projectSyncBus.subscribe((event) => {
-          if (event.projectId !== projectId) return
-          if (event.type === 'document.access-changed' && event.documentId === documentId) {
             ws.close()
-            return
-          }
-          if (event.type !== 'project.updated' && event.type !== 'project.deleted') return
+          })
 
-          if (event.type === 'project.updated' && event.audienceUserIds.includes(user.id)) {
-            return
-          }
-
-          ws.close()
-        })
-
-        ws.once('close', unsubscribe)
-        transport?.resume()
-      } catch (error) {
-        console.error(`Failed to initialize Yjs doc ${documentId}:`, error)
-        ws.close(1011, 'Failed to initialize document')
-      }
+          ws.once('close', unsubscribe)
+          transport?.resume()
+        } catch (error) {
+          console.error(`Failed to initialize Yjs doc ${documentId}:`, error)
+          ws.close(1011, 'Failed to initialize document')
+        }
       })()
     })
   })

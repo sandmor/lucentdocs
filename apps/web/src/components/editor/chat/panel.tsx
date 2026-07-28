@@ -31,7 +31,12 @@ interface ChatPanelProps {
   className?: string
 }
 
-export function ChatPanel({ projectId, documentId, canEditDocument = false, className }: ChatPanelProps) {
+export function ChatPanel({
+  projectId,
+  documentId,
+  canEditDocument = false,
+  className,
+}: ChatPanelProps) {
   const editorSelection = useEditorStore((s) => s.editorSelection)
   const utils = trpc.useUtils()
   const [messages, setMessages] = useState<UIMessage[]>([])
@@ -426,7 +431,14 @@ export function ChatPanel({ projectId, documentId, canEditDocument = false, clas
       toast.error('Chat Error', { description: message })
       return null
     }
-  }, [canEditDocument, createThreadMutation, documentId, draftEditingEnabled, projectId, utils.chat.listByProject])
+  }, [
+    canEditDocument,
+    createThreadMutation,
+    documentId,
+    draftEditingEnabled,
+    projectId,
+    utils.chat.listByProject,
+  ])
 
   const deleteThread = useCallback(
     async (threadId: string) => {

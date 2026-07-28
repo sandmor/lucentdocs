@@ -19,7 +19,11 @@ describe('ChatRuntime message revision guard', () => {
 
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
-    await runtime.startGeneration({ ...scope, actorUserId: LOCAL_DEFAULT_USER.id, message: 'Keep this response running' })
+    await runtime.startGeneration({
+      ...scope,
+      actorUserId: LOCAL_DEFAULT_USER.id,
+      message: 'Keep this response running',
+    })
 
     await expect(runtime.updateMessageById(scope, 'missing-message', 'Changed')).rejects.toThrow(
       'Stop the current response before editing or deleting messages.'
@@ -30,9 +34,9 @@ describe('ChatRuntime message revision guard', () => {
     await expect(runtime.selectBranch(scope, 'missing-message')).rejects.toThrow(
       'Stop the current response before editing or deleting messages.'
     )
-    await expect(runtime.regenerateFromMessage(scope, 'missing-message', LOCAL_DEFAULT_USER.id)).rejects.toThrow(
-      'Stop the current response before editing or deleting messages.'
-    )
+    await expect(
+      runtime.regenerateFromMessage(scope, 'missing-message', LOCAL_DEFAULT_USER.id)
+    ).rejects.toThrow('Stop the current response before editing or deleting messages.')
 
     runtime.cancelGeneration(scope)
   })
@@ -83,9 +87,9 @@ describe('ChatRuntime continue generation', () => {
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
 
-    await expect(runtime.startGeneration({ ...scope, actorUserId: LOCAL_DEFAULT_USER.id, message: '' })).rejects.toThrow(
-      'Cannot continue an empty chat.'
-    )
+    await expect(
+      runtime.startGeneration({ ...scope, actorUserId: LOCAL_DEFAULT_USER.id, message: '' })
+    ).rejects.toThrow('Cannot continue an empty chat.')
   })
 })
 
@@ -96,14 +100,21 @@ describe('ChatRuntime generation completion', () => {
       ownerUserId: LOCAL_DEFAULT_USER.id,
     })
     const origin = await adapter.services.documents.createForProject(project.id, 'origin.md')
-    const destination = await adapter.services.documents.createForProject(project.id, 'destination.md')
+    const destination = await adapter.services.documents.createForProject(
+      project.id,
+      'destination.md'
+    )
     if (!origin || !destination) throw new Error('Expected documents')
     const thread = await adapter.services.chats.create(project.id, origin.id)
     if (!thread) throw new Error('Expected a chat thread')
 
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const originScope = { projectId: project.id, documentId: origin.id, chatId: thread.id }
-    const destinationScope = { projectId: project.id, documentId: destination.id, chatId: thread.id }
+    const destinationScope = {
+      projectId: project.id,
+      documentId: destination.id,
+      chatId: thread.id,
+    }
     const previousDelay = process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS
     process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS = '100'
 
@@ -144,7 +155,11 @@ describe('ChatRuntime generation completion', () => {
 
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
-    await runtime.startGeneration({ ...scope, actorUserId: LOCAL_DEFAULT_USER.id, message: 'Complete this response' })
+    await runtime.startGeneration({
+      ...scope,
+      actorUserId: LOCAL_DEFAULT_USER.id,
+      message: 'Complete this response',
+    })
 
     for (let attempt = 0; attempt < 50; attempt += 1) {
       if (!runtime.isGenerating(scope)) break
@@ -209,7 +224,12 @@ describe('ChatRuntime edit and generate', () => {
 
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
-    await runtime.editMessageAndGenerate(scope, appended.nodeId, 'Edited prompt', LOCAL_DEFAULT_USER.id)
+    await runtime.editMessageAndGenerate(
+      scope,
+      appended.nodeId,
+      'Edited prompt',
+      LOCAL_DEFAULT_USER.id
+    )
 
     for (let attempt = 0; attempt < 50; attempt += 1) {
       if (!runtime.isGenerating(scope)) break

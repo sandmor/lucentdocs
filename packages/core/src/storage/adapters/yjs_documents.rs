@@ -8,12 +8,10 @@ pub async fn get_persisted(
 ) -> StorageResult<Option<Vec<u8>>> {
   engine
     .with_conn(tx_id, async |conn| {
-      let row = sqlx::query_as::<_, (Vec<u8>,)>(
-        "SELECT data FROM yjs_documents WHERE name = ?",
-      )
-      .bind(document_id)
-      .fetch_optional(&mut *conn)
-      .await?;
+      let row = sqlx::query_as::<_, (Vec<u8>,)>("SELECT data FROM yjs_documents WHERE name = ?")
+        .bind(document_id)
+        .fetch_optional(&mut *conn)
+        .await?;
       Ok(row.map(|(data,)| data))
     })
     .await

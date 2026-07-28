@@ -116,7 +116,9 @@ export function createSearchTool(context: BuildReadToolsContext) {
     inputSchema: z.object({
       query: z
         .string()
-        .describe('Natural-language or descriptive phrase for semantic search (not exact substring matching).'),
+        .describe(
+          'Natural-language or descriptive phrase for semantic search (not exact substring matching).'
+        ),
       path: z
         .string()
         .optional()
@@ -130,13 +132,10 @@ export function createSearchTool(context: BuildReadToolsContext) {
       recursive: z
         .boolean()
         .optional()
-        .describe('When path is a directory, search the subtree recursively (default false = direct children only).'),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(searchToolConfig.maxResultLimit)
-        .optional(),
+        .describe(
+          'When path is a directory, search the subtree recursively (default false = direct children only).'
+        ),
+      limit: z.number().int().min(1).max(searchToolConfig.maxResultLimit).optional(),
     }),
     execute: async ({ query, path, whole_project = false, recursive = false, limit }) => {
       const normalizedQuery = normalizeValidatedSearchText(
@@ -202,7 +201,14 @@ export function createSearchTool(context: BuildReadToolsContext) {
           throw new Error(`File "${scopedPath}" is no longer available in this project.`)
         }
 
-        return searchSingleDocument(context, documentId, scopedPath, normalizedQuery, resultLimit, meta)
+        return searchSingleDocument(
+          context,
+          documentId,
+          scopedPath,
+          normalizedQuery,
+          resultLimit,
+          meta
+        )
       }
 
       let searchScope:
@@ -302,9 +308,7 @@ export function createSearchTool(context: BuildReadToolsContext) {
               : null
 
           const annotationIds =
-            loadedText && lineRange
-              ? annotationIdsInRenderedSlice(loadedText, lineRange)
-              : []
+            loadedText && lineRange ? annotationIdsInRenderedSlice(loadedText, lineRange) : []
 
           matches.push({
             path: documentPath,
@@ -392,15 +396,14 @@ async function searchSingleDocument(
     meta.summary = 'Configured indexing differs from observed embeddings; results may be stale.'
   }
 
-  const document = await context.services.documents.getForProject(context.scope.projectId, documentId)
+  const document = await context.services.documents.getForProject(
+    context.scope.projectId,
+    documentId
+  )
   const loadedText = document
-    ? await loadDocumentText(
-        context.services,
-        context.scope.projectId,
-        documentId,
-        path,
-        { includeAnnotations: true }
-      )
+    ? await loadDocumentText(context.services, context.scope.projectId, documentId, path, {
+        includeAnnotations: true,
+      })
     : null
   const matches = []
 

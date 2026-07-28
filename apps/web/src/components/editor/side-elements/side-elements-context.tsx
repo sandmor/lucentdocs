@@ -9,9 +9,7 @@ import {
   type SideElementsStore,
 } from './use-side-elements-store'
 
-function recomputeResolvedTops(
-  registry: Map<string, SideElementDescriptor>
-): Map<string, number> {
+function recomputeResolvedTops(registry: Map<string, SideElementDescriptor>): Map<string, number> {
   const byGutter = new Map<SideElementGutter, SideElementDescriptor[]>()
   for (const descriptor of registry.values()) {
     const list = byGutter.get(descriptor.gutter) ?? []
