@@ -37,6 +37,7 @@ interface NotesGutterProps {
   currentUserId: string
   justCreatedNote?: { id: string; anchorId: string } | null
   onJustCreatedNoteHandled?: () => void
+  readOnly?: boolean
 }
 
 interface MobileBlockMarkerLayout {
@@ -85,6 +86,7 @@ export function NotesGutter({
   currentUserId,
   justCreatedNote,
   onJustCreatedNoteHandled,
+  readOnly = false,
 }: NotesGutterProps) {
   const notes = useDocumentNotes(notesMap)
   const isCoarsePointer = useIsCoarsePointer()
@@ -232,7 +234,7 @@ export function NotesGutter({
   }, [view, container, isCoarsePointer, anchoredNotes, layoutEpoch])
 
   const handleDeleteNote = (note: DocumentNoteViewModel) => {
-    if (!notesMap) return
+    if (readOnly || !notesMap) return
     deleteNoteAndReconcileMarker(view, notesMap, note.id)
     setExpandedNoteIds((prev) => removeExpandedId(prev, note.id))
   }
@@ -288,6 +290,7 @@ export function NotesGutter({
                 onExpand={() => expandNote(note.id)}
                 onCollapse={() => collapseNote(note.id)}
                 onDelete={() => handleDeleteNote(note)}
+                readOnly={readOnly}
                 onMouseEnter={() => setHighlightedAnchorId(note.anchorId)}
                 onMouseLeave={() => setHighlightedAnchorId(null)}
               />
@@ -323,16 +326,16 @@ export function NotesGutter({
                       {authorLabels.getLabel(note.authorUserId)}
                     </span>
                   </div>
-                  <button
+                  {!readOnly && <button
                     type="button"
                     className="rounded p-1 text-muted-foreground hover:bg-muted"
                     aria-label="Delete note"
                     onClick={() => handleDeleteNote(note)}
                   >
                     <Trash2 className="size-3.5" />
-                  </button>
+                  </button>}
                 </div>
-                <NoteEditor body={note.body} yMap={note.yMap} />
+                <NoteEditor body={note.body} yMap={note.yMap} editable={!readOnly} />
               </div>
             ))}
           </div>
@@ -349,6 +352,7 @@ export function NotesGutter({
           projectId={projectId}
           currentUserId={currentUserId}
           onClose={() => setSheetAnchorId(null)}
+          readOnly={readOnly}
         />
       )}
     </>

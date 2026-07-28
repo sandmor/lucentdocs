@@ -64,6 +64,7 @@ export function createWriteTool(context: BuildEditToolsContext) {
       const documentId = index.files.get(normalizedPath)
 
       if (!documentId) {
+        await context.assertCanCreateDocument()
         if (index.directories.has(normalizedPath)) {
           throw new EditToolError('path_conflict', `Cannot create "${normalizedPath}" because it is a directory.`)
         }
@@ -91,6 +92,7 @@ export function createWriteTool(context: BuildEditToolsContext) {
       }
 
       context.editSession.assertPathRead(normalizedPath)
+      await context.assertCanEditDocument(documentId)
       return withDocumentLock(documentId, async () => {
         const transformed = await context.yjsRuntime.applyProsemirrorTransform(documentId, {
           origin: 'chat-write', clearNotes: overwrite,

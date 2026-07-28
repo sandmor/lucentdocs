@@ -18,10 +18,18 @@ describe('QdrantDocumentEmbeddingsRepository', () => {
     const engine = await openRustStorage(':memory:')
 
     try {
+      await engine.projectsInsert(null, {
+        id: 'project_1',
+        title: 'Fixture project',
+        ownerUserId: 'user_1',
+        createdAt: 1,
+        updatedAt: 1,
+      })
       await engine.documentsInsert(null, {
         id: 'doc_1',
         title: 'docs/a.md',
         type: 'manuscript',
+        homeProjectId: 'project_1',
         createdAt: 1,
         updatedAt: 1,
       })

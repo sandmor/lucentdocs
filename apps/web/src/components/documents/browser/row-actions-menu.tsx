@@ -4,6 +4,7 @@ import {
   Download,
   MoreHorizontal,
   Pencil,
+  Share2,
   Settings2,
   Trash2,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ interface RowActionsMenuProps {
   onDeleteDocument: (documentId: string) => void
   onExportDocument: (documentId: string) => void
   onCopyDocumentAsMarkdown: (documentId: string) => void
+  onShareDocument: (documentId: string) => void
   onRenameDirectory: (path: string) => void
   onMoveDirectory: (path: string) => void
   onDeleteDirectory: (path: string) => void
@@ -37,6 +39,7 @@ export function RowActionsMenu({
   onDeleteDocument,
   onExportDocument,
   onCopyDocumentAsMarkdown,
+  onShareDocument,
   onRenameDirectory,
   onMoveDirectory,
   onDeleteDirectory,
@@ -78,6 +81,10 @@ export function RowActionsMenu({
             <DropdownMenuItem onClick={() => onCopyDocumentAsMarkdown(item.id)}>
               <ClipboardCopy className="size-4" />
               Copy as MD
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onShareDocument(item.id)}>
+              <Share2 className="size-4" />
+              Share
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={() => onDeleteDocument(item.id)}>
               <Trash2 className="size-4" />

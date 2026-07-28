@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import {
   isValidId,
   type Document,
+  type ProjectDocument,
   type JsonObject,
   createDefaultContent,
   parseContent,
@@ -44,6 +45,14 @@ export interface DocumentWithContent extends Document {
   content: string
 }
 
+export interface ProjectDocumentWithContent extends DocumentWithContent {
+  projectId: string
+  path: string
+  addedByUserId: string
+  addedAt: number
+  updatedAt: number
+}
+
 export interface VersionSnapshot {
   id: string
   documentId: string
@@ -60,6 +69,7 @@ export interface ProjectDocumentSearchSnippet {
 export interface ProjectDocumentSearchResult {
   id: string
   title: string
+  path: string
   type: string
   metadata: JsonObject | null
   createdAt: number
@@ -106,7 +116,7 @@ export interface DocumentsService {
   getContent(id: string): Promise<string>
   getWithContentByIds(documentIds: string[]): Promise<Map<string, DocumentWithContent>>
   listAllIds(): Promise<string[]>
-  listForProject(projectId: string): Promise<Document[]>
+  listForProject(projectId: string): Promise<ProjectDocument[]>
   searchForProject(
     projectId: string,
     query: string,
@@ -124,13 +134,12 @@ export interface DocumentsService {
   ): Promise<ProjectDocumentSemanticSearchMatch[]>
   hasProjectAssociation(projectId: string, documentId: string): Promise<boolean>
 
-  create(title: string, content?: string, type?: string): Promise<DocumentWithContent>
   createForProject(
     projectId: string,
     title: string,
     content?: string,
     type?: string
-  ): Promise<DocumentWithContent | null>
+  ): Promise<ProjectDocumentWithContent | null>
   update(
     id: string,
     data: { title?: string; metadata?: JsonObject | null }
@@ -138,23 +147,23 @@ export interface DocumentsService {
   updateForProject(
     projectId: string,
     documentId: string,
-    data: { title?: string; metadata?: JsonObject | null }
-  ): Promise<DocumentWithContent | null>
+    data: { metadata?: JsonObject | null }
+  ): Promise<ProjectDocumentWithContent | null>
   delete(id: string): Promise<boolean>
-  deleteForProject(projectId: string, documentId: string): Promise<boolean>
+  removeFromProject(projectId: string, documentId: string): Promise<'deleted' | 'unmounted' | null>
 
   getDefaultDocumentIdForProject(projectId: string): Promise<string | null>
   setDefaultForProject(projectId: string, documentId: string): Promise<boolean>
   // Resolves or creates the default document without loading document content.
   // Useful for write-heavy flows where only the selected default ID is needed.
   openOrCreateDefaultIdForProject(projectId: string): Promise<string | null>
-  openOrCreateDefaultForProject(projectId: string): Promise<DocumentWithContent | null>
+  openOrCreateDefaultForProject(projectId: string): Promise<ProjectDocumentWithContent | null>
 
   moveForProject(
     projectId: string,
     documentId: string,
     destinationPath: string
-  ): Promise<DocumentWithContent | null>
+  ): Promise<ProjectDocumentWithContent | null>
   moveDirectoryForProject(
     projectId: string,
     sourcePath: string,
@@ -163,13 +172,13 @@ export interface DocumentsService {
   createDirectoryForProject(
     projectId: string,
     directoryPath: string
-  ): Promise<DocumentWithContent | null>
+  ): Promise<ProjectDocumentWithContent | null>
   deleteDirectoryForProject(
     projectId: string,
     directoryPath: string
-  ): Promise<{ deletedDocumentIds: string[] } | null>
+  ): Promise<{ deletedDocumentIds: string[]; unmountedDocumentIds: string[] } | null>
 
-  getForProject(projectId: string, documentId: string): Promise<DocumentWithContent | null>
+  getForProject(projectId: string, documentId: string): Promise<ProjectDocumentWithContent | null>
 
   importForProject(
     projectId: string,
@@ -202,8 +211,8 @@ export interface DocumentContentObserver {
   ): Promise<void> | void
 }
 
-function listVisibleDocuments(docs: Document[]): Document[] {
-  return docs.filter((doc) => !isDirectorySentinelPath(normalizeDocumentPath(doc.title)))
+function listVisibleDocuments<T extends { path: string }>(docs: T[]): T[] {
+  return docs.filter((doc) => !isDirectorySentinelPath(normalizeDocumentPath(doc.path)))
 }
 
 function getDefaultDocumentIdFromMetadata(metadata: JsonObject | null): string | null {
@@ -264,41 +273,28 @@ function resolveUniqueImportPath(requestedPath: string, existingPaths: string[])
   throw new Error('Unable to allocate a unique import path')
 }
 
-async function isSoleDocumentForProject(
-  repos: RepositorySet,
-  projectId: string,
-  documentId: string
-): Promise<boolean> {
-  const soleProjectId = await repos.projectDocuments.findSoleProjectIdByDocumentId(documentId)
-  return soleProjectId === projectId
-}
-
 async function getProjectScopedDocument(
   repos: RepositorySet,
   projectId: string,
   documentId: string
-): Promise<Document | null> {
+): Promise<ProjectDocument | null> {
   if (!isValidId(projectId) || !isValidId(documentId)) return null
-  if (!(await isSoleDocumentForProject(repos, projectId, documentId))) return null
+  const mount = (await repos.projectDocuments.listByProject(projectId)).find(
+    (candidate) => candidate.documentId === documentId
+  )
+  if (!mount) return null
 
   const doc = await repos.documents.findById(documentId)
-  if (!doc) return null
-  if (isDirectorySentinelPath(doc.title)) return null
-  return doc
+  if (!doc || isDirectorySentinelPath(mount.path)) return null
+  return { ...doc, ...mount }
 }
 
 async function getAssociatedProjectDocument(
   repos: RepositorySet,
   projectId: string,
   documentId: string
-): Promise<Document | null> {
-  if (!isValidId(projectId) || !isValidId(documentId)) return null
-  if (!(await repos.projectDocuments.hasProjectDocument(projectId, documentId))) return null
-
-  const doc = await repos.documents.findById(documentId)
-  if (!doc) return null
-  if (isDirectorySentinelPath(normalizeDocumentPath(doc.title))) return null
-  return doc
+): Promise<ProjectDocument | null> {
+  return getProjectScopedDocument(repos, projectId, documentId)
 }
 
 /**
@@ -354,19 +350,22 @@ function aggregateProjectSearchMatches(
   matches: ProjectDocumentEmbeddingSearchMatch[],
   query: string,
   maxSnippetsPerDocument: number,
-  documentById: Map<string, Document>
+  documentById: Map<string, Document>,
+  pathByDocumentId: Map<string, string>
 ): ProjectDocumentSearchResult[] {
   const resultsByDocumentId = new Map<string, ProjectDocumentSearchResult>()
 
   for (const match of matches) {
     const document = documentById.get(match.documentId)
-    if (!document) continue
+    const path = pathByDocumentId.get(match.documentId)
+    if (!document || !path) continue
 
     let result = resultsByDocumentId.get(match.documentId)
     if (!result) {
       result = {
         id: document.id,
         title: document.title,
+        path,
         type: document.type,
         metadata: document.metadata,
         createdAt: document.createdAt,
@@ -506,6 +505,7 @@ export function createDocumentsService(
 
   const createDocument = async (
     title: string,
+    homeProjectId: string,
     content?: string,
     type: string = 'manuscript',
     options: { notifyObserver?: boolean } = {}
@@ -521,7 +521,8 @@ export function createDocumentsService(
 
     const doc: Document = {
       id,
-      title,
+      title: normalizeDocumentPath(title).split('/').at(-1) || title,
+      homeProjectId,
       type,
       metadata: {
         wordCount: counters.wordCount,
@@ -551,33 +552,17 @@ export function createDocumentsService(
     return { ...doc, content: docContent }
   }
 
-  const listDocumentsForProject = async (projectId: string): Promise<Document[]> => {
+  const listDocumentsForProject = async (projectId: string): Promise<ProjectDocument[]> => {
     if (!isValidId(projectId)) return []
-    const ids = await repos.projectDocuments.findSoleDocumentIdsByProjectId(projectId)
+    const mounts = await repos.projectDocuments.listByProject(projectId)
+    const ids = mounts.map((mount) => mount.documentId)
     if (ids.length === 0) return []
     const docs = await repos.documents.findByIds(ids)
     const byId = new Map(docs.map((d: Document) => [d.id, d]))
-    return ids.flatMap((id: string) => {
+    return mounts.flatMap((mount) => {
+      const id = mount.documentId
       const doc = byId.get(id)
-      return doc ? [doc] : []
-    })
-  }
-
-  const listAssociatedDocumentsForProject = async (projectId: string): Promise<Document[]> => {
-    if (!isValidId(projectId)) return []
-    const allDocumentIds = await repos.projectDocuments.listDocumentIds()
-    const associatedIds = await repos.projectDocuments.findAssociatedDocumentIds(
-      projectId,
-      allDocumentIds
-    )
-    if (associatedIds.size === 0) return []
-
-    const ids = Array.from(associatedIds)
-    const docs = await repos.documents.findByIds(ids)
-    const byId = new Map(docs.map((d: Document) => [d.id, d]))
-    return ids.flatMap((id: string) => {
-      const doc = byId.get(id)
-      return doc ? [doc] : []
+      return doc ? [{ ...doc, ...mount }] : []
     })
   }
 
@@ -680,7 +665,7 @@ export function createDocumentsService(
       }
       if (!aiSettingsService || !embeddingModelSelectionService) return []
 
-      const projectDocuments = await listAssociatedDocumentsForProject(projectId)
+      const projectDocuments = await listDocumentsForProject(projectId)
       const resolvedByDocumentId = await embeddingModelSelectionService.resolveForProjectDocuments(
         projectId,
         projectDocuments.map((document) => document.id)
@@ -735,11 +720,13 @@ export function createDocumentsService(
         const documents = await repos.documents.findByIds(
           Array.from(new Set(matches.map((match) => match.documentId)))
         )
+        const pathsByDocumentId = new Map(projectDocuments.map((document) => [document.id, document.path]))
         bestResults = aggregateProjectSearchMatches(
           matches,
           normalizedQuery,
           maxSnippetsPerDocument,
-          new Map(documents.map((document) => [document.id, document]))
+          new Map(documents.map((document) => [document.id, document])),
+          pathsByDocumentId
         ).slice(0, limit)
 
         if (bestResults.length >= limit || matches.length < candidateLimit) {
@@ -808,14 +795,12 @@ export function createDocumentsService(
       return repos.projectDocuments.hasProjectDocument(projectId, documentId)
     },
 
-    create: createDocument,
-
     async createForProject(
       projectId: string,
       title: string,
       content?: string,
       type: string = 'manuscript'
-    ): Promise<DocumentWithContent | null> {
+    ): Promise<ProjectDocumentWithContent | null> {
       if (!isValidId(projectId)) return null
       const normalizedTitle = normalizeDocumentPath(title)
       if (!normalizedTitle) return null
@@ -831,18 +816,29 @@ export function createDocumentsService(
         if (!project) return null
 
         const docs = await listDocumentsForProject(projectId)
-        const finalPaths = docs.map((d) => normalizeDocumentPath(d.title)).concat(normalizedTitle)
+        const finalPaths = docs.map((d) => normalizeDocumentPath(d.path)).concat(normalizedTitle)
         if (hasPathCollision(finalPaths) || hasAncestorFileConflict(finalPaths)) {
           return null
         }
 
-        const doc = await createDocument(normalizedTitle, content, type)
+        const doc = await createDocument(normalizedTitle, project.id, content, type)
         await repos.projectDocuments.insert({
           projectId,
           documentId: doc.id,
+          path: normalizedTitle,
+          addedByUserId: project.ownerUserId,
           addedAt: Date.now(),
+          updatedAt: Date.now(),
         })
-        return doc
+        return {
+          ...doc,
+          projectId,
+          path: normalizedTitle,
+          addedByUserId: project.ownerUserId,
+          addedAt: doc.createdAt,
+          updatedAt: doc.updatedAt,
+          content: doc.content,
+        }
       })
     },
 
@@ -881,30 +877,18 @@ export function createDocumentsService(
     async updateForProject(
       projectId: string,
       documentId: string,
-      data: { title?: string; metadata?: JsonObject | null }
-    ): Promise<DocumentWithContent | null> {
+      data: { metadata?: JsonObject | null }
+    ): Promise<ProjectDocumentWithContent | null> {
       const existing = await getProjectScopedDocument(repos, projectId, documentId)
       if (!existing) return null
-
-      if (data.title === undefined) {
-        return this.update(documentId, data)
-      }
-
-      const normalizedTitle = normalizeDocumentPath(data.title)
-      if (!normalizedTitle) return null
-      if (isDirectorySentinelPath(normalizedTitle)) return null
-      if (pathHasSentinelSegment(normalizedTitle)) return null
-
-      const docs = await listDocumentsForProject(projectId)
-      const finalPaths = docs.map((d) => {
-        if (d.id === documentId) return normalizedTitle
-        return normalizeDocumentPath(d.title)
-      })
-      if (hasPathCollision(finalPaths) || hasAncestorFileConflict(finalPaths)) {
-        return null
-      }
-
-      return this.update(documentId, { ...data, title: normalizedTitle })
+      const updated = data.metadata === undefined
+        ? await getDocumentWithContent(documentId)
+        : await this.update(documentId, { metadata: data.metadata })
+      if (!updated) return null
+      const mount = (await repos.projectDocuments.listByProject(projectId)).find(
+        (candidate) => candidate.documentId === documentId
+      )
+      return mount ? { ...updated, ...mount } : null
     },
 
     async delete(id: string): Promise<boolean> {
@@ -921,14 +905,18 @@ export function createDocumentsService(
         return capturedReferences
       })
 
-      dispatchDocumentsDeleted([id], references)
+      transaction.afterCommit(() => dispatchDocumentsDeleted([id], references))
 
       return true
     },
 
-    async deleteForProject(projectId: string, documentId: string): Promise<boolean> {
-      if (!(await getProjectScopedDocument(repos, projectId, documentId))) return false
-      return this.delete(documentId)
+    async removeFromProject(projectId: string, documentId: string): Promise<'deleted' | 'unmounted' | null> {
+      const document = await getProjectScopedDocument(repos, projectId, documentId)
+      if (!document) return null
+      if (document.homeProjectId === projectId) {
+        return (await this.delete(documentId)) ? 'deleted' : null
+      }
+      return (await repos.projectDocuments.delete(projectId, documentId)) ? 'unmounted' : null
     },
 
     async getDefaultDocumentIdForProject(projectId: string): Promise<string | null> {
@@ -978,7 +966,7 @@ export function createDocumentsService(
           return fallback.id
         }
 
-        const existingPaths = docs.map((d) => normalizeDocumentPath(d.title))
+        const existingPaths = docs.map((d) => normalizeDocumentPath(d.path))
         const title = nextDefaultDocumentPath(existingPaths)
         const created = await this.createForProject(projectId, title)
         if (!created) return null
@@ -987,17 +975,17 @@ export function createDocumentsService(
       })
     },
 
-    async openOrCreateDefaultForProject(projectId: string): Promise<DocumentWithContent | null> {
+    async openOrCreateDefaultForProject(projectId: string): Promise<ProjectDocumentWithContent | null> {
       const defaultDocumentId = await this.openOrCreateDefaultIdForProject(projectId)
       if (!defaultDocumentId) return null
-      return getDocumentWithContent(defaultDocumentId)
+      return this.getForProject(projectId, defaultDocumentId)
     },
 
     async moveForProject(
       projectId: string,
       documentId: string,
       destinationPath: string
-    ): Promise<DocumentWithContent | null> {
+    ): Promise<ProjectDocumentWithContent | null> {
       const sourceDoc = await getProjectScopedDocument(repos, projectId, documentId)
       if (!sourceDoc) return null
 
@@ -1006,22 +994,31 @@ export function createDocumentsService(
       if (isDirectorySentinelPath(normalizedDestinationPath)) return null
       if (pathHasSentinelSegment(normalizedDestinationPath)) return null
 
-      const normalizedSourcePath = normalizeDocumentPath(sourceDoc.title)
-      if (normalizedSourcePath === normalizedDestinationPath) {
-        return getDocumentWithContent(documentId)
-      }
+      const normalizedSourcePath = normalizeDocumentPath(sourceDoc.path)
+      if (normalizedSourcePath === normalizedDestinationPath) return this.getForProject(projectId, documentId)
 
       const docs = await listDocumentsForProject(projectId)
       const finalPaths = docs.map((d) => {
         if (d.id === documentId) return normalizedDestinationPath
-        return normalizeDocumentPath(d.title)
+        return normalizeDocumentPath(d.path)
       })
 
       if (hasPathCollision(finalPaths) || hasAncestorFileConflict(finalPaths)) {
         return null
       }
 
-      return this.update(documentId, { title: normalizedDestinationPath })
+      const moved = await repos.projectDocuments.updatePath(
+        projectId,
+        documentId,
+        normalizedDestinationPath,
+        Date.now()
+      )
+      if (!moved) return null
+      const updated = await getDocumentWithContent(documentId)
+      const mount = (await repos.projectDocuments.listByProject(projectId)).find(
+        (candidate) => candidate.documentId === documentId
+      )
+      return updated && mount ? { ...updated, ...mount } : null
     },
 
     async moveDirectoryForProject(
@@ -1047,7 +1044,7 @@ export function createDocumentsService(
 
       const docs = await listDocumentsForProject(projectId)
       const hasSourceDirectory = docs.some((d) => {
-        const normalizedTitle = normalizeDocumentPath(d.title)
+        const normalizedTitle = normalizeDocumentPath(d.path)
         if (isDirectorySentinelPath(normalizedTitle)) {
           const directory = directoryPathFromSentinel(normalizedTitle)
           return directory === normalizedSourcePath
@@ -1061,7 +1058,7 @@ export function createDocumentsService(
       const movedDocumentIds: string[] = []
 
       for (const doc of docs) {
-        const normalizedTitle = normalizeDocumentPath(doc.title)
+        const normalizedTitle = normalizeDocumentPath(doc.path)
 
         if (isDirectorySentinelPath(normalizedTitle)) {
           const directoryPath = directoryPathFromSentinel(normalizedTitle)
@@ -1095,7 +1092,7 @@ export function createDocumentsService(
 
       if (updates.size === 0) return null
 
-      const finalPaths = docs.map((d) => updates.get(d.id) ?? normalizeDocumentPath(d.title))
+      const finalPaths = docs.map((d) => updates.get(d.id) ?? normalizeDocumentPath(d.path))
       if (hasPathCollision(finalPaths) || hasAncestorFileConflict(finalPaths)) {
         return null
       }
@@ -1103,7 +1100,7 @@ export function createDocumentsService(
       const updatedAt = Date.now()
       await transaction.run(async () => {
         for (const [docId, title] of updates) {
-          await repos.documents.update(docId, { title, updatedAt })
+          await repos.projectDocuments.updatePath(projectId, docId, title, updatedAt)
         }
       })
 
@@ -1113,7 +1110,7 @@ export function createDocumentsService(
     async createDirectoryForProject(
       projectId: string,
       directoryPath: string
-    ): Promise<DocumentWithContent | null> {
+    ): Promise<ProjectDocumentWithContent | null> {
       if (!isValidId(projectId)) return null
 
       const normalizedDirectory = normalizeDocumentPath(directoryPath)
@@ -1124,10 +1121,10 @@ export function createDocumentsService(
       const docs = await listDocumentsForProject(projectId)
 
       const existingSentinel = docs.find(
-        (d) => normalizeDocumentPath(d.title) === sentinelPath && isDirectorySentinelPath(d.title)
+        (d) => normalizeDocumentPath(d.path) === sentinelPath && isDirectorySentinelPath(d.path)
       )
       if (existingSentinel) {
-        return getDocumentWithContent(existingSentinel.id)
+        return this.getForProject(projectId, existingSentinel.id)
       }
 
       return this.createForProject(projectId, sentinelPath, undefined, 'directory-sentinel')
@@ -1136,7 +1133,7 @@ export function createDocumentsService(
     async deleteDirectoryForProject(
       projectId: string,
       directoryPath: string
-    ): Promise<{ deletedDocumentIds: string[] } | null> {
+    ): Promise<{ deletedDocumentIds: string[]; unmountedDocumentIds: string[] } | null> {
       if (!isValidId(projectId)) return null
 
       const normalizedDirectory = normalizeDocumentPath(directoryPath)
@@ -1145,7 +1142,7 @@ export function createDocumentsService(
 
       const docs = await listDocumentsForProject(projectId)
       const docsToDelete = docs.filter((d) => {
-        const normalizedTitle = normalizeDocumentPath(d.title)
+        const normalizedTitle = normalizeDocumentPath(d.path)
         if (isDirectorySentinelPath(normalizedTitle)) {
           const sentinelDirectory = directoryPathFromSentinel(normalizedTitle)
           if (!sentinelDirectory) return false
@@ -1156,30 +1153,34 @@ export function createDocumentsService(
 
       if (docsToDelete.length === 0) return null
 
-      const deletedDocumentIds = docsToDelete.map((doc) => doc.id)
+      const deletedDocumentIds: string[] = []
+      const unmountedDocumentIds: string[] = []
 
-      const references = await transaction.run(async () => {
-        const capturedReferences =
-          await repos.documentEmbeddings.listVectorReferencesByDocumentIds(deletedDocumentIds)
+      await transaction.run(async () => {
         for (const doc of docsToDelete) {
-          await repos.documents.deleteById(doc.id)
-          await repos.yjsDocuments.delete(doc.id)
+          if (doc.homeProjectId === projectId) {
+            const references = await repos.documentEmbeddings.listVectorReferencesByDocumentIds([doc.id])
+            await repos.documents.deleteById(doc.id)
+            await repos.yjsDocuments.delete(doc.id)
+            transaction.afterCommit(() => dispatchDocumentsDeleted([doc.id], references))
+            deletedDocumentIds.push(doc.id)
+          } else if (await repos.projectDocuments.delete(projectId, doc.id)) {
+            unmountedDocumentIds.push(doc.id)
+          }
         }
-        return capturedReferences
       })
 
-      dispatchDocumentsDeleted(deletedDocumentIds, references)
-
-      return { deletedDocumentIds }
+      return { deletedDocumentIds, unmountedDocumentIds }
     },
 
     getForProject: async (
       projectId: string,
       documentId: string
-    ): Promise<DocumentWithContent | null> => {
+    ): Promise<ProjectDocumentWithContent | null> => {
       const doc = await getAssociatedProjectDocument(repos, projectId, documentId)
       if (!doc) return null
-      return getDocumentWithContent(documentId)
+      const loaded = await getDocumentWithContent(documentId)
+      return loaded ? { ...loaded, ...doc } : null
     },
 
     async importForProject(
@@ -1215,18 +1216,21 @@ export function createDocumentsService(
         }
 
         const docs = await listDocumentsForProject(projectId)
-        const existingPaths = docs.map((d) => normalizeDocumentPath(d.title))
+        const existingPaths = docs.map((d) => normalizeDocumentPath(d.path))
         const uniquePath = resolveUniqueImportPath(normalizedTitle, existingPaths)
         const content = JSON.stringify({ doc: parseResult.value, aiDraft: null })
 
-        const doc = await createDocument(uniquePath, content)
+        const doc = await createDocument(uniquePath, project.id, content, 'manuscript')
         await repos.projectDocuments.insert({
           projectId,
           documentId: doc.id,
+          path: uniquePath,
+          addedByUserId: project.ownerUserId,
           addedAt: Date.now(),
+          updatedAt: Date.now(),
         })
 
-        return { ok: true, doc } as const
+        return { ok: true, doc: { ...doc, title: uniquePath } } as const
       })
     },
 

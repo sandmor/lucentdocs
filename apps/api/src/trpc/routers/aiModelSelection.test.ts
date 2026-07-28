@@ -93,7 +93,10 @@ describe('aiModelSelectionRouter', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: document.id,
+      path: document.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
     const caller = aiModelSelectionRouter.createCaller(

@@ -1,6 +1,8 @@
 export type DocumentItem = {
   id: string
   title: string
+  path: string
+  homeProjectId: string
   metadata: Record<string, unknown> | null
   createdAt: number
   updatedAt: number
@@ -8,7 +10,7 @@ export type DocumentItem = {
 
 export type DocumentSearchResultItem = {
   id: string
-  title: string
+  path: string
   createdAt: number
   updatedAt: number
   score: number

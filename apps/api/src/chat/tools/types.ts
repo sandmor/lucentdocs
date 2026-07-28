@@ -16,6 +16,8 @@ export interface BuildReadToolsContext {
 export interface BuildEditToolsContext extends BuildReadToolsContext {
   yjsRuntime: YjsRuntime
   editSession: DocumentEditSession
+  assertCanEditDocument(documentId: string): Promise<void>
+  assertCanCreateDocument(): Promise<void>
 }
 
 export const DEFAULT_READ_LINE_LIMIT = 2000

@@ -19,6 +19,7 @@ interface DocumentListProps {
   onDeleteDocument: (documentId: string) => void
   onExportDocument: (documentId: string) => void
   onCopyDocumentAsMarkdown: (documentId: string) => void
+  onShareDocument: (documentId: string) => void
   onRenameDirectory: (path: string) => void
   onMoveDirectory: (path: string) => void
   onDeleteDirectory: (path: string) => void
@@ -37,6 +38,7 @@ export function DocumentList({
   onDeleteDocument,
   onExportDocument,
   onCopyDocumentAsMarkdown,
+  onShareDocument,
   onRenameDirectory,
   onMoveDirectory,
   onDeleteDirectory,
@@ -92,6 +94,7 @@ export function DocumentList({
             onDeleteDocument={onDeleteDocument}
             onExportDocument={onExportDocument}
             onCopyDocumentAsMarkdown={onCopyDocumentAsMarkdown}
+            onShareDocument={onShareDocument}
             onRenameDirectory={onRenameDirectory}
             onMoveDirectory={onMoveDirectory}
             onDeleteDirectory={onDeleteDirectory}

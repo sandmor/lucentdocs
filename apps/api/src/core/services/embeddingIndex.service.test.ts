@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { createTestAdapter } from '../../testing/factory.js'
+import { createTestAdapter, type TestAdapter } from '../../testing/factory.js'
 import { configureEmbeddingProvider, resetEmbeddingClient } from '../../embeddings/provider.js'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -19,6 +19,20 @@ function jsonResponse(payload: unknown, status = 200): Response {
       'content-type': 'application/json',
     },
   })
+}
+
+async function createProjectDocument(
+  adapter: TestAdapter,
+  title: string,
+  content?: string,
+  type?: string
+) {
+  const project = await adapter.services.projects.create(`Fixture for ${title}`, {
+    ownerUserId: 'embedding-test-user',
+  })
+  const document = await adapter.services.documents.createForProject(project.id, title, content, type)
+  if (!document) throw new Error(`Expected fixture document ${title} to be created.`)
+  return document
 }
 
 describe('EmbeddingIndexService', () => {
@@ -79,7 +93,7 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await adapter.services.documents.create(
+    const doc = await createProjectDocument(adapter,
       'notes.md',
       JSON.stringify({
         doc: {
@@ -126,7 +140,7 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await adapter.services.documents.create(
+    const doc = await createProjectDocument(adapter,
       'batch.md',
       JSON.stringify({
         doc: {
@@ -191,7 +205,7 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await adapter.services.documents.create(
+    const doc = await createProjectDocument(adapter,
       'stale.md',
       JSON.stringify({
         doc: {
@@ -294,7 +308,7 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await adapter.services.documents.create(
+    const doc = await createProjectDocument(adapter,
       'windowed.md',
       JSON.stringify({
         doc: {
@@ -356,15 +370,17 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await adapter.services.documents.create(
-      '',
-      JSON.stringify({
-        doc: {
-          type: 'doc',
-          content: [{ type: 'paragraph' }],
-        },
-        aiDraft: null,
-      })
+    const doc = await createProjectDocument(adapter,
+      'empty.md',
+      JSON.stringify({ type: 'doc', content: [{ type: 'paragraph' }] })
+    )
+    // The embedding projection includes the canonical label. Keep the project
+    // path valid while making this a genuinely content-and-label-empty fixture.
+    await adapter.repositories.documents.update(doc.id, { title: '', updatedAt: Date.now() })
+    await adapter.repositories.documentContent.upsert(
+      doc.id,
+      { type: 'doc', content: [{ type: 'paragraph' }] },
+      Date.now()
     )
 
     await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([doc.id])
@@ -427,7 +443,7 @@ describe('EmbeddingIndexService', () => {
     cleanupDir = resolve(dbPath, '..')
     const adapter = createTestAdapter({ dbPath })
 
-    const doc = await adapter.services.documents.create('race.md')
+    const doc = await createProjectDocument(adapter, 'race.md')
 
     const newer = await adapter.repositories.documentEmbeddings.replaceEmbeddings({
       documentId: doc.id,
@@ -489,7 +505,7 @@ describe('EmbeddingIndexService', () => {
     cleanupDir = resolve(dbPath, '..')
     const adapter = createTestAdapter({ dbPath })
 
-    const doc = await adapter.services.documents.create('scope.md')
+    const doc = await createProjectDocument(adapter, 'scope.md')
 
     const firstWrite = await adapter.repositories.documentEmbeddings.replaceEmbeddings({
       documentId: doc.id,
@@ -583,7 +599,7 @@ describe('EmbeddingIndexService', () => {
       throw new Error(`Unexpected fetch ${url}`)
     }) as typeof fetch
 
-    const doc = await adapter.services.documents.create(
+    const doc = await createProjectDocument(adapter,
       'notes.md',
       JSON.stringify({
         doc: {
@@ -625,7 +641,7 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await adapter.services.documents.create('delete-queued.md')
+    const doc = await createProjectDocument(adapter, 'delete-queued.md')
     await adapter.services.embeddingIndex.enqueueDocument(doc.id, { queuedAt: 1000, debounceMs: 0 })
 
     const queuedBefore = await adapter.repositories.embeddingIndexQueue.getQueuedDocument(doc.id)
@@ -653,7 +669,7 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const doc = await adapter.services.documents.create(
+    const doc = await createProjectDocument(adapter,
       'delete-during-flush.md',
       JSON.stringify({
         doc: {
@@ -709,7 +725,7 @@ describe('EmbeddingIndexService', () => {
     })
     configureEmbeddingProvider(adapter.services.aiSettings)
 
-    const docA = await adapter.services.documents.create(
+    const docA = await createProjectDocument(adapter,
       'target-a.md',
       JSON.stringify({
         doc: {
@@ -719,7 +735,7 @@ describe('EmbeddingIndexService', () => {
         aiDraft: null,
       })
     )
-    const docB = await adapter.services.documents.create(
+    const docB = await createProjectDocument(adapter,
       'target-b.md',
       JSON.stringify({
         doc: {
@@ -829,7 +845,10 @@ describe('EmbeddingIndexService', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: doc.id,
+      path: doc.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
     await adapter.services.embeddingModelSelection.updateProjectStrategy(projectA.id, secondary.id)
 

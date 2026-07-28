@@ -8,13 +8,13 @@ use tokio::runtime::Runtime;
 use crate::import::MassImportRequest;
 use crate::storage::adapters::{
   ai_model_selection, ai_settings, app_config, assistant, auth_data, document_content,
-  document_embedding_metadata, document_embeddings, document_notes, documents,
+  document_collaborators, document_embedding_metadata, document_embeddings, document_notes, documents,
   indexing_settings, job_queue, persist_bundle, project_documents, projects,
   version_snapshots, yjs_documents,
 };
 use crate::storage::dto::{
   AiApiKeyDto, AiModelSelectionDto, AiProviderConfigDto, AppConfigEntryDto, AuthInvitationDto,
-  AssistantMessageDto, AssistantPreferenceSettingDto, AssistantThreadDto, AuthSessionDto, AuthUserDto, CompleteLeasedJobInputDto, DocumentContentDto,
+  AssistantMessageDto, AssistantPreferenceSettingDto, AssistantThreadDto, AuthSessionDto, AuthUserDto, CompleteLeasedJobInputDto, DocumentCollaboratorDto, DocumentContentDto, DocumentShareInvitationDto,
   DocumentDto, DocumentEmbeddingDto, DocumentNoteDto, DocumentVectorPayloadContextDto,
   EmbeddingSearchMatchDto, EmbeddingSearchMetadataDto, EmbeddingVectorReferenceDto,
   EnqueueJobInputDto, FailLeasedJobInputDto, IndexingSettingsDto, JobQueueTypeStatsDto,
@@ -1089,6 +1089,30 @@ impl NativeStorageEngine {
       .map_err(to_napi_err)
   }
   #[napi]
+  pub async fn project_documents_list_by_project(
+    &self, tx_id: Option<String>, project_id: String,
+  ) -> Result<Vec<ProjectDocumentDto>> {
+    project_documents::list_by_project(&self.engine, tx_id.as_deref(), &project_id).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn project_documents_list_by_document(
+    &self, tx_id: Option<String>, document_id: String,
+  ) -> Result<Vec<ProjectDocumentDto>> {
+    project_documents::list_by_document(&self.engine, tx_id.as_deref(), &document_id).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn project_documents_update_path(
+    &self, tx_id: Option<String>, project_id: String, document_id: String, path: String, updated_at: i64,
+  ) -> Result<bool> {
+    project_documents::update_path(&self.engine, tx_id.as_deref(), &project_id, &document_id, &path, updated_at).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn project_documents_delete(
+    &self, tx_id: Option<String>, project_id: String, document_id: String,
+  ) -> Result<bool> {
+    project_documents::delete(&self.engine, tx_id.as_deref(), &project_id, &document_id).await.map_err(to_napi_err)
+  }
+  #[napi]
   pub async fn project_documents_find_associated_document_ids(
     &self,
     tx_id: Option<String>,
@@ -1147,6 +1171,60 @@ impl NativeStorageEngine {
     project_documents::find_sole_project_ids_by_document_ids(&self.engine, tx_id.as_deref(), &document_ids)
       .await
       .map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_collaborators_list_for_document(
+    &self, tx_id: Option<String>, document_id: String,
+  ) -> Result<Vec<DocumentCollaboratorDto>> {
+    document_collaborators::list_for_document(&self.engine, tx_id.as_deref(), &document_id).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_collaborators_list_for_user(
+    &self, tx_id: Option<String>, user_id: String,
+  ) -> Result<Vec<DocumentCollaboratorDto>> {
+    document_collaborators::list_for_user(&self.engine, tx_id.as_deref(), &user_id).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_collaborators_find(
+    &self, tx_id: Option<String>, document_id: String, user_id: String,
+  ) -> Result<Option<DocumentCollaboratorDto>> {
+    document_collaborators::find(&self.engine, tx_id.as_deref(), &document_id, &user_id).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_collaborators_upsert(
+    &self, tx_id: Option<String>, row: DocumentCollaboratorDto,
+  ) -> Result<()> {
+    document_collaborators::upsert(&self.engine, tx_id.as_deref(), &row).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_collaborators_delete(
+    &self, tx_id: Option<String>, document_id: String, user_id: String,
+  ) -> Result<()> {
+    document_collaborators::delete(&self.engine, tx_id.as_deref(), &document_id, &user_id).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_share_invitations_insert(
+    &self, tx_id: Option<String>, row: DocumentShareInvitationDto,
+  ) -> Result<()> {
+    document_collaborators::insert_invitation(&self.engine, tx_id.as_deref(), &row).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_share_invitations_list_for_user(
+    &self, tx_id: Option<String>, user_id: String,
+  ) -> Result<Vec<DocumentShareInvitationDto>> {
+    document_collaborators::list_invitations_for_user(&self.engine, tx_id.as_deref(), &user_id).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_share_invitations_find(
+    &self, tx_id: Option<String>, id: String,
+  ) -> Result<Option<DocumentShareInvitationDto>> {
+    document_collaborators::find_invitation(&self.engine, tx_id.as_deref(), &id).await.map_err(to_napi_err)
+  }
+  #[napi]
+  pub async fn document_share_invitations_set_state(
+    &self, tx_id: Option<String>, id: String, field: String, at: i64,
+  ) -> Result<()> {
+    document_collaborators::set_invitation_state(&self.engine, tx_id.as_deref(), &id, &field, at).await.map_err(to_napi_err)
   }
   #[napi]
   pub async fn projects_find_all(

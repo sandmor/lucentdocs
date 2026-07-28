@@ -1,7 +1,7 @@
 import { z } from 'zod/v4'
 import { editorPreferenceOverridesSchema, isValidId } from '@lucentdocs/shared'
 import { adminProcedure, protectedProcedure, router } from '../index.js'
-import { assertProjectAccess } from '../access.js'
+import { assertMountedDocumentAccess, assertProjectAccess } from '../access.js'
 
 const id = z.string().min(1).max(128).refine(isValidId)
 export const editorPreferencesRouter = router({
@@ -30,19 +30,13 @@ export const editorPreferencesRouter = router({
   getDocument: protectedProcedure
     .input(z.object({ projectId: id, id }))
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      if (!(await ctx.services.documents.hasProjectAssociation(input.projectId, input.id))) {
-        throw new Error('Document not found in project')
-      }
+      await assertMountedDocumentAccess(ctx, { projectId: input.projectId, documentId: input.id })
       return ctx.services.editorPreferences.snapshot(ctx.user.id, input.projectId, input.id)
     }),
   updateDocument: protectedProcedure
     .input(z.object({ projectId: id, id, overrides: editorPreferenceOverridesSchema }))
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      if (!(await ctx.services.documents.hasProjectAssociation(input.projectId, input.id))) {
-        throw new Error('Document not found in project')
-      }
+      await assertMountedDocumentAccess(ctx, { projectId: input.projectId, documentId: input.id })
       ctx.services.editorPreferences.update('document', input.id, input.overrides)
       return ctx.services.editorPreferences.snapshot(ctx.user.id, input.projectId, input.id)
     }),

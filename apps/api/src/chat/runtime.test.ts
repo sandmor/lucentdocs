@@ -19,7 +19,7 @@ describe('ChatRuntime message revision guard', () => {
 
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
-    await runtime.startGeneration({ ...scope, message: 'Keep this response running' })
+    await runtime.startGeneration({ ...scope, actorUserId: LOCAL_DEFAULT_USER.id, message: 'Keep this response running' })
 
     await expect(runtime.updateMessageById(scope, 'missing-message', 'Changed')).rejects.toThrow(
       'Stop the current response before editing or deleting messages.'
@@ -30,7 +30,7 @@ describe('ChatRuntime message revision guard', () => {
     await expect(runtime.selectBranch(scope, 'missing-message')).rejects.toThrow(
       'Stop the current response before editing or deleting messages.'
     )
-    await expect(runtime.regenerateFromMessage(scope, 'missing-message')).rejects.toThrow(
+    await expect(runtime.regenerateFromMessage(scope, 'missing-message', LOCAL_DEFAULT_USER.id)).rejects.toThrow(
       'Stop the current response before editing or deleting messages.'
     )
 
@@ -62,7 +62,7 @@ describe('ChatRuntime continue generation', () => {
 
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
-    await runtime.startGeneration({ ...scope, message: '' })
+    await runtime.startGeneration({ ...scope, actorUserId: LOCAL_DEFAULT_USER.id, message: '' })
 
     const persisted = await adapter.services.chats.getById(project.id, document.id, thread.id)
     expect(persisted?.messages).toHaveLength(1)
@@ -83,7 +83,7 @@ describe('ChatRuntime continue generation', () => {
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
 
-    await expect(runtime.startGeneration({ ...scope, message: '' })).rejects.toThrow(
+    await expect(runtime.startGeneration({ ...scope, actorUserId: LOCAL_DEFAULT_USER.id, message: '' })).rejects.toThrow(
       'Cannot continue an empty chat.'
     )
   })
@@ -108,7 +108,11 @@ describe('ChatRuntime generation completion', () => {
     process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS = '100'
 
     try {
-      await runtime.startGeneration({ ...originScope, message: 'Keep streaming' })
+      await runtime.startGeneration({
+        ...originScope,
+        actorUserId: LOCAL_DEFAULT_USER.id,
+        message: 'Keep streaming',
+      })
       const lateEvents: Array<{ generating: boolean; generationId: string | null }> = []
       const unsubscribe = await runtime.subscribe(destinationScope, (event) => {
         if (event.type === 'snapshot') {
@@ -140,7 +144,7 @@ describe('ChatRuntime generation completion', () => {
 
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
-    await runtime.startGeneration({ ...scope, message: 'Complete this response' })
+    await runtime.startGeneration({ ...scope, actorUserId: LOCAL_DEFAULT_USER.id, message: 'Complete this response' })
 
     for (let attempt = 0; attempt < 50; attempt += 1) {
       if (!runtime.isGenerating(scope)) break
@@ -205,7 +209,7 @@ describe('ChatRuntime edit and generate', () => {
 
     const runtime = new ChatRuntime(adapter.services, {} as YjsRuntime)
     const scope = { projectId: project.id, documentId: document.id, chatId: thread.id }
-    await runtime.editMessageAndGenerate(scope, appended.nodeId, 'Edited prompt')
+    await runtime.editMessageAndGenerate(scope, appended.nodeId, 'Edited prompt', LOCAL_DEFAULT_USER.id)
 
     for (let attempt = 0; attempt < 50; attempt += 1) {
       if (!runtime.isGenerating(scope)) break

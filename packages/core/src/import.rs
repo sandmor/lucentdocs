@@ -20,6 +20,7 @@ pub struct MassImportDocumentInput {
 #[napi(object)]
 pub struct MassImportRequest {
   pub project_id: String,
+  pub owner_user_id: String,
   pub documents: Vec<MassImportDocumentInput>,
   pub parse_failure_mode: Option<String>,
   pub raw_html_mode: Option<MarkdownRawHtmlMode>,
@@ -265,7 +266,12 @@ pub async fn import_markdown_documents(
       tx,
       &DocumentDto {
         id: id.clone(),
-        title: unique_path.clone(),
+        title: unique_path
+          .split('/')
+          .last()
+          .unwrap_or("Imported document")
+          .to_string(),
+        home_project_id: request.project_id.clone(),
         r#type: "manuscript".to_string(),
         metadata_json: None,
         created_at: now,
@@ -284,7 +290,10 @@ pub async fn import_markdown_documents(
       &crate::storage::dto::ProjectDocumentDto {
         project_id: request.project_id.clone(),
         document_id: id.clone(),
+        path: unique_path.clone(),
+        added_by_user_id: request.owner_user_id.clone(),
         added_at: now,
+        updated_at: now,
       },
     )
     .await

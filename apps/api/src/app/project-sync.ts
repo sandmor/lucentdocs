@@ -65,6 +65,11 @@ export type ProjectSyncPayload =
         metadata?: Record<string, unknown>
       }
     }
+  | {
+      projectId: string
+      type: 'document.access-changed'
+      documentId: string
+    }
 
 export type ProjectSyncEvent =
   | {
@@ -122,6 +127,13 @@ export type ProjectSyncEvent =
         updatedAt?: number
         metadata?: Record<string, unknown>
       }
+    }
+  | {
+      id: string
+      projectId: string
+      createdAt: number
+      type: 'document.access-changed'
+      documentId: string
     }
 
 type ProjectSyncListener = (event: ProjectSyncEvent) => void

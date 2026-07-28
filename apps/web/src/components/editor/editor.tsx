@@ -174,13 +174,14 @@ function scrollEditorPositionIntoView(view: EditorView, position: number): void 
 interface EditorProps {
   projectId?: string
   documentId: string
+  readOnly?: boolean
   onConnectionChange?: (status: ConnectionStatus) => void
   className?: string
   searchResultMarkers?: SearchResultMarker[]
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { projectId, documentId, onConnectionChange, className, searchResultMarkers = [] },
+  { projectId, documentId, readOnly = false, onConnectionChange, className, searchResultMarkers = [] },
   ref
 ) {
   const [editorShell, setEditorShell] = useState<HTMLDivElement | null>(null)
@@ -305,6 +306,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
     const provider = createYjsProvider(
       documentId,
+      projectId ?? '',
       handleConnectionChange,
       () => {
         if (destroyed) return
@@ -407,6 +409,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
     const view = new EditorView(containerRef.current, {
       state,
+      editable: () => !readOnly,
       scrollThreshold: 150,
       scrollMargin: 150,
       nodeViews: previewNodeViews,
@@ -605,6 +608,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   }, [
     projectId,
     documentId,
+    readOnly,
     providerSessionKey,
     showOfflineToast,
     dismissOfflineToast,
@@ -808,13 +812,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         markers={searchResultMarkers}
       />
       <SideElementsProvider view={editorView} container={editorShell}>
-        <BlockHandle
+        {!readOnly && <BlockHandle
           view={editorView}
           container={editorShell}
           notesMap={notesMap}
           noteCreatorUserId={noteCreatorUserId}
           onNoteCreated={(noteId, anchorId) => setJustCreatedNote({ id: noteId, anchorId })}
-        />
+        />}
         <NotesGutter
           view={editorView}
           container={editorShell}
@@ -823,6 +827,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
           currentUserId={noteCreatorUserId}
           justCreatedNote={justCreatedNote}
           onJustCreatedNoteHandled={() => setJustCreatedNote(null)}
+          readOnly={readOnly}
         />
       </SideElementsProvider>
       <SelectionFakeOverlay

@@ -4,13 +4,31 @@ import type {
   ProjectDocumentRow,
 } from '../../core/ports/projectDocuments.port.js'
 import { currentTxId } from './tx-scope.js'
-import { nullToUndefined, projectDocumentToDto } from './mappers.js'
+import { nullToUndefined, projectDocumentFromDto, projectDocumentToDto } from './mappers.js'
 
 export class ProjectDocumentsRepository implements ProjectDocumentsRepositoryPort {
   constructor(private engine: NativeStorageEngine) {}
 
   async insert(row: ProjectDocumentRow): Promise<void> {
     await this.engine.projectDocumentsInsert(currentTxId(), projectDocumentToDto(row))
+  }
+
+  async listByProject(projectId: string): Promise<ProjectDocumentRow[]> {
+    const rows = await this.engine.projectDocumentsListByProject(currentTxId(), projectId)
+    return rows.map(projectDocumentFromDto)
+  }
+
+  async listByDocument(documentId: string): Promise<ProjectDocumentRow[]> {
+    const rows = await this.engine.projectDocumentsListByDocument(currentTxId(), documentId)
+    return rows.map(projectDocumentFromDto)
+  }
+
+  async updatePath(projectId: string, documentId: string, path: string, updatedAt: number): Promise<boolean> {
+    return this.engine.projectDocumentsUpdatePath(currentTxId(), projectId, documentId, path, updatedAt)
+  }
+
+  async delete(projectId: string, documentId: string): Promise<boolean> {
+    return this.engine.projectDocumentsDelete(currentTxId(), projectId, documentId)
   }
 
   async hasProjectDocument(projectId: string, documentId: string): Promise<boolean> {

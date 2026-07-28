@@ -289,7 +289,7 @@ test('sidebar chat generation survives initiator disconnect and reconnecting cli
       timeout: 12_000,
     })
 
-    await sendChatMessage(page, 'Give me a mobile continuation')
+    await sendChatMessage(page, 'Give me a slow mobile continuation')
     await page.close()
 
     await selectFirstChatThread(peerPage)

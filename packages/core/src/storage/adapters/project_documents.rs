@@ -13,11 +13,15 @@ pub async fn insert(
   engine
     .with_conn(tx_id, async |conn| {
       sqlx::query(
-        "INSERT INTO project_documents (projectId, documentId, addedAt) VALUES (?, ?, ?)",
+        "INSERT INTO project_documents (projectId, documentId, path, addedByUserId, addedAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?)",
       )
       .bind(&row.project_id)
       .bind(&row.document_id)
+      .bind(&row.path)
+      .bind(&row.added_by_user_id)
       .bind(row.added_at)
+      .bind(row.updated_at)
       .execute(&mut *conn)
       .await?;
       Ok(())
@@ -46,6 +50,50 @@ pub async fn has_project_document(
       Ok(row.is_some())
     })
     .await
+}
+
+pub async fn list_by_project(
+  engine: &StorageEngine, tx_id: Option<&str>, project_id: &str,
+) -> StorageResult<Vec<ProjectDocumentDto>> {
+  engine.with_conn(tx_id, async |conn| {
+    sqlx::query_as::<_, ProjectDocumentDto>(
+      "SELECT projectId AS project_id, documentId AS document_id, path,
+              addedByUserId AS added_by_user_id, addedAt AS added_at, updatedAt AS updated_at
+         FROM project_documents WHERE projectId = ? ORDER BY addedAt DESC",
+    ).bind(project_id).fetch_all(&mut *conn).await.map_err(Into::into)
+  }).await
+}
+
+pub async fn list_by_document(
+  engine: &StorageEngine, tx_id: Option<&str>, document_id: &str,
+) -> StorageResult<Vec<ProjectDocumentDto>> {
+  engine.with_conn(tx_id, async |conn| {
+    sqlx::query_as::<_, ProjectDocumentDto>(
+      "SELECT projectId AS project_id, documentId AS document_id, path,
+              addedByUserId AS added_by_user_id, addedAt AS added_at, updatedAt AS updated_at
+         FROM project_documents WHERE documentId = ? ORDER BY addedAt DESC",
+    ).bind(document_id).fetch_all(&mut *conn).await.map_err(Into::into)
+  }).await
+}
+
+pub async fn update_path(
+  engine: &StorageEngine, tx_id: Option<&str>, project_id: &str, document_id: &str, path: &str, updated_at: i64,
+) -> StorageResult<bool> {
+  engine.with_conn(tx_id, async |conn| {
+    let result = sqlx::query("UPDATE project_documents SET path = ?, updatedAt = ? WHERE projectId = ? AND documentId = ?")
+      .bind(path).bind(updated_at).bind(project_id).bind(document_id).execute(&mut *conn).await?;
+    Ok(result.rows_affected() > 0)
+  }).await
+}
+
+pub async fn delete(
+  engine: &StorageEngine, tx_id: Option<&str>, project_id: &str, document_id: &str,
+) -> StorageResult<bool> {
+  engine.with_conn(tx_id, async |conn| {
+    let result = sqlx::query("DELETE FROM project_documents WHERE projectId = ? AND documentId = ?")
+      .bind(project_id).bind(document_id).execute(&mut *conn).await?;
+    Ok(result.rows_affected() > 0)
+  }).await
 }
 
 pub async fn find_associated_document_ids(

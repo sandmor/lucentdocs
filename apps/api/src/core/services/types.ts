@@ -11,10 +11,12 @@ import type { DocumentNotesService } from './documentNotes.service.js'
 import { createEditorPreferencesService } from './editorPreferences.service.js'
 import { createAssistantPreferencesService } from './assistantPreferences.service.js'
 import type { McpSettingsService } from './mcpSettings.service.js'
+import type { DocumentSharingService } from './documentSharing.service.js'
 
 export interface ServiceSet {
   projects: ProjectsService
   documents: DocumentsService
+  documentSharing: DocumentSharingService
   documentNotes: DocumentNotesService
   chats: ChatsService
   aiSettings: AiSettingsService

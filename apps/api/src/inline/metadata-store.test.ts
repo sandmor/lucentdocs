@@ -6,6 +6,7 @@ function createDocument(metadata: JsonObject | null): Document {
   return {
     id: 'd1',
     title: 'Doc',
+    homeProjectId: 'project_1',
     type: 'text/markdown',
     metadata,
     createdAt: 1,
@@ -31,6 +32,10 @@ describe('InlineSessionMetadataStore.pruneOrphans', () => {
       },
       projectDocuments: {
         insert: async () => {},
+        listByProject: async () => [],
+        listByDocument: async () => [],
+        updatePath: async () => false,
+        delete: async () => false,
         hasProjectDocument: async () => true,
         findAssociatedDocumentIds: async () => new Set(['d1']),
         listDocumentIds: async () => ['d1'],
@@ -88,6 +93,10 @@ describe('InlineSessionMetadataStore.pruneOrphans', () => {
       },
       projectDocuments: {
         insert: async () => {},
+        listByProject: async () => [],
+        listByDocument: async () => [],
+        updatePath: async () => false,
+        delete: async () => false,
         hasProjectDocument: async () => true,
         findAssociatedDocumentIds: async () => new Set(['d1']),
         listDocumentIds: async () => ['d1'],
@@ -173,6 +182,10 @@ describe('InlineSessionMetadataStore.pruneOrphans', () => {
       },
       projectDocuments: {
         insert: async () => {},
+        listByProject: async () => [],
+        listByDocument: async () => [],
+        updatePath: async () => false,
+        delete: async () => false,
         hasProjectDocument: async () => true,
         findAssociatedDocumentIds: async () => new Set(['d1']),
         listDocumentIds: async () => ['d1'],

@@ -2,6 +2,7 @@ import type { Document, JsonObject } from '@lucentdocs/shared'
 
 export interface UpdateDocumentData {
   title?: string
+  homeProjectId?: string
   metadata?: JsonObject | null
   updatedAt: number
 }

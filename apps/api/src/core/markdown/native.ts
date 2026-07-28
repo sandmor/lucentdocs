@@ -51,6 +51,7 @@ export interface NativeMassImportDocumentInput {
 
 export interface NativeMassImportRequest {
   projectId: string
+  ownerUserId: string
   documents: NativeMassImportDocumentInput[]
   parseFailureMode?: 'fail' | 'code_block'
   rawHtmlMode?: MarkdownRawHtmlMode
@@ -138,6 +139,7 @@ export async function runNativeMassImport(
   const rawHtmlMode = toNativeRawHtmlMode(request.rawHtmlMode)
   const response = await engine.importMarkdownDocuments({
     projectId: request.projectId,
+    ownerUserId: request.ownerUserId,
     documents: request.documents,
     parseFailureMode: request.parseFailureMode,
     rawHtmlMode,

@@ -5,7 +5,7 @@ import { isValidId } from '@lucentdocs/shared'
 import { protectedProcedure, router } from '../index.js'
 import { InlineRuntimeError, type InlineObserveEvent } from '../../inline/runtime.js'
 import { configManager } from '../../config/runtime.js'
-import { assertProjectAccess, subscribeToProjectAccessRevocation } from '../access.js'
+import { assertMountedDocumentAccess, subscribeToProjectAccessRevocation } from '../access.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 
@@ -38,7 +38,7 @@ export const inlineRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
+      await assertMountedDocumentAccess(ctx, input)
       try {
         const sessions = await ctx.inlineRuntime.getSessions(
           {
@@ -63,7 +63,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
+      await assertMountedDocumentAccess(ctx, input, 'editor')
       try {
         await ctx.inlineRuntime.pruneOrphanSessions({
           projectId: input.projectId,
@@ -91,7 +91,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
+      await assertMountedDocumentAccess(ctx, input, 'editor')
       const limits = configManager.getConfig().limits
       if (input.prompt.trim().length === 0 || input.prompt.length > limits.promptChars) {
         throw new TRPCError({
@@ -123,7 +123,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
+      await assertMountedDocumentAccess(ctx, input, 'editor')
       try {
         return await ctx.inlineRuntime.startGeneration({
           ...input,
@@ -144,7 +144,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
+      await assertMountedDocumentAccess(ctx, input, 'editor')
       try {
         const session = await ctx.inlineRuntime.undoSessionTurn(input, input.requesterClientName)
         return { session }
@@ -163,7 +163,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
+      await assertMountedDocumentAccess(ctx, input, 'editor')
       try {
         const session = await ctx.inlineRuntime.redoSessionTurn(input, input.requesterClientName)
         return { session }
@@ -182,7 +182,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
+      await assertMountedDocumentAccess(ctx, input, 'editor')
       try {
         const session = await ctx.inlineRuntime.restoreAcceptedSessionZone(
           input,
@@ -204,7 +204,7 @@ export const inlineRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
+      await assertMountedDocumentAccess(ctx, input, 'editor')
       return {
         canceled: ctx.inlineRuntime.cancelGeneration(input, input.generationId),
       }
@@ -224,7 +224,7 @@ export const inlineRouter = router({
         let unsubscribe: (() => void) | null = null
         let unsubscribeAccess: (() => void) | null = null
 
-        void assertProjectAccess(ctx, input.projectId)
+        void assertMountedDocumentAccess(ctx, input)
           .then(() => {
             unsubscribeAccess = subscribeToProjectAccessRevocation(
               ctx,

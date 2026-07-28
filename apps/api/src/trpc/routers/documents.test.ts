@@ -148,7 +148,10 @@ describe('documentsRouter', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: sharedDoc.id,
+      path: sharedDoc.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
     const now = Date.now()
@@ -486,7 +489,10 @@ describe('documentsRouter', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: sharedDoc.id,
+      path: sharedDoc.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
     await adapter.services.embeddingModelSelection.updateProjectStrategy(projectA.id, secondary.id)
 
@@ -731,7 +737,10 @@ describe('documentsRouter', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: document.id,
+      path: document.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
     const caller = documentsRouter.createCaller(
@@ -891,9 +900,9 @@ describe('documentsRouter', () => {
       () => adapter.services.documents.listForProject(project.id),
       (items) => items.length === 3
     )
-    const titles = docs.map((doc) => doc.title)
-    expect(titles.some((title) => title.endsWith('/00-contents.md'))).toBe(true)
-    expect(titles.some((title) => title.endsWith('/1-part-one.md'))).toBe(true)
-    expect(titles.some((title) => title.endsWith('/2-part-two.md'))).toBe(true)
+    const paths = docs.map((doc) => doc.path)
+    expect(paths.some((path) => path.endsWith('/00-contents.md'))).toBe(true)
+    expect(paths.some((path) => path.endsWith('/1-part-one.md'))).toBe(true)
+    expect(paths.some((path) => path.endsWith('/2-part-two.md'))).toBe(true)
   })
 })

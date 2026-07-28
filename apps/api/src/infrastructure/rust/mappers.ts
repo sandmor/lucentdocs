@@ -164,6 +164,7 @@ export function documentFromDto(dto: DocumentDto): Document {
   return {
     id: dto.id,
     title: dto.title,
+    homeProjectId: dto.homeProjectId,
     type: dto.type,
     metadata: fromJsonField(dto.metadataJson),
     createdAt: dto.createdAt,
@@ -175,6 +176,7 @@ export function documentToDto(document: Document): DocumentDto {
   return {
     id: document.id,
     title: document.title,
+    homeProjectId: document.homeProjectId,
     type: document.type,
     metadataJson: toJsonField(document.metadata),
     createdAt: document.createdAt,
@@ -186,6 +188,7 @@ export function updateDocumentToDto(_id: string, data: UpdateDocumentData): Upda
   const metadataJson = toOptionalJsonField(data.metadata)
   return {
     title: data.title,
+    homeProjectId: data.homeProjectId,
     metadataJson: metadataJson === null ? undefined : metadataJson,
     clearMetadata: data.metadata !== undefined,
     updatedAt: data.updatedAt,
@@ -196,7 +199,10 @@ export function projectDocumentFromDto(dto: ProjectDocumentDto): ProjectDocument
   return {
     projectId: dto.projectId,
     documentId: dto.documentId,
+    path: dto.path,
+    addedByUserId: dto.addedByUserId,
     addedAt: dto.addedAt,
+    updatedAt: dto.updatedAt,
   }
 }
 
@@ -204,7 +210,10 @@ export function projectDocumentToDto(row: ProjectDocumentRow): ProjectDocumentDt
   return {
     projectId: row.projectId,
     documentId: row.documentId,
+    path: row.path,
+    addedByUserId: row.addedByUserId,
     addedAt: row.addedAt,
+    updatedAt: row.updatedAt,
   }
 }
 

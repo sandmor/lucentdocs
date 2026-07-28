@@ -162,10 +162,12 @@ function createQdrantFetchMock(): typeof fetch {
 }
 
 async function insertDocument(engine: NativeStorageEngine, id: string, title: string): Promise<void> {
+  await insertProject(engine, 'project_1')
   await engine.documentsInsert(null, {
     id,
     title,
     type: 'manuscript',
+    homeProjectId: 'project_1',
     createdAt: 1,
     updatedAt: 1,
   })
@@ -174,16 +176,21 @@ async function insertDocument(engine: NativeStorageEngine, id: string, title: st
 async function linkDocumentToProject(
   engine: NativeStorageEngine,
   projectId: string,
-  documentId: string
+  documentId: string,
+  path = documentId
 ): Promise<void> {
   await engine.projectDocumentsInsert(null, {
     projectId,
     documentId,
+    path,
+    addedByUserId: 'user_1',
     addedAt: 1,
+    updatedAt: 1,
   })
 }
 
 async function insertProject(engine: NativeStorageEngine, projectId: string): Promise<void> {
+  if (await engine.projectsFindById(null, projectId)) return
   await engine.projectsInsert(null, {
     id: projectId,
     title: `Project ${projectId}`,
@@ -346,7 +353,7 @@ for (const backend of ['sqlite', 'qdrant'] as const) {
         await insertDocument(engine, 'doc_root', 'root.md')
         await insertDocument(engine, 'doc_nested', 'docs/a.md')
         await linkDocumentToProject(engine, 'proj_1', 'doc_root')
-        await linkDocumentToProject(engine, 'proj_1', 'doc_nested')
+        await linkDocumentToProject(engine, 'proj_1', 'doc_nested', 'docs/a.md')
 
         await repo.replaceEmbeddings({
           documentId: 'doc_root',

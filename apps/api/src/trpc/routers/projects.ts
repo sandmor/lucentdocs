@@ -21,9 +21,6 @@ const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSc
 
 export const projectsRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
-    if (ctx.user.role === 'admin') {
-      return ctx.services.projects.list()
-    }
     return ctx.services.projects.listOwnedByUser(ctx.user.id)
   }),
 
@@ -133,19 +130,43 @@ export const projectsRouter = router({
       return project
     }),
 
-  delete: protectedProcedure.input(z.object({ id: idSchema })).mutation(async ({ ctx, input }) => {
+  deletionPlan: protectedProcedure.input(z.object({ id: idSchema })).query(async ({ ctx, input }) => {
+    await assertProjectAccess(ctx, input.id)
+    const plan = await ctx.services.projects.getDeletionPlan(input.id)
+    if (!plan) throw new TRPCError({ code: 'NOT_FOUND', message: `Project ${input.id} not found` })
+    return plan
+  }),
+
+  delete: protectedProcedure.input(z.object({
+    id: idSchema,
+    resolutions: z.array(z.discriminatedUnion('action', [
+      z.object({ documentId: idSchema, action: z.literal('delete') }),
+      z.object({ documentId: idSchema, action: z.literal('rehome'), projectId: idSchema, path: z.string().trim().min(1).max(512) }),
+    ])).default([]),
+  })).mutation(async ({ ctx, input }) => {
     const project = await assertProjectAccess(ctx, input.id)
-    const scopedDocuments = await ctx.services.documents.listForProject(input.id)
-    const deleted = await ctx.services.projects.delete(input.id)
-    if (!deleted) {
+    const plan = await ctx.services.projects.getDeletionPlan(input.id)
+    if (!plan) {
       throw new TRPCError({
         code: 'NOT_FOUND',
         message: `Project ${input.id} not found`,
       })
     }
+    if (plan.homeDocuments.length > 0 && input.resolutions.length === 0) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Resolve every home document before deleting this project',
+      })
+    }
+    const result = await ctx.services.projects.deleteWithPlan({
+      projectId: input.id,
+      targetOwnerUserId: project.ownerUserId,
+      resolutions: input.resolutions,
+    })
+    if (!result) throw new TRPCError({ code: 'BAD_REQUEST', message: 'The deletion plan is no longer valid' })
 
-    for (const document of scopedDocuments) {
-      ctx.yjsRuntime.evictLiveDocument(document.id)
+    for (const document of result.deletedDocumentIds) {
+      ctx.yjsRuntime.evictLiveDocument(document)
     }
     projectSyncBus.publish({
       audienceUserIds: [project.ownerUserId],
@@ -154,6 +175,6 @@ export const projectsRouter = router({
       ownerUserId: project.ownerUserId,
     })
 
-    return { success: true }
+    return { success: true, ...result }
   }),
 })

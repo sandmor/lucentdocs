@@ -23,8 +23,9 @@ describe('YjsRuntime', () => {
   let adapter: TestAdapter
   let yjsRuntime: YjsRuntime
   let documentsService: DocumentsService
+  let projectId: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     adapter = createTestAdapter()
     yjsRuntime = createYjsRuntime(
       {
@@ -37,6 +38,9 @@ describe('YjsRuntime', () => {
     )
     yjsRuntime.initialize()
     documentsService = adapter.services.documents
+    projectId = (await adapter.services.projects.create('Yjs runtime fixtures', {
+      ownerUserId: 'yjs-test-user',
+    })).id
   })
 
   afterEach(async () => {
@@ -44,8 +48,14 @@ describe('YjsRuntime', () => {
     await adapter.adapter.engine.close()
   })
 
+  const createDocument = async (title: string, content?: string, type?: string) => {
+    const document = await documentsService.createForProject(projectId, title, content, type)
+    if (!document) throw new Error(`Expected fixture document ${title} to be created.`)
+    return document
+  }
+
   test('flushes pending in-memory updates so content survives restart', async () => {
-    const doc = await documentsService.create('test.md')
+    const doc = await createDocument('test.md')
     expect(doc).toBeTruthy()
 
     await yjsRuntime.ensureDocumentLoaded(doc.id)
@@ -70,7 +80,7 @@ describe('YjsRuntime', () => {
   })
 
   test('clears document notes in the same transform when requested', async () => {
-    const doc = await documentsService.create('clear-notes.md')
+    const doc = await createDocument('clear-notes.md')
     await yjsRuntime.ensureDocumentLoaded(doc.id)
     const liveDoc = docs.get(doc.id)
     if (!liveDoc) throw new Error('Expected live Yjs document.')
@@ -97,7 +107,7 @@ describe('YjsRuntime', () => {
   })
 
   test('initialization is idempotent for new docs', async () => {
-    const doc = await documentsService.create('test-idempotent.md')
+    const doc = await createDocument('test-idempotent.md')
 
     await Promise.all([
       yjsRuntime.ensureDocumentLoaded(doc.id),
@@ -118,7 +128,7 @@ describe('YjsRuntime', () => {
   })
 
   test('document content persists after flush', async () => {
-    const doc = await documentsService.create('persist-test.md')
+    const doc = await createDocument('persist-test.md')
 
     await yjsRuntime.ensureDocumentLoaded(doc.id)
     await yjsRuntime.flushAllDocumentStates()
@@ -128,7 +138,7 @@ describe('YjsRuntime', () => {
   })
 
   test('loads persisted state on first ensureDocumentLoaded call', async () => {
-    const doc = await documentsService.create('persisted-load.md')
+    const doc = await createDocument('persisted-load.md')
 
     await yjsRuntime.replaceDocument(doc.id, makeDoc('persisted-before-load'))
     await yjsRuntime.ensureDocumentLoaded(doc.id)
@@ -142,8 +152,9 @@ describe('DocumentsService YJS operations', () => {
   let adapter: TestAdapter
   let yjsRuntime: YjsRuntime
   let documentsService: DocumentsService
+  let projectId: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     adapter = createTestAdapter()
     yjsRuntime = createYjsRuntime(
       {
@@ -156,6 +167,11 @@ describe('DocumentsService YJS operations', () => {
     )
     yjsRuntime.initialize()
     documentsService = adapter.services.documents
+    projectId = (
+      await adapter.services.projects.create('Documents service fixtures', {
+        ownerUserId: 'yjs-test-user',
+      })
+    ).id
   })
 
   afterEach(async () => {
@@ -163,8 +179,14 @@ describe('DocumentsService YJS operations', () => {
     await adapter.adapter.engine.close()
   })
 
+  const createDocument = async (title: string, content?: string, type?: string) => {
+    const document = await documentsService.createForProject(projectId, title, content, type)
+    if (!document) throw new Error(`Expected fixture document ${title} to be created.`)
+    return document
+  }
+
   test('getContent returns default content for new document', async () => {
-    const doc = await documentsService.create('new-doc.md')
+    const doc = await createDocument('new-doc.md')
     const content = await documentsService.getContent(doc.id)
 
     expect(content).toBeTruthy()
@@ -174,7 +196,7 @@ describe('DocumentsService YJS operations', () => {
   })
 
   test('createSnapshot creates snapshot from YJS data', async () => {
-    const doc = await documentsService.create('snapshot-test.md')
+    const doc = await createDocument('snapshot-test.md')
 
     const snapshot = await documentsService.createSnapshot(doc.id)
     expect(snapshot).toBeTruthy()
@@ -182,7 +204,7 @@ describe('DocumentsService YJS operations', () => {
   })
 
   test('getContent reads latest live Yjs state before persistence flush', async () => {
-    const doc = await documentsService.create('live-content-test.md')
+    const doc = await createDocument('live-content-test.md')
 
     await yjsRuntime.ensureDocumentLoaded(doc.id)
     const liveDoc = docs.get(doc.id)
@@ -198,7 +220,7 @@ describe('DocumentsService YJS operations', () => {
   })
 
   test('createSnapshot captures latest live Yjs state before persistence flush', async () => {
-    const doc = await documentsService.create('live-snapshot-test.md')
+    const doc = await createDocument('live-snapshot-test.md')
 
     await yjsRuntime.ensureDocumentLoaded(doc.id)
     const liveDoc = docs.get(doc.id)
@@ -218,7 +240,7 @@ describe('DocumentsService YJS operations', () => {
   })
 
   test('restoreToSnapshot restores content', async () => {
-    const doc = await documentsService.create('restore-test.md')
+    const doc = await createDocument('restore-test.md')
 
     const snapshot1 = await documentsService.createSnapshot(doc.id)
     expect(snapshot1).toBeTruthy()
@@ -229,7 +251,7 @@ describe('DocumentsService YJS operations', () => {
   })
 
   test('canonical document_content wins over stale yjs blob on read and cold load', async () => {
-    const doc = await documentsService.create('canonical-priority.md')
+    const doc = await createDocument('canonical-priority.md')
     await yjsRuntime.replaceDocumentBundle(doc.id, { doc: makeDoc('canonical-truth'), notes: [] })
 
     const staleDoc = prosemirrorJSONToYDoc(schema, makeDoc('stale-blob'))
@@ -256,7 +278,7 @@ describe('DocumentsService YJS operations', () => {
   })
 
   test('cold reload preserves Yjs identities so reconnecting clients do not duplicate content', async () => {
-    const doc = await documentsService.create('reconnect-identities.md')
+    const doc = await createDocument('reconnect-identities.md')
     await yjsRuntime.replaceDocumentBundle(doc.id, {
       doc: makeDoc('one canonical paragraph'),
       notes: [],
@@ -295,7 +317,7 @@ describe('DocumentsService YJS operations', () => {
   })
 
   test('epoch bump prevents stale live flush from overwriting canonical restore', async () => {
-    const doc = await documentsService.create('restore-race.md')
+    const doc = await createDocument('restore-race.md')
     await yjsRuntime.ensureDocumentLoaded(doc.id)
     const liveDoc = docs.get(doc.id)!
     const stale = prosemirrorJSONToYDoc(schema, makeDoc('stale-live'))
@@ -315,7 +337,7 @@ describe('DocumentsService YJS operations', () => {
   })
 
   test('restoreToSnapshot rejects corrupt snapshot content', async () => {
-    const doc = await documentsService.create('corrupt-restore.md')
+    const doc = await createDocument('corrupt-restore.md')
     await yjsRuntime.replaceDocumentBundle(doc.id, { doc: makeDoc('keep-me'), notes: [] })
 
     const snapshotId = nanoid()

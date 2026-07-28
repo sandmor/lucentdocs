@@ -89,7 +89,7 @@ describe('projectsRouter', () => {
       updatedAt: now,
     })
 
-    await caller.delete({ id: project.id })
+    await caller.delete({ id: project.id, resolutions: [{ documentId: doc.id, action: 'delete' }] })
 
     const remaining = await adapter.repositories.documentEmbeddings.findEmbeddings(
       doc.id,
@@ -156,7 +156,7 @@ describe('projectsRouter', () => {
     }
   })
 
-  test('admin can read projects they do not own', async () => {
+  test('admin cannot read projects they do not own', async () => {
     const adminUser: User = {
       id: 'admin_user',
       name: 'Admin',
@@ -189,6 +189,6 @@ describe('projectsRouter', () => {
       })
     )
 
-    await expect(adminCaller.get({ id: project.id })).resolves.toMatchObject({ id: project.id })
+    await expect(adminCaller.get({ id: project.id })).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 })

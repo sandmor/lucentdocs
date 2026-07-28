@@ -76,6 +76,7 @@ export function useDocumentBrowser({
   const [moveDestination, setMoveDestination] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [settingsDocumentId, setSettingsDocumentId] = useState<string | null>(null)
+  const [shareDocumentId, setShareDocumentId] = useState<string | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [importDraft, setImportDraft] = useState<{ fileName: string; markdown: string } | null>(
     null
@@ -152,11 +153,11 @@ export function useDocumentBrowser({
 
   const allDocuments = documents
   const visibleDocuments = useMemo(
-    () => allDocuments.filter((doc) => !isDirectorySentinelPath(normalizeDocumentPath(doc.title))),
+    () => allDocuments.filter((doc) => !isDirectorySentinelPath(normalizeDocumentPath(doc.path))),
     [allDocuments]
   )
   const normalizedDocumentPaths = useMemo(
-    () => visibleDocuments.map((doc) => normalizeDocumentPath(doc.title)),
+    () => visibleDocuments.map((doc) => normalizeDocumentPath(doc.path)),
     [visibleDocuments]
   )
   const documentPathSet = useMemo(() => new Set(normalizedDocumentPaths), [normalizedDocumentPaths])
@@ -164,7 +165,7 @@ export function useDocumentBrowser({
   const explicitDirectoryPaths = useMemo(
     () =>
       allDocuments
-        .map((doc) => directoryPathFromSentinel(normalizeDocumentPath(doc.title)))
+        .map((doc) => directoryPathFromSentinel(normalizeDocumentPath(doc.path)))
         .flatMap((value) => (value ? [value] : [])),
     [allDocuments]
   )
@@ -175,7 +176,7 @@ export function useDocumentBrowser({
 
   const activeDocumentPath = useMemo(() => {
     const active = visibleDocuments.find((doc) => doc.id === activeDocumentId)
-    return active ? normalizeDocumentPath(active.title) : null
+    return active ? normalizeDocumentPath(active.path) : null
   }, [visibleDocuments, activeDocumentId])
 
   const currentPath = userPath ?? (activeDocumentPath ? parentPath(activeDocumentPath) : '')
@@ -203,8 +204,8 @@ export function useDocumentBrowser({
       key: `search:${result.id}`,
       type: 'search-result' as const,
       id: result.id,
-      name: basename(normalizeDocumentPath(result.title)),
-      path: normalizeDocumentPath(result.title),
+      name: basename(normalizeDocumentPath(result.path)),
+      path: normalizeDocumentPath(result.path),
       createdAt: result.createdAt,
       updatedAt: result.updatedAt,
       score: result.score,
@@ -227,11 +228,11 @@ export function useDocumentBrowser({
       const prefix = currentPath ? `${currentPath}/` : ''
       sourceRows = visibleDocuments
         .filter((doc) => {
-          const normalizedPath = normalizeDocumentPath(doc.title)
+          const normalizedPath = normalizeDocumentPath(doc.path)
           return !prefix || normalizedPath.startsWith(prefix)
         })
         .map((doc) => {
-          const normalizedPath = normalizeDocumentPath(doc.title)
+          const normalizedPath = normalizeDocumentPath(doc.path)
           const meta = doc.metadata ?? {}
           return {
             key: `doc:${doc.id}`,
@@ -249,7 +250,7 @@ export function useDocumentBrowser({
         })
     } else {
       sourceRows = visibleDocuments.map((doc) => {
-        const normalizedPath = normalizeDocumentPath(doc.title)
+        const normalizedPath = normalizeDocumentPath(doc.path)
         const meta = doc.metadata ?? {}
         return {
           key: `doc:${doc.id}`,
@@ -368,7 +369,7 @@ export function useDocumentBrowser({
     },
   })
 
-  const renameMutation = trpc.documents.update.useMutation({
+  const renameMutation = trpc.documents.move.useMutation({
     onSuccess: (doc) => {
       setRenameTarget(null)
       setRenameName('')
@@ -623,7 +624,7 @@ export function useDocumentBrowser({
     }
 
     if (renameTarget.type === 'document') {
-      const sourcePath = normalizeDocumentPath(renameTarget.document.title)
+      const sourcePath = normalizeDocumentPath(renameTarget.document.path)
       const targetPath = normalizeDocumentPath(
         parentPath(sourcePath) ? `${parentPath(sourcePath)}/${trimmed}` : trimmed
       )
@@ -641,7 +642,7 @@ export function useDocumentBrowser({
       renameMutation.mutate({
         projectId,
         id: renameTarget.document.id,
-        title: targetPath,
+        path: targetPath,
       })
       return
     }
@@ -691,7 +692,7 @@ export function useDocumentBrowser({
     const destinationDirectory = normalizeDestination(moveDestination)
 
     if (moveTarget.type === 'document') {
-      const sourcePath = normalizeDocumentPath(moveTarget.document.title)
+      const sourcePath = normalizeDocumentPath(moveTarget.document.path)
       const fileName = basename(sourcePath)
       const destinationPath = normalizeDocumentPath(
         destinationDirectory ? `${destinationDirectory}/${fileName}` : fileName
@@ -794,7 +795,7 @@ export function useDocumentBrowser({
       if (!document) return
 
       setRenameTarget({ type: 'document', document })
-      setRenameName(basename(normalizeDocumentPath(document.title)))
+      setRenameName(basename(normalizeDocumentPath(document.path)))
     },
     [findDocumentById]
   )
@@ -804,7 +805,7 @@ export function useDocumentBrowser({
       const document = findDocumentById(documentId)
       if (!document) return
 
-      const sourcePath = normalizeDocumentPath(document.title)
+      const sourcePath = normalizeDocumentPath(document.path)
       setMoveTarget({ type: 'document', document })
       setMoveDestination(parentPath(sourcePath))
     },
@@ -830,9 +831,16 @@ export function useDocumentBrowser({
     [findDocumentById]
   )
 
+  const handleShareDocument = useCallback(
+    (documentId: string) => {
+      if (findDocumentById(documentId)) setShareDocumentId(documentId)
+    },
+    [findDocumentById]
+  )
+
   const settingsDocumentTitle = useMemo(() => {
     if (!settingsDocumentId) return ''
-    return findDocumentById(settingsDocumentId)?.title ?? ''
+    return findDocumentById(settingsDocumentId)?.path ?? ''
   }, [findDocumentById, settingsDocumentId])
 
   const handleSaveDocumentSettings = useCallback(
@@ -887,7 +895,7 @@ export function useDocumentBrowser({
         const url = URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
-        link.download = result.title || 'document.md'
+        link.download = result.path || 'document.md'
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
@@ -1124,7 +1132,9 @@ export function useDocumentBrowser({
 
   const deleteDescription =
     deleteTarget?.type === 'document'
-      ? `"${normalizeDocumentPath(deleteTarget.document.title)}" will be permanently deleted.`
+      ? deleteTarget.document.homeProjectId === projectId
+        ? `"${normalizeDocumentPath(deleteTarget.document.path)}" will be permanently deleted.`
+        : `"${normalizeDocumentPath(deleteTarget.document.path)}" will be removed from this project.`
       : deleteTarget?.type === 'directory'
         ? `"${deleteTarget.path}" and all its contents will be permanently deleted.`
         : ''
@@ -1219,6 +1229,8 @@ export function useDocumentBrowser({
     confirmImportDraft: handleConfirmImportDraft,
     cancelImportDraft: handleCancelImport,
     settingsDocumentId,
+    shareDocumentId,
+    setShareDocumentId,
     settingsDocumentTitle,
     setSettingsDocumentId,
     documentSettings: documentSettingsQuery.data,
@@ -1246,6 +1258,7 @@ export function useDocumentBrowser({
     handleRenameDocument,
     handleMoveDocument,
     handleSettingsDocument,
+    handleShareDocument,
     handleDeleteDocument,
     handleExportDocument,
     handleCopyDocumentAsMarkdown,

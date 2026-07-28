@@ -1,6 +1,6 @@
 import { z } from 'zod/v4'
 import { TRPCError } from '@trpc/server'
-import { protectedProcedure, router } from '../index.js'
+import { adminProcedure, protectedProcedure, router } from '../index.js'
 import type { ImportDocumentErrorKind } from '../../core/services/documents.service.js'
 import {
   isValidId,
@@ -15,7 +15,7 @@ import {
 import { configManager } from '../../config/runtime.js'
 import { projectSyncBus } from '../project-sync.js'
 import { YJS_RESTORE_CLOSE_CODE, YJS_RESTORE_CLOSE_REASON } from '../../yjs/runtime.js'
-import { assertProjectAccess } from '../access.js'
+import { assertDocumentAccess, assertProjectAccess } from '../access.js'
 import { normalizeValidatedSearchText } from '../../core/services/documentSearch.js'
 import { planMarkdownImport, type MarkdownRawHtmlMode } from '../../core/markdown/native.js'
 import { API_JSON_BODY_LIMIT_BYTES } from '../../http/body-limits.js'
@@ -171,6 +171,24 @@ function buildSplitImportDocuments(params: {
 }
 
 export const documentsRouter = router({
+  adminInventory: adminProcedure.query(async ({ ctx }) => {
+    const documentIds = await ctx.services.documents.listAllIds()
+    return Promise.all(documentIds.map(async (documentId) => {
+      const [document, collaborators] = await Promise.all([
+        ctx.services.documents.getById(documentId),
+        ctx.services.documentSharing.listCollaborators(documentId),
+      ])
+      if (!document) return null
+      const homeProject = await ctx.services.projects.getById(document.homeProjectId)
+      const owner = homeProject ? await ctx.authPort.getUserById(homeProject.ownerUserId) : null
+      return {
+        document,
+        homeProject: homeProject ? { id: homeProject.id, title: homeProject.title } : null,
+        owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+        collaboratorCount: collaborators.length,
+      }
+    })).then((rows) => rows.filter((row): row is NonNullable<typeof row> => row !== null))
+  }),
   importLimits: protectedProcedure.query(() => {
     const limits = configManager.getConfig().limits
     return {
@@ -178,6 +196,96 @@ export const documentsRouter = router({
       docImportBatchDocs: limits.docImportBatchDocs,
       transferMaxBytes: IMPORT_TRANSFER_MAX_BYTES,
     }
+  }),
+
+  shareInvitations: protectedProcedure.query(async ({ ctx }) => {
+    const invitations = await ctx.services.documentSharing.listInvitationsForUser(ctx.user.id)
+    return Promise.all(invitations.filter((invitation) => !invitation.acceptedAt && !invitation.declinedAt && !invitation.revokedAt).map(async (invitation) => {
+      const [document, inviter] = await Promise.all([
+        ctx.services.documents.getById(invitation.documentId),
+        ctx.authPort.getUserById(invitation.invitedByUserId),
+      ])
+      return { ...invitation, documentTitle: document?.title ?? 'Untitled document', inviterName: inviter?.name ?? 'A collaborator' }
+    }))
+  }),
+
+  collaborators: protectedProcedure.input(z.object({ documentId: idSchema })).query(async ({ ctx, input }) => {
+    const role = await assertDocumentAccess(ctx, input.documentId)
+    if (role !== 'owner') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the document owner can manage collaborators' })
+    }
+    const collaborators = await ctx.services.documentSharing.listCollaborators(input.documentId)
+    return Promise.all(collaborators.map(async (collaborator) => {
+      const user = await ctx.authPort.getUserById(collaborator.userId)
+      return {
+        ...collaborator,
+        name: user?.name ?? 'Unknown user',
+        email: user?.email ?? null,
+      }
+    }))
+  }),
+
+  accessRole: protectedProcedure.input(z.object({ documentId: idSchema })).query(async ({ ctx, input }) => {
+    const role = await assertDocumentAccess(ctx, input.documentId)
+    return { role }
+  }),
+
+  invite: protectedProcedure.input(z.object({ documentId: idSchema, recipientEmail: z.string().email(), role: z.enum(['viewer', 'editor']) })).mutation(async ({ ctx, input }) => {
+    const recipient = await ctx.authPort.getUserByEmail(input.recipientEmail)
+    if (!recipient) throw new TRPCError({ code: 'NOT_FOUND', message: 'No registered user has that email address' })
+    const invitation = await ctx.services.documentSharing.invite({ documentId: input.documentId, recipientUserId: recipient.id, role: input.role, invitedByUserId: ctx.user.id })
+    if (!invitation) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the document owner can invite a new collaborator' })
+    return invitation
+  }),
+
+  acceptShare: protectedProcedure.input(z.object({ invitationId: idSchema, projectId: idSchema, path: pathSchema })).mutation(async ({ ctx, input }) => {
+    const result = await ctx.services.documentSharing.acceptInvitation({ ...input, path: normalizeAndValidatePath(input.path, 'Document path'), userId: ctx.user.id })
+    if (result.status === 'accepted') return result.invitation
+    const errors = {
+      not_found: { code: 'NOT_FOUND' as const, message: 'Share invitation not found' },
+      inactive: { code: 'CONFLICT' as const, message: 'Share invitation is no longer pending' },
+      destination_not_found: { code: 'NOT_FOUND' as const, message: 'Destination project not found' },
+      destination_not_owned: { code: 'FORBIDDEN' as const, message: 'Choose one of your own projects' },
+      path_conflict: { code: 'CONFLICT' as const, message: 'A document already uses that path in the destination project' },
+      already_mounted: { code: 'CONFLICT' as const, message: 'This document is already mounted in the destination project' },
+    }
+    throw new TRPCError(errors[result.status])
+  }),
+
+  declineShare: protectedProcedure.input(z.object({ invitationId: idSchema })).mutation(async ({ ctx, input }) => {
+    const invitation = await ctx.services.documentSharing.declineInvitation(input.invitationId, ctx.user.id)
+    if (!invitation) throw new TRPCError({ code: 'NOT_FOUND', message: 'Share invitation not found' })
+    return invitation
+  }),
+
+  changeCollaboratorRole: protectedProcedure.input(z.object({ documentId: idSchema, userId: idSchema, role: z.enum(['viewer', 'editor']) })).mutation(async ({ ctx, input }) => {
+    const projectIds = await ctx.services.documentSharing.listMountedProjectIds(input.documentId)
+    const changed = await ctx.services.documentSharing.changeRole({ ...input, actingUserId: ctx.user.id })
+    if (!changed) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the document owner can change access' })
+    for (const projectId of projectIds) projectSyncBus.publish({ type: 'document.access-changed', projectId, documentId: input.documentId })
+    return { success: true }
+  }),
+
+  revokeCollaborator: protectedProcedure.input(z.object({ documentId: idSchema, userId: idSchema })).mutation(async ({ ctx, input }) => {
+    const projectIds = await ctx.services.documentSharing.listMountedProjectIds(input.documentId)
+    const removed = await ctx.services.documentSharing.revokeAccess({ ...input, actingUserId: ctx.user.id })
+    if (!removed) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the document owner can revoke access' })
+    for (const projectId of projectIds) projectSyncBus.publish({ type: 'document.access-changed', projectId, documentId: input.documentId })
+    return { success: true }
+  }),
+
+  leaveShare: protectedProcedure.input(z.object({ documentId: idSchema })).mutation(async ({ ctx, input }) => {
+    const projectIds = await ctx.services.documentSharing.listMountedProjectIds(input.documentId)
+    const left = await ctx.services.documentSharing.leave(input.documentId, ctx.user.id)
+    if (!left) throw new TRPCError({ code: 'BAD_REQUEST', message: 'The document owner cannot leave their own document' })
+    for (const projectId of projectIds) projectSyncBus.publish({ type: 'document.access-changed', projectId, documentId: input.documentId })
+    return { success: true }
+  }),
+
+  transferOwnership: protectedProcedure.input(z.object({ documentId: idSchema, recipientUserId: idSchema, recipientProjectId: idSchema })).mutation(async ({ ctx, input }) => {
+    const document = await ctx.services.documentSharing.transferOwnership({ ...input, actingUserId: ctx.user.id })
+    if (!document) throw new TRPCError({ code: 'FORBIDDEN', message: 'Ownership can only be transferred to a collaborator project' })
+    return document
   }),
 
   list: protectedProcedure
@@ -260,6 +368,7 @@ export const documentsRouter = router({
     )
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
+      await assertDocumentAccess(ctx, input.id)
       const doc = await ctx.services.documents.getForProject(input.projectId, input.id)
       if (!doc) {
         throw new TRPCError({
@@ -279,6 +388,7 @@ export const documentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
+      await assertDocumentAccess(ctx, input.id)
       const updated = await ctx.services.documents.setDefaultForProject(input.projectId, input.id)
       if (!updated) {
         throw new TRPCError({
@@ -334,42 +444,19 @@ export const documentsRouter = router({
 
   update: protectedProcedure
     .input(
-      z
-        .object({
-          projectId: idSchema,
-          id: idSchema,
-          title: pathSchema.optional(),
-          metadata: jsonObjectSchema.nullable().optional(),
-        })
-        .refine((value) => value.title !== undefined || value.metadata !== undefined, {
-          message: 'At least one field must be provided',
-          path: ['title'],
-        })
+      z.object({
+        projectId: idSchema,
+        id: idSchema,
+        metadata: jsonObjectSchema.nullable(),
+      })
     )
     .mutation(async ({ ctx, input }) => {
-      const { projectId, id, title, metadata } = input
+      const { projectId, id, metadata } = input
       await assertProjectAccess(ctx, projectId)
-      const data: { title?: string; metadata?: JsonObject | null } = { metadata }
-
-      if (title !== undefined) {
-        const normalizedTitle = normalizeAndValidatePath(title, 'Document path')
-        data.title = normalizedTitle
-      }
-
-      const doc = await ctx.services.documents.updateForProject(projectId, id, data)
+      await assertDocumentAccess(ctx, id, 'editor')
+      const doc = await ctx.services.documents.updateForProject(projectId, id, { metadata })
       if (!doc) {
-        const exists = await ctx.services.documents.getForProject(projectId, id)
-        if (!exists) {
-          throw new TRPCError({
-            code: 'NOT_FOUND',
-            message: `Document ${id} not found in project ${projectId}`,
-          })
-        }
-
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Cannot update document ${id} due to a path conflict`,
-        })
+        throw new TRPCError({ code: 'NOT_FOUND', message: `Document ${id} not found in project ${projectId}` })
       }
 
       projectSyncBus.publish({
@@ -377,8 +464,7 @@ export const documentsRouter = router({
         projectId,
         documentId: doc.id,
         changes: {
-          title: data.title,
-          metadata: data.metadata ?? undefined,
+          metadata: metadata ?? undefined,
           updatedAt: doc.updatedAt,
         },
       })
@@ -395,6 +481,7 @@ export const documentsRouter = router({
     )
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
+      await assertDocumentAccess(ctx, input.id)
       const versions = await ctx.services.documents.getVersionHistoryForProject(
         input.projectId,
         input.id
@@ -420,6 +507,7 @@ export const documentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
+      await assertDocumentAccess(ctx, input.id, 'editor')
       const snapshot = await ctx.services.documents.createSnapshotForProject(
         input.projectId,
         input.id
@@ -443,6 +531,7 @@ export const documentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
+      await assertDocumentAccess(ctx, input.id, 'editor')
       // Invalidate in-flight persistence on the old live Y.Doc before writing canonical restore state.
       ctx.yjsRuntime.bumpDocumentEpoch(input.id)
       const doc = await ctx.services.documents.restoreToSnapshotForProject(
@@ -478,29 +567,28 @@ export const documentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
-      const deleted = await ctx.services.documents.deleteForProject(input.projectId, input.id)
-      if (!deleted) {
+      await assertDocumentAccess(ctx, input.id)
+      const removal = await ctx.services.documents.removeFromProject(input.projectId, input.id)
+      if (!removal) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: `Document ${input.id} not found in project ${input.projectId}`,
         })
       }
 
-      ctx.yjsRuntime.evictLiveDocument(input.id)
-      const defaultDocumentId = await ctx.services.documents.openOrCreateDefaultIdForProject(
-        input.projectId
-      )
+      if (removal === 'deleted') ctx.yjsRuntime.evictLiveDocument(input.id)
+      const defaultDocumentId = await ctx.services.documents.openOrCreateDefaultIdForProject(input.projectId)
 
       projectSyncBus.publish({
         type: 'documents.changed',
         projectId: input.projectId,
         reason: 'documents.delete',
         changedDocumentIds: defaultDocumentId ? [defaultDocumentId] : [],
-        deletedDocumentIds: [input.id],
+        deletedDocumentIds: removal === 'deleted' ? [input.id] : [],
         defaultDocumentId,
       })
 
-      return { success: true, defaultDocumentId }
+      return { success: true, removal, defaultDocumentId }
     }),
 
   move: protectedProcedure
@@ -513,6 +601,7 @@ export const documentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId)
+      await assertDocumentAccess(ctx, input.id)
       const normalizedPath = normalizeAndValidatePath(input.path, 'Destination path')
       const moved = await ctx.services.documents.moveForProject(
         input.projectId,
@@ -608,8 +697,8 @@ export const documentsRouter = router({
       )
       if (!moved) {
         const existing = await ctx.services.documents.listForProject(input.projectId)
-        const normalizedPaths = existing.map((doc: { title: string }) =>
-          normalizeDocumentPath(doc.title)
+        const normalizedPaths = existing.map((doc: { path: string }) =>
+          normalizeDocumentPath(doc.path)
         )
         const hasSourceDirectory = normalizedPaths.some(
           (path: string) =>
@@ -719,7 +808,7 @@ export const documentsRouter = router({
       }
 
       return {
-        title: normalizeDocumentPath(doc.title),
+        path: normalizeDocumentPath(doc.path),
         markdown,
       }
     }),
@@ -834,6 +923,7 @@ export const documentsRouter = router({
 
       const enqueueResult = await ctx.documentImportRuntime.enqueueImport({
         projectId: input.projectId,
+        ownerUserId: ctx.user.id,
         documents: input.documents,
         parseFailureMode: input.parseFailureMode,
         reason: 'documents.import-many',
@@ -896,6 +986,7 @@ export const documentsRouter = router({
 
       const enqueueResult = await ctx.documentImportRuntime.enqueueImport({
         projectId: input.projectId,
+        ownerUserId: ctx.user.id,
         documents: plannedDocuments,
         parseFailureMode: 'code_block',
         rawHtmlMode: input.rawHtmlMode,

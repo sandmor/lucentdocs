@@ -17,6 +17,7 @@ import { DOCUMENTS_CHANGED_REASONS } from './project-sync.js'
 
 export interface DocumentImportJob {
   projectId: string
+  ownerUserId?: string
   documents: NativeMassImportDocumentInput[]
   parseFailureMode?: 'fail' | 'code_block'
   rawHtmlMode?: MarkdownRawHtmlMode
@@ -25,6 +26,7 @@ export interface DocumentImportJob {
 
 export interface EnqueueImportRequest {
   projectId: string
+  ownerUserId?: string
   documents: NativeMassImportDocumentInput[]
   parseFailureMode?: 'fail' | 'code_block'
   rawHtmlMode?: MarkdownRawHtmlMode
@@ -43,6 +45,7 @@ export interface DocumentImportRuntime {
 
 const documentImportJobSchema = z.object({
   projectId: z.string().min(1),
+  ownerUserId: z.string().min(1).optional(),
   documents: z.array(
     z.object({
       title: z.string(),
@@ -63,6 +66,7 @@ export function createDocumentImportRuntime(options: {
         type: DOCUMENT_IMPORT_JOB_TYPE,
         payload: {
           projectId: request.projectId,
+          ownerUserId: request.ownerUserId,
           documents: request.documents,
           parseFailureMode: request.parseFailureMode,
           rawHtmlMode: request.rawHtmlMode,
@@ -85,8 +89,15 @@ export function createDocumentImportJobHandler(options: {
   repositories: RepositorySet
 }): (job: QueueJobEnvelope<unknown>) => Promise<void> {
   async function runJob(jobId: string, job: DocumentImportJob): Promise<void> {
+    const ownerUserId =
+      job.ownerUserId ?? (await options.services.projects.getById(job.projectId))?.ownerUserId
+    if (!ownerUserId) {
+      throw new Error(`Unable to resolve owner for import project ${job.projectId}.`)
+    }
+
     const importResult = await runNativeMassImport(options.engine, {
       projectId: job.projectId,
+      ownerUserId,
       documents: job.documents,
       parseFailureMode: job.parseFailureMode,
       rawHtmlMode: job.rawHtmlMode,

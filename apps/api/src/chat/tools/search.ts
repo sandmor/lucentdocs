@@ -253,7 +253,7 @@ export function createSearchTool(context: BuildReadToolsContext) {
       const loadedTextByDocumentId = new Map<string, LoadedDocumentText>()
       const matches = []
       for (const result of limitedResults) {
-        const documentPath = normalizeDocumentPath(result.title) || '(untitled)'
+        const documentPath = normalizeDocumentPath(result.path) || '(untitled)'
         const document = await context.services.documents.getForProject(
           context.scope.projectId,
           result.id

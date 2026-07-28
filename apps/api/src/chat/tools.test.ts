@@ -1010,11 +1010,15 @@ function createEditContext(
   yjsRuntime: YjsRuntime
 ) {
   const editSession = new DocumentEditSession()
+  const assertCanEditDocument = async () => {}
+  const assertCanCreateDocument = async () => {}
   return {
     scope: { projectId, documentId },
     services: adapter.services,
     yjsRuntime,
     editSession,
+    assertCanEditDocument,
+    assertCanCreateDocument,
   }
 }
 
@@ -1358,7 +1362,7 @@ describe('buildWriteTools', () => {
     expect(result.action).toBe('created')
 
     const documents = await adapter.services.documents.listForProject(project.id)
-    const created = documents.find((document) => document.title === 'chapters/Chapter 2')
+    const created = documents.find((document) => document.path === 'chapters/Chapter 2')
     expect(created).toBeDefined()
     if (!created) return
     const stored = await adapter.services.documents.getForProject(project.id, created.id)

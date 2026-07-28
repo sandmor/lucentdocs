@@ -14,6 +14,7 @@ import type { DocumentContentRepositoryPort } from './documentContent.port.js'
 import type { DocumentNotesRepositoryPort } from './documentNotes.port.js'
 import type { AppConfigRepositoryPort } from './appConfig.port.js'
 import type { AssistantPreferencesRepositoryPort } from './assistantPreferences.port.js'
+import type { DocumentCollaboratorsRepositoryPort } from './documentCollaborators.port.js'
 
 export interface RepositorySet {
   projects: ProjectsRepositoryPort
@@ -32,4 +33,5 @@ export interface RepositorySet {
   authData: AuthDataRepositoryPort
   appConfig: AppConfigRepositoryPort
   assistantPreferences: AssistantPreferencesRepositoryPort
+  documentCollaborators: DocumentCollaboratorsRepositoryPort
 }

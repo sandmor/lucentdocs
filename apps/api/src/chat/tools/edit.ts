@@ -108,6 +108,7 @@ export function createEditTool(context: BuildEditToolsContext) {
       }
 
       const replacement = validateEditReplacement(new_string)
+      await context.assertCanEditDocument(documentId)
 
       return withDocumentLock(documentId, async () => {
         const noteRows = await context.services.documentNotes.listByDocumentId(documentId)

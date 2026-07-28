@@ -74,7 +74,10 @@ describe('IndexingSettingsService', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: document.id,
+      path: document.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
     await adapter.services.indexingSettings.updateProjectStrategy(projectA.id, {
@@ -139,7 +142,10 @@ describe('IndexingSettingsService', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: secondaryProject.id,
       documentId: document.id,
+      path: document.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
     await adapter.services.indexingSettings.updateUserStrategy('user_1', {

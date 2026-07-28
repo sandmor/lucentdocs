@@ -17,6 +17,7 @@ export interface YjsProviderResult {
 
 export function createYjsProvider(
   documentId: string,
+  projectId: string,
   onConnectionChange?: (status: ConnectionStatus) => void,
   onSync?: () => void,
   onRestoreReset?: () => void
@@ -32,6 +33,11 @@ export function createYjsProvider(
 
   const provider = new WebsocketProvider(wsUrl, documentId, doc, {
     connect: true,
+    // The provider's BroadcastChannel has no server authorization boundary. Keeping
+    // collaboration on the authenticated websocket prevents a stale/local tab from
+    // bypassing a document-role change.
+    disableBc: true,
+    params: { projectId },
   })
 
   provider.on('status', (event: { status: string }) => {

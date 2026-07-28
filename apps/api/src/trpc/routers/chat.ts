@@ -7,22 +7,21 @@ import { protectedProcedure, router } from '../index.js'
 import { ChatRuntimeError } from '../../chat/utils.js'
 import type { ChatObserveEvent } from '../../chat/runtime.js'
 import { configManager } from '../../config/runtime.js'
-import { assertProjectAccess, subscribeToProjectAccessRevocation } from '../access.js'
+import {
+  assertMountedDocumentAccess,
+  assertProjectAccess,
+  subscribeToProjectAccessRevocation,
+} from '../access.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 
-async function assertProjectDocument(
-  projectId: string,
-  documentId: string,
-  services: { documents: { getForProject: (p: string, d: string) => Promise<unknown | null> } }
+async function assertChatGenerationAccess(
+  ctx: Parameters<typeof assertMountedDocumentAccess>[0],
+  input: { projectId: string; documentId: string; chatId: string }
 ): Promise<void> {
-  const document = await services.documents.getForProject(projectId, documentId)
-  if (!document) {
-    throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: `Document ${documentId} not found in project ${projectId}`,
-    })
-  }
+  const thread = await ctx.services.chats.getById(input.projectId, input.documentId, input.chatId)
+  if (!thread) throw new TRPCError({ code: 'NOT_FOUND', message: `Chat thread ${input.chatId} not found` })
+  await assertMountedDocumentAccess(ctx, input, thread.settings.editingEnabled ? 'editor' : 'viewer')
 }
 
 function publishChatChangedEvent(
@@ -78,8 +77,7 @@ export const chatRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertMountedDocumentAccess(ctx, input)
       return {
         threads: await ctx.services.chats.listForDocument(input.projectId, input.documentId),
       }
@@ -94,8 +92,7 @@ export const chatRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertMountedDocumentAccess(ctx, input)
       const state = await ctx.chatRuntime.getObserveState(input)
       if (!state.thread) {
         throw new TRPCError({
@@ -132,8 +129,7 @@ export const chatRouter = router({
         let unsubscribe: (() => void) | null = null
         let unsubscribeAccess: (() => void) | null = null
 
-        void assertProjectAccess(ctx, input.projectId)
-          .then(() => assertProjectDocument(input.projectId, input.documentId, ctx.services))
+        void assertMountedDocumentAccess(ctx, input)
           .then(() => {
             unsubscribeAccess = subscribeToProjectAccessRevocation(
               ctx,
@@ -189,8 +185,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertMountedDocumentAccess(ctx, input, input.editingEnabled ? 'editor' : 'viewer')
       const created = await ctx.services.chats.create(
         input.projectId,
         input.documentId,
@@ -228,8 +223,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertMountedDocumentAccess(ctx, input, input.editingEnabled ? 'editor' : 'viewer')
       const updated = await ctx.services.chats.updateSettings(
         input.projectId,
         input.documentId,
@@ -271,8 +265,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertChatGenerationAccess(ctx, input)
       const updated = await ctx.services.chats.rename(
         input.projectId,
         input.documentId,
@@ -299,8 +292,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertMountedDocumentAccess(ctx, input)
       const text = input.text.trim()
       const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
       if (text.length === 0 || text.length > maxChatMessageChars) {
@@ -337,8 +329,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertChatGenerationAccess(ctx, input)
       const text = input.text.trim()
       const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
       if (text.length === 0 || text.length > maxChatMessageChars) {
@@ -349,10 +340,13 @@ export const chatRouter = router({
       }
 
       try {
-        const started = await ctx.chatRuntime.editMessageAndGenerate(input, input.messageId, text, {
-          selectionFrom: input.selectionFrom,
-          selectionTo: input.selectionTo,
-        })
+        const started = await ctx.chatRuntime.editMessageAndGenerate(
+          input,
+          input.messageId,
+          text,
+          ctx.user.id,
+          { selectionFrom: input.selectionFrom, selectionTo: input.selectionTo }
+        )
         return { accepted: true, generationId: started.generationId }
       } catch (error) {
         throw mapRuntimeError(error)
@@ -369,8 +363,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertChatGenerationAccess(ctx, input)
 
       try {
         const updated = await ctx.chatRuntime.selectBranch(input, input.nodeId)
@@ -398,11 +391,10 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertChatGenerationAccess(ctx, input)
 
       try {
-        const started = await ctx.chatRuntime.regenerateFromMessage(input, input.messageId, {
+        const started = await ctx.chatRuntime.regenerateFromMessage(input, input.messageId, ctx.user.id, {
           selectionFrom: input.selectionFrom,
           selectionTo: input.selectionTo,
         })
@@ -423,8 +415,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertMountedDocumentAccess(ctx, input)
 
       try {
         const updated = await ctx.chatRuntime.deleteMessagesById(input, input.messageId, input.mode)
@@ -453,10 +444,12 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertChatGenerationAccess(ctx, input)
       if (input.contextDocumentId) {
-        await assertProjectDocument(input.projectId, input.contextDocumentId, ctx.services)
+        await assertMountedDocumentAccess(ctx, {
+          projectId: input.projectId,
+          documentId: input.contextDocumentId,
+        })
       }
       const message = input.message.trim()
       const maxChatMessageChars = configManager.getConfig().limits.chatMessageChars
@@ -468,7 +461,7 @@ export const chatRouter = router({
       }
 
       try {
-        const started = await ctx.chatRuntime.startGeneration({ ...input, message })
+        const started = await ctx.chatRuntime.startGeneration({ ...input, message, actorUserId: ctx.user.id })
         return { accepted: true, generationId: started.generationId }
       } catch (error) {
         throw mapRuntimeError(error)
@@ -485,8 +478,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertMountedDocumentAccess(ctx, input)
       // A stop is intentionally chat-scoped: any connected collaborator can
       // stop the active project-assistant run. The optional ID is retained for
       // older clients, but a stale local pump must not block a real stop.
@@ -502,8 +494,7 @@ export const chatRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId)
-      await assertProjectDocument(input.projectId, input.documentId, ctx.services)
+      await assertMountedDocumentAccess(ctx, input)
       const deleted = await ctx.services.chats.delete(
         input.projectId,
         input.documentId,

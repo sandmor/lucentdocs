@@ -485,7 +485,11 @@ pub async fn get_vector_payload_context(
   engine
     .with_conn(tx_id, async |conn| {
       let document_row = sqlx::query_as::<_, (String, String)>(
-        "SELECT id, title FROM documents WHERE id = ?",
+        "SELECT d.id, COALESCE(home_mount.path, d.title)
+           FROM documents AS d
+           LEFT JOIN project_documents AS home_mount
+             ON home_mount.documentId = d.id AND home_mount.projectId = d.homeProjectId
+          WHERE d.id = ?",
       )
       .bind(document_id)
       .fetch_optional(&mut *conn)

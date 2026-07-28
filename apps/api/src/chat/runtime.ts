@@ -22,6 +22,7 @@ import {
 } from './utils.js'
 
 export interface StartChatGenerationInput extends ChatScope {
+  actorUserId: string
   message: string
   contextDocumentId?: string
   selectionFrom?: number
@@ -287,15 +288,17 @@ export class ChatRuntime {
   async regenerateFromMessage(
     scope: ChatScope,
     messageId: string,
+    actorUserId: string,
     options?: { selectionFrom?: number; selectionTo?: number }
   ): Promise<{ generationId: string }> {
-    return this.#forkAndGenerate(scope, messageId, options)
+    return this.#forkAndGenerate(scope, messageId, actorUserId, options)
   }
 
   async editMessageAndGenerate(
     scope: ChatScope,
     messageId: string,
     text: string,
+    actorUserId: string,
     options?: { selectionFrom?: number; selectionTo?: number }
   ): Promise<{ generationId: string }> {
     const thread = await this.#services.chats.getById(
@@ -324,6 +327,7 @@ export class ChatRuntime {
       await this.updateMessageById(scope, messageId, text)
       return this.startGeneration({
         ...scope,
+        actorUserId,
         message: '',
         selectionFrom: options?.selectionFrom,
         selectionTo: options?.selectionTo,
@@ -332,19 +336,20 @@ export class ChatRuntime {
 
     if (isLeaf && node.role === 'assistant') {
       await this.updateMessageById(scope, messageId, text)
-      return this.regenerateFromMessage(scope, messageId, options)
+      return this.regenerateFromMessage(scope, messageId, actorUserId, options)
     }
 
     if (node.role === 'user') {
-      return this.#forkAndGenerate(scope, messageId, { ...options, text })
+      return this.#forkAndGenerate(scope, messageId, actorUserId, { ...options, text })
     }
 
-    return this.#forkAndGenerate(scope, messageId, options)
+    return this.#forkAndGenerate(scope, messageId, actorUserId, options)
   }
 
   async #forkAndGenerate(
     scope: ChatScope,
     messageId: string,
+    actorUserId: string,
     options?: { text?: string; selectionFrom?: number; selectionTo?: number }
   ): Promise<{ generationId: string }> {
     const key = this.#beginTreeMutation(scope)
@@ -400,6 +405,7 @@ export class ChatRuntime {
 
     return this.#runGeneration(scope, {
       ...scope,
+      actorUserId,
       message: '',
       assistantNodeId,
       promptMessages,
@@ -597,6 +603,7 @@ export class ChatRuntime {
       void this.#generationEngine.runGeneration(
         {
           scope,
+          actorUserId: input.actorUserId,
           contextDocumentId: input.contextDocumentId,
           baseThread: liveThread,
           promptMessages,

@@ -8,6 +8,7 @@ import { ListToolbar } from './browser/list-toolbar'
 import { useDocumentBrowser } from './browser/use-document-browser'
 import type { DocumentBrowserProps } from './browser/types'
 import { SearchResultsList } from './browser/search-results'
+import { ShareDocumentDialog } from './share-document-dialog'
 
 export function DocumentBrowser(props: DocumentBrowserProps) {
   const { onSearchResultMarkersChange } = props
@@ -108,6 +109,7 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
               onDeleteDocument={browser.handleDeleteDocument}
               onExportDocument={browser.handleExportDocument}
               onCopyDocumentAsMarkdown={browser.handleCopyDocumentAsMarkdown}
+              onShareDocument={browser.handleShareDocument}
               onRenameDirectory={browser.handleRenameDirectory}
               onMoveDirectory={browser.handleMoveDirectory}
               onDeleteDirectory={browser.handleDeleteDirectory}
@@ -194,6 +196,14 @@ export function DocumentBrowser(props: DocumentBrowserProps) {
           isLoadingDocumentEmbeddingModel={browser.isLoadingDocumentEmbeddingModel}
           isSavingDocumentEmbeddingModel={browser.isSavingDocumentEmbeddingModel}
         />
+        {browser.shareDocumentId && (
+          <ShareDocumentDialog
+            documentId={browser.shareDocumentId}
+            open
+            onOpenChange={(open) => !open && browser.setShareDocumentId(null)}
+            hideTrigger
+          />
+        )}
       </section>
     </DndContext>
   )

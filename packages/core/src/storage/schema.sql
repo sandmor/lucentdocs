@@ -16,6 +16,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_owner_user_id ON projects(ownerUserId);
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
+  homeProjectId TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
   type TEXT NOT NULL DEFAULT 'manuscript',
   metadata TEXT,
   createdAt INTEGER NOT NULL,
@@ -26,14 +27,74 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type);
 -- ;;
 
+CREATE INDEX IF NOT EXISTS idx_documents_home_project_id ON documents(homeProjectId);
+-- ;;
+
 CREATE TABLE IF NOT EXISTS project_documents (
   projectId TEXT NOT NULL,
   documentId TEXT NOT NULL,
+  path TEXT NOT NULL,
+  addedByUserId TEXT NOT NULL,
   addedAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
   PRIMARY KEY (projectId, documentId),
   FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE,
   FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
 );
+-- ;;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_documents_project_path
+  ON project_documents(projectId, path);
+-- ;;
+
+CREATE INDEX IF NOT EXISTS idx_project_documents_document
+  ON project_documents(documentId, addedAt DESC);
+-- ;;
+
+CREATE TABLE IF NOT EXISTS project_directories (
+  projectId TEXT NOT NULL,
+  path TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  PRIMARY KEY (projectId, path),
+  FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+);
+-- ;;
+
+CREATE TABLE IF NOT EXISTS document_collaborators (
+  documentId TEXT NOT NULL,
+  userId TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('viewer', 'editor')),
+  grantedByUserId TEXT NOT NULL,
+  grantSource TEXT NOT NULL CHECK (grantSource IN ('invite', 'project_transfer', 'ownership_transfer')),
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  PRIMARY KEY (documentId, userId),
+  FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+);
+-- ;;
+
+CREATE INDEX IF NOT EXISTS idx_document_collaborators_user
+  ON document_collaborators(userId, updatedAt DESC);
+-- ;;
+
+CREATE TABLE IF NOT EXISTS document_share_invitations (
+  id TEXT PRIMARY KEY,
+  documentId TEXT NOT NULL,
+  recipientUserId TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('viewer', 'editor')),
+  invitedByUserId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  acceptedAt INTEGER,
+  declinedAt INTEGER,
+  revokedAt INTEGER,
+  FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+);
+-- ;;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_share_invitations_pending
+  ON document_share_invitations(documentId, recipientUserId)
+  WHERE acceptedAt IS NULL AND declinedAt IS NULL AND revokedAt IS NULL;
 -- ;;
 
 CREATE TABLE IF NOT EXISTS yjs_documents (

@@ -27,6 +27,7 @@ pub struct UpdateProjectDataDto {
 pub struct DocumentDto {
   pub id: String,
   pub title: String,
+  pub home_project_id: String,
   pub r#type: String,
   pub metadata_json: Option<String>,
   pub created_at: i64,
@@ -37,17 +38,47 @@ pub struct DocumentDto {
 #[derive(Clone, Debug)]
 pub struct UpdateDocumentDataDto {
   pub title: Option<String>,
+  pub home_project_id: Option<String>,
   pub metadata_json: Option<String>,
   pub clear_metadata: bool,
   pub updated_at: i64,
 }
 
 #[napi(object)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, sqlx::FromRow)]
 pub struct ProjectDocumentDto {
   pub project_id: String,
   pub document_id: String,
+  pub path: String,
+  pub added_by_user_id: String,
   pub added_at: i64,
+  pub updated_at: i64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub struct DocumentCollaboratorDto {
+  pub document_id: String,
+  pub user_id: String,
+  pub role: String,
+  pub granted_by_user_id: String,
+  pub grant_source: String,
+  pub created_at: i64,
+  pub updated_at: i64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub struct DocumentShareInvitationDto {
+  pub id: String,
+  pub document_id: String,
+  pub recipient_user_id: String,
+  pub role: String,
+  pub invited_by_user_id: String,
+  pub created_at: i64,
+  pub accepted_at: Option<i64>,
+  pub declined_at: Option<i64>,
+  pub revoked_at: Option<i64>,
 }
 
 #[napi(object)]

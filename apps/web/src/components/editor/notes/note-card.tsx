@@ -17,6 +17,7 @@ interface NoteCardProps {
   isExpanded: boolean
   /** When true, note enters editing state immediately on expand (e.g. newly created) */
   isNew?: boolean
+  readOnly?: boolean
   onExpand: () => void
   onCollapse: () => void
   onDelete: () => void
@@ -43,6 +44,7 @@ export function NoteCard({
   authorColor,
   isExpanded,
   isNew,
+  readOnly = false,
   onExpand,
   onCollapse,
   onDelete,
@@ -58,7 +60,7 @@ export function NoteCard({
   if (isExpanded !== prevExpanded) {
     setPrevExpanded(isExpanded)
     if (isExpanded) {
-      setEditMode(isNew ? 'editing' : 'reading')
+      setEditMode(!readOnly && isNew ? 'editing' : 'reading')
     }
   }
 
@@ -76,7 +78,7 @@ export function NoteCard({
   }, [isCollapsed, onCollapse])
 
   const handleBodyClick = useCallback(() => {
-    if (editMode === 'reading') {
+    if (!readOnly && editMode === 'reading') {
       setEditMode('editing')
       requestAnimationFrame(() => editorRef.current?.focus())
     }
@@ -135,7 +137,7 @@ export function NoteCard({
             <span className="truncate text-xs font-medium text-foreground/80">{authorLabel}</span>
           </div>
           <div className="flex items-center gap-1">
-            <button
+            {!readOnly && <button
               type="button"
               title="Minimize note"
               aria-label="Minimize note"
@@ -146,7 +148,7 @@ export function NoteCard({
               }}
             >
               <Minimize2 className="size-3.5" />
-            </button>
+            </button>}
             <button
               type="button"
               aria-label="Delete note"
@@ -166,19 +168,19 @@ export function NoteCard({
             'overflow-y-auto',
             editMode === 'reading' ? 'max-h-none min-h-0 cursor-text' : 'max-h-[55vh] min-h-16'
           )}
-          onClick={handleBodyClick}
+          onClick={readOnly ? undefined : handleBodyClick}
         >
           <NoteEditor
             ref={editorRef}
             body={note.body}
             yMap={note.yMap}
-            editable={editMode === 'editing'}
+            editable={!readOnly && editMode === 'editing'}
             onFocus={handleEditorFocus}
             onBlur={handleEditorBlur}
           />
         </div>
 
-        {editMode === 'reading' && (
+        {!readOnly && editMode === 'reading' && (
           <div className="pointer-events-none mt-1 select-none text-right text-[10px] text-muted-foreground/40">
             click to edit
           </div>

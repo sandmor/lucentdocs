@@ -274,6 +274,7 @@ describe('runNativeMassImport', () => {
 
       const result = await runNativeMassImport(adapter.adapter.engine, {
         projectId: project.id,
+        ownerUserId: 'owner_1',
         documents: [{ title: 'rich.md', markdown }],
         parseFailureMode: 'fail',
         rawHtmlMode: 'code_block',
@@ -325,6 +326,7 @@ describe('runNativeMassImport', () => {
 
       const result = await runNativeMassImport(adapter.adapter.engine, {
         projectId: project.id,
+        ownerUserId: 'owner_1',
         documents: [{ title: 'drop.md', markdown }],
         parseFailureMode: 'fail',
         rawHtmlMode: 'drop',

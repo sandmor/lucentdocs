@@ -27,10 +27,11 @@ import { useEditorStore } from '@/lib/editor-store'
 interface ChatPanelProps {
   projectId?: string
   documentId: string | null
+  canEditDocument?: boolean
   className?: string
 }
 
-export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) {
+export function ChatPanel({ projectId, documentId, canEditDocument = false, className }: ChatPanelProps) {
   const editorSelection = useEditorStore((s) => s.editorSelection)
   const utils = trpc.useUtils()
   const [messages, setMessages] = useState<UIMessage[]>([])
@@ -119,7 +120,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
 
   const editingEnabled = hasActiveThreadId
     ? (activeThreadQuery.data?.settings.editingEnabled ?? false)
-    : draftEditingEnabled
+    : draftEditingEnabled && canEditDocument
 
   useEffect(() => {
     if (
@@ -137,6 +138,10 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       return () => window.clearTimeout(timeoutId)
     }
   }, [assistantPreferencesQuery.data, hasActiveThreadId, projectId])
+
+  useEffect(() => {
+    if (!canEditDocument) setDraftEditingEnabled(false)
+  }, [canEditDocument])
 
   const { streamGenerationIdRef, enqueueStreamChunk, stopStreamChunkPump, startStreamChunkPump } =
     useChatStreamPump({
@@ -401,7 +406,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
       const created = await createThreadMutation.mutateAsync({
         projectId,
         documentId,
-        editingEnabled: draftEditingEnabled,
+        editingEnabled: draftEditingEnabled && canEditDocument,
       })
       utils.chat.listByProject.setData({ projectId }, (previous) => {
         const existing = previous?.threads ?? []
@@ -734,7 +739,7 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
     }
 
     let targetChatId = activeThreadId
-    const initialEditingEnabled = draftEditingEnabled
+    const initialEditingEnabled = draftEditingEnabled && canEditDocument
 
     if (!targetChatId) {
       const newChatId = await createThread()
@@ -858,7 +863,12 @@ export function ChatPanel({ projectId, documentId, className }: ChatPanelProps) 
                 size="sm"
                 checked={editingEnabled}
                 aria-label={editingEnabled ? 'Agent mode enabled' : 'Ask mode enabled'}
-                disabled={!queryEnabled || isGenerating || updateSettingsMutation.isPending}
+                disabled={
+                  !queryEnabled ||
+                  !canEditDocument ||
+                  isGenerating ||
+                  updateSettingsMutation.isPending
+                }
                 onCheckedChange={(checked) => {
                   if (!projectId || !operationDocumentId) return
 

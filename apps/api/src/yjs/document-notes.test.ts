@@ -40,8 +40,9 @@ describe('document notes integration', () => {
   let adapter: TestAdapter
   let yjsRuntime: YjsRuntime
   let documentsService: DocumentsService
+  let projectId: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     adapter = createTestAdapter()
     yjsRuntime = createYjsRuntime(
       {
@@ -54,6 +55,9 @@ describe('document notes integration', () => {
     )
     yjsRuntime.initialize()
     documentsService = adapter.services.documents
+    projectId = (await adapter.services.projects.create('Document notes fixtures', {
+      ownerUserId: 'notes-test-user',
+    })).id
   })
 
   afterEach(() => {
@@ -61,8 +65,14 @@ describe('document notes integration', () => {
     void adapter.adapter.engine.close()
   })
 
+  const createDocument = async (title: string, content?: string, type?: string) => {
+    const document = await documentsService.createForProject(projectId, title, content, type)
+    if (!document) throw new Error(`Expected fixture document ${title} to be created.`)
+    return document
+  }
+
   test('snapshot restore rolls back bundled notes with document content', async () => {
-    const doc = await documentsService.create('notes-restore.md')
+    const doc = await createDocument('notes-restore.md')
 
     await yjsRuntime.replaceDocumentBundle(doc.id, {
       doc: makeDoc('before notes'),
@@ -103,7 +113,7 @@ describe('document notes integration', () => {
   })
 
   test('flush persists live notes map to document_notes', async () => {
-    const doc = await documentsService.create('notes-persist.md')
+    const doc = await createDocument('notes-persist.md')
     await yjsRuntime.ensureDocumentLoaded(doc.id)
     const liveDoc = docs.get(doc.id)!
     hydrateNotesMap(liveDoc, [

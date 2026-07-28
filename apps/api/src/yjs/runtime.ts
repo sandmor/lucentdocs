@@ -30,7 +30,7 @@ import {
   type SerializedNoteFromYjs,
 } from './document-notes.js'
 
-export { setupWSConnection }
+export { setupWSConnection, getYDoc }
 
 export interface YjsRepositorySet {
   yjsDocuments: YjsDocumentsRepositoryPort

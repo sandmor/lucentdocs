@@ -20,6 +20,7 @@ import { createAuthService } from './auth.service.js'
 import { createEditorPreferencesService } from './editorPreferences.service.js'
 import { createAssistantPreferencesService } from './assistantPreferences.service.js'
 import { createMcpSettingsService } from './mcpSettings.service.js'
+import { createDocumentSharingService } from './documentSharing.service.js'
 import type { ServiceSet } from './types.js'
 
 export function createCoreServiceSet(dependencies: {
@@ -50,25 +51,28 @@ export function createCoreServiceSet(dependencies: {
       embeddingIndex.deleteDocuments(documentIds, { references }),
   })
 
-  return {
-    projects: createProjectsService(dependencies.repositories, dependencies.transaction, {
+  const documents = createDocumentsService(
+    dependencies.repositories,
+    dependencies.transaction,
+    aiSettings,
+    embeddingModelSelection,
+    {
+      onDocumentContentStored: (documentId) => embeddingIndex.enqueueDocument(documentId),
+      onDocumentsContentStored: (documentIds) => embeddingIndex.enqueueDocuments(documentIds),
       onDocumentsDeleted: (documentIds, references) => {
         documentDeleteCleanup.schedule(documentIds, references)
       },
-    }),
-    documents: createDocumentsService(
-      dependencies.repositories,
-      dependencies.transaction,
-      aiSettings,
-      embeddingModelSelection,
-      {
-        onDocumentContentStored: (documentId) => embeddingIndex.enqueueDocument(documentId),
-        onDocumentsContentStored: (documentIds) => embeddingIndex.enqueueDocuments(documentIds),
-        onDocumentsDeleted: (documentIds, references) => {
-          documentDeleteCleanup.schedule(documentIds, references)
-        },
-      }
-    ),
+    }
+  )
+
+  const projects = createProjectsService(dependencies.repositories, dependencies.transaction, {
+    deleteDocument: (id) => documents.delete(id),
+  })
+
+  return {
+    projects,
+    documents,
+    documentSharing: createDocumentSharingService(dependencies.repositories, dependencies.transaction),
     documentNotes: createDocumentNotesService(dependencies.repositories),
     chats: createChatsService(dependencies.repositories),
     aiSettings,

@@ -110,7 +110,7 @@ export function buildRows(allDocuments: DocumentItem[], currentPath: string): Br
   }
 
   for (const doc of allDocuments) {
-    const normalizedTitle = normalizeDocumentPath(doc.title)
+    const normalizedTitle = normalizeDocumentPath(doc.path)
     if (!normalizedTitle) continue
 
     if (isDirectorySentinelPath(normalizedTitle)) {

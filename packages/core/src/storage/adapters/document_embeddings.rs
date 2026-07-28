@@ -402,16 +402,16 @@ async fn search_matches(
           let escaped = escape_sql_like_pattern(path);
           if directory_exact {
             scope_fragments.push(
-              "               AND scoped_doc.title LIKE ? ESCAPE '\\'
-                   AND scoped_doc.title NOT LIKE ? ESCAPE '\\'".to_string(),
+              "               AND pd.path LIKE ? ESCAPE '\\'
+                   AND pd.path NOT LIKE ? ESCAPE '\\'".to_string(),
             );
             scope_params.push(format!("{escaped}/%"));
             scope_params.push(format!("{escaped}/%/%"));
           } else {
             scope_fragments.push(
               "               AND (
-                    scoped_doc.title = ?
-                    OR scoped_doc.title LIKE ? ESCAPE '\\'
+                    pd.path = ?
+                    OR pd.path LIKE ? ESCAPE '\\'
                   )"
                 .to_string(),
             );
@@ -419,7 +419,7 @@ async fn search_matches(
             scope_params.push(format!("{escaped}/%"));
           }
         } else if directory_exact {
-          scope_fragments.push("               AND scoped_doc.title NOT LIKE ? ESCAPE '\\'".to_string());
+          scope_fragments.push("               AND pd.path NOT LIKE ? ESCAPE '\\'".to_string());
           scope_params.push("%/%".to_string());
         }
       }

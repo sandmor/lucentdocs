@@ -351,6 +351,8 @@ async function startServer() {
     authPort: container.authPort,
     projects: container.repositories.projects,
     projectDocuments: container.repositories.projectDocuments,
+    documents: container.repositories.documents,
+    documentCollaborators: container.repositories.documentCollaborators,
   })
   const trpcWs = setupTrpcWebSocket(httpServer, ({ req }) => createWsTrpcContext(req))
   // Snapshotting starts only after websocket servers exist so connected-document

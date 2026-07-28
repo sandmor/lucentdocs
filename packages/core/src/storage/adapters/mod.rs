@@ -8,6 +8,7 @@ pub mod document_embedding_metadata;
 pub mod document_embeddings;
 pub mod document_notes;
 pub mod documents;
+pub mod document_collaborators;
 pub mod indexing_settings;
 pub mod job_queue;
 pub mod persist_bundle;

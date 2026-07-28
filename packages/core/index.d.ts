@@ -98,12 +98,25 @@ export declare class NativeStorageEngine {
   jobQueueGetTypeStats(txId: string | undefined | null, jobType: string): Promise<JobQueueTypeStatsDto>
   projectDocumentsInsert(txId: string | undefined | null, row: ProjectDocumentDto): Promise<void>
   projectDocumentsHasProjectDocument(txId: string | undefined | null, projectId: string, documentId: string): Promise<boolean>
+  projectDocumentsListByProject(txId: string | undefined | null, projectId: string): Promise<Array<ProjectDocumentDto>>
+  projectDocumentsListByDocument(txId: string | undefined | null, documentId: string): Promise<Array<ProjectDocumentDto>>
+  projectDocumentsUpdatePath(txId: string | undefined | null, projectId: string, documentId: string, path: string, updatedAt: number): Promise<boolean>
+  projectDocumentsDelete(txId: string | undefined | null, projectId: string, documentId: string): Promise<boolean>
   projectDocumentsFindAssociatedDocumentIds(txId: string | undefined | null, projectId: string, documentIds: Array<string>): Promise<Array<string>>
   projectDocumentsListDocumentIds(txId?: string | undefined | null): Promise<Array<string>>
   projectDocumentsFindSoleDocumentIdsByProjectId(txId: string | undefined | null, projectId: string): Promise<Array<string>>
   projectDocumentsFindProjectIdsByDocumentId(txId: string | undefined | null, documentId: string): Promise<Array<string>>
   projectDocumentsFindSoleProjectIdByDocumentId(txId: string | undefined | null, documentId: string): Promise<string | null>
   projectDocumentsFindSoleProjectIdsByDocumentIds(txId: string | undefined | null, documentIds: Array<string>): Promise<Record<string, string>>
+  documentCollaboratorsListForDocument(txId: string | undefined | null, documentId: string): Promise<Array<DocumentCollaboratorDto>>
+  documentCollaboratorsListForUser(txId: string | undefined | null, userId: string): Promise<Array<DocumentCollaboratorDto>>
+  documentCollaboratorsFind(txId: string | undefined | null, documentId: string, userId: string): Promise<DocumentCollaboratorDto | null>
+  documentCollaboratorsUpsert(txId: string | undefined | null, row: DocumentCollaboratorDto): Promise<void>
+  documentCollaboratorsDelete(txId: string | undefined | null, documentId: string, userId: string): Promise<void>
+  documentShareInvitationsInsert(txId: string | undefined | null, row: DocumentShareInvitationDto): Promise<void>
+  documentShareInvitationsListForUser(txId: string | undefined | null, userId: string): Promise<Array<DocumentShareInvitationDto>>
+  documentShareInvitationsFind(txId: string | undefined | null, id: string): Promise<DocumentShareInvitationDto | null>
+  documentShareInvitationsSetState(txId: string | undefined | null, id: string, field: string, at: number): Promise<void>
   projectsFindAll(txId?: string | undefined | null): Promise<Array<ProjectDto>>
   projectsFindByOwnerUserId(txId: string | undefined | null, ownerUserId: string): Promise<Array<ProjectDto>>
   projectsFindById(txId: string | undefined | null, id: string): Promise<ProjectDto | null>
@@ -236,6 +249,16 @@ export interface CompleteLeasedJobInputDto {
   expectedUpdatedAt?: number
 }
 
+export interface DocumentCollaboratorDto {
+  documentId: string
+  userId: string
+  role: string
+  grantedByUserId: string
+  grantSource: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface DocumentContentDto {
   documentId: string
   content: string
@@ -245,6 +268,7 @@ export interface DocumentContentDto {
 export interface DocumentDto {
   id: string
   title: string
+  homeProjectId: string
   type: string
   metadataJson?: string
   createdAt: number
@@ -284,6 +308,18 @@ export interface DocumentNoteDto {
   authorUserId: string
   createdAt: number
   updatedAt: number
+}
+
+export interface DocumentShareInvitationDto {
+  id: string
+  documentId: string
+  recipientUserId: string
+  role: string
+  invitedByUserId: string
+  createdAt: number
+  acceptedAt?: number
+  declinedAt?: number
+  revokedAt?: number
 }
 
 export interface DocumentVectorPayloadContextDto {
@@ -426,6 +462,7 @@ export interface MassImportDocumentInput {
 
 export interface MassImportRequest {
   projectId: string
+  ownerUserId: string
   documents: Array<MassImportDocumentInput>
   parseFailureMode?: string
   rawHtmlMode?: MarkdownRawHtmlMode
@@ -469,7 +506,10 @@ export declare function prepareEmbeddingDocuments(requests: Array<EmbeddingDocum
 export interface ProjectDocumentDto {
   projectId: string
   documentId: string
+  path: string
+  addedByUserId: string
   addedAt: number
+  updatedAt: number
 }
 
 export interface ProjectDto {
@@ -567,6 +607,7 @@ export interface UpdateAssistantThreadDataDto {
 
 export interface UpdateDocumentDataDto {
   title?: string
+  homeProjectId?: string
   metadataJson?: string
   clearMetadata: boolean
   updatedAt: number

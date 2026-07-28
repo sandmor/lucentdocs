@@ -4,6 +4,7 @@ import { EditorPage } from '@/pages/editor'
 import { AdminConfigPage } from '@/pages/admin-config'
 import { AdminPromptsPage } from '@/pages/admin-prompts'
 import { AdminUsersPage } from '@/pages/admin-users'
+import { AdminDocumentsPage } from '@/pages/admin-documents'
 import { UserSettingsPage } from '@/pages/user-settings'
 
 import { LoginPage } from '@/pages/auth/login'
@@ -20,6 +21,7 @@ export const routes = createRoutesFromElements(
       <Route path="/settings" element={<UserSettingsPage />} />
       <Route path="/admin/config" element={<AdminConfigPage />} />
       <Route path="/admin/users" element={<AdminUsersPage />} />
+      <Route path="/admin/documents" element={<AdminDocumentsPage />} />
       <Route path="/admin/prompts" element={<AdminPromptsPage />} />
       <Route path="/project/:id" element={<EditorPage />} />
     </Route>

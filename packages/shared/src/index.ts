@@ -1,5 +1,11 @@
 export type { Project } from './project.js'
-export type { Document } from './document.js'
+export {
+  DOCUMENT_ACCESS_ROLES,
+  type Document,
+  type DocumentAccessRole,
+  type ProjectDocument,
+  type ProjectDocumentMount,
+} from './document.js'
 export type { JsonObject, JsonValue } from './json.js'
 export { computeDocumentCounters, type DocumentCounters } from './document-counters.js'
 export { isJsonObject } from './json.js'

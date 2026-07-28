@@ -27,6 +27,7 @@ interface NoteSheetProps {
   projectId?: string
   currentUserId: string
   onClose: () => void
+  readOnly?: boolean
 }
 
 function NoteSheetItem({
@@ -34,17 +35,19 @@ function NoteSheetItem({
   authorLabel,
   authorColor,
   onDelete,
+  readOnly = false,
 }: {
   note: DocumentNoteViewModel
   authorLabel: string
   authorColor: string
   onDelete: () => void
+  readOnly?: boolean
 }) {
   const [isEditing, setIsEditing] = useState(false)
   const editorRef = useRef<NoteEditorHandle>(null)
 
   const handleBodyClick = useCallback(() => {
-    if (!isEditing) {
+    if (!readOnly && !isEditing) {
       setIsEditing(true)
       requestAnimationFrame(() => editorRef.current?.focus())
     }
@@ -66,14 +69,14 @@ function NoteSheetItem({
           />
           <span className="text-sm font-medium">{authorLabel}</span>
         </div>
-        <button
+        {!readOnly && <button
           type="button"
           className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           aria-label="Delete note"
           onClick={onDelete}
         >
           <Trash2 className="size-4" />
-        </button>
+        </button>}
       </div>
 
       <div
@@ -81,19 +84,19 @@ function NoteSheetItem({
           isEditing ? 'min-h-16' : 'min-h-0',
           !isEditing && 'cursor-text'
         )}
-        onClick={handleBodyClick}
+        onClick={readOnly ? undefined : handleBodyClick}
       >
         <NoteEditor
           ref={editorRef}
           body={note.body}
           yMap={note.yMap}
-          editable={isEditing}
+          editable={!readOnly && isEditing}
           onFocus={() => setIsEditing(true)}
           onBlur={handleBlur}
         />
       </div>
 
-      {!isEditing && (
+      {!readOnly && !isEditing && (
         <div className="pointer-events-none mt-1 select-none text-right text-[10px] text-muted-foreground/40">
           tap to edit
         </div>
@@ -111,6 +114,7 @@ export function NoteSheet({
   projectId,
   currentUserId,
   onClose,
+  readOnly = false,
 }: NoteSheetProps) {
   const authorLabels = useNoteAuthorLabels(
     notes.map((note) => note.authorUserId),
@@ -143,12 +147,13 @@ export function NoteSheet({
                 authorLabel={authorLabels.getLabel(note.authorUserId)}
                 authorColor={authorLabels.getColor(note.authorUserId)}
                 onDelete={() => deleteNoteAndReconcileMarker(view, notesMap, note.id)}
+                readOnly={readOnly}
               />
             ))
           )}
         </div>
         <div className="pt-1 border-t border-border/50">
-          <Button
+          {!readOnly && <Button
             type="button"
             variant="ghost"
             size="sm"
@@ -157,7 +162,7 @@ export function NoteSheet({
           >
             <Plus className="size-4" />
             Add note
-          </Button>
+          </Button>}
         </div>
       </DialogContent>
     </Dialog>

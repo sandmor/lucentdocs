@@ -55,7 +55,10 @@ describe('indexingRouter', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: document.id,
+      path: document.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
     const caller = indexingRouter.createCaller(
@@ -104,7 +107,10 @@ describe('indexingRouter', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: document.id,
+      path: document.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
     await adapter.services.indexingSettings.updateProjectStrategy(projectA.id, {
@@ -152,7 +158,10 @@ describe('indexingRouter', () => {
     await adapter.repositories.projectDocuments.insert({
       projectId: projectB.id,
       documentId: document.id,
+      path: document.id,
+      addedByUserId: 'user_1',
       addedAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
     await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([document.id])

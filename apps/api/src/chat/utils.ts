@@ -126,14 +126,14 @@ function addDirectoryWithAncestors(pathValue: string, directories: Set<string>):
 
 export async function buildProjectFileIndex(
   projectId: string,
-  listDocumentsForProject: (projectId: string) => Promise<Array<{ id: string; title: string }>>
+  listDocumentsForProject: (projectId: string) => Promise<Array<{ id: string; path: string }>>
 ): Promise<ProjectFileIndex> {
   const documents = await listDocumentsForProject(projectId)
   const files = new Map<string, string>()
   const directories = new Set<string>([''])
 
   for (const document of documents) {
-    const normalizedTitle = normalizeDocumentPath(document.title)
+    const normalizedTitle = normalizeDocumentPath(document.path)
     if (!normalizedTitle) continue
 
     if (isDirectorySentinelPath(normalizedTitle)) {

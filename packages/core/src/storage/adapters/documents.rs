@@ -7,6 +7,8 @@ use crate::storage::json_util::ids_json;
 struct DocumentRow {
   id: String,
   title: String,
+  #[sqlx(rename = "homeProjectId")]
+  home_project_id: String,
   r#type: String,
   metadata: Option<String>,
   #[sqlx(rename = "createdAt")]
@@ -19,6 +21,7 @@ fn row_to_dto(row: DocumentRow) -> DocumentDto {
   DocumentDto {
     id: row.id,
     title: row.title,
+    home_project_id: row.home_project_id,
     r#type: row.r#type,
     metadata_json: row.metadata,
     created_at: row.created_at,
@@ -86,11 +89,12 @@ pub async fn insert(
   engine
     .with_conn(tx_id, async |conn| {
       sqlx::query(
-        "INSERT INTO documents (id, title, type, metadata, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO documents (id, title, homeProjectId, type, metadata, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .bind(&document.id)
       .bind(&document.title)
+      .bind(&document.home_project_id)
       .bind(&document.r#type)
       .bind(&document.metadata_json)
       .bind(document.created_at)
@@ -109,6 +113,7 @@ pub async fn update(
   data: &UpdateDocumentDataDto,
 ) -> StorageResult<()> {
   let has_title = data.title.is_some() as i32;
+  let has_home_project = data.home_project_id.is_some() as i32;
   let has_metadata = data.metadata_json.is_some() as i32;
 
   engine
@@ -116,12 +121,15 @@ pub async fn update(
       sqlx::query(
         "UPDATE documents
          SET title = CASE WHEN ? = 1 THEN ? ELSE title END,
+             homeProjectId = CASE WHEN ? = 1 THEN ? ELSE homeProjectId END,
              metadata = CASE WHEN ? = 1 THEN ? ELSE metadata END,
              updatedAt = ?
          WHERE id = ?",
       )
       .bind(has_title)
       .bind(data.title.as_deref())
+      .bind(has_home_project)
+      .bind(data.home_project_id.as_deref())
       .bind(has_metadata)
       .bind(data.metadata_json.as_deref())
       .bind(data.updated_at)

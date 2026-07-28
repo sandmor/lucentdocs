@@ -65,6 +65,11 @@ const documentUpdatedEventSchema = eventBaseSchema.extend({
   }),
 })
 
+const documentAccessChangedEventSchema = eventBaseSchema.extend({
+  type: z.literal('document.access-changed'),
+  documentId: idSchema,
+})
+
 const projectSyncEventSchema = z.discriminatedUnion('type', [
   projectCreatedEventSchema,
   projectUpdatedEventSchema,
@@ -72,6 +77,7 @@ const projectSyncEventSchema = z.discriminatedUnion('type', [
   documentsChangedEventSchema,
   chatsChangedEventSchema,
   documentUpdatedEventSchema,
+  documentAccessChangedEventSchema,
 ])
 
 const projectsListSyncEventSchema = z.discriminatedUnion('type', [

@@ -41,6 +41,7 @@ export interface ChatScope {
 
 export interface GenerationOptions {
   scope: ChatScope
+  actorUserId: string
   contextDocumentId?: string
   baseThread: PersistedChatThread
   promptMessages: UIMessage[]
@@ -98,8 +99,13 @@ function resolveTestChatResponse(promptSeed: string): string {
   return 'spark'
 }
 
-function resolveTestChatDelayMs(): number {
-  const envDelay = Number(process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS ?? '')
+function resolveTestChatDelayMs(promptSeed: string): number {
+  const normalizedPrompt = promptSeed.trim().toLowerCase()
+  const envDelay = Number(
+    (normalizedPrompt.includes('slow')
+      ? process.env.LUCENTDOCS_TEST_CHAT_SLOW_DELAY_MS
+      : undefined) ?? process.env.LUCENTDOCS_TEST_CHAT_DELAY_MS ?? ''
+  )
   if (Number.isFinite(envDelay) && envDelay > 0) {
     return Math.round(envDelay)
   }
@@ -250,6 +256,7 @@ export class GenerationEngine {
       selectionFrom,
       selectionTo,
       editingEnabled,
+      actorUserId,
       generationId,
       assistantNodeId,
       abortController,
@@ -288,7 +295,16 @@ export class GenerationEngine {
       }
 
       if (isTestRuntime()) {
-        const delayMs = resolveTestChatDelayMs()
+        const promptSeed = extractMessageText(promptMessages[promptMessages.length - 1])
+        // Model the real lifecycle: clients observe an in-flight thread before the
+        // response arrives. This lets reconnect tests exercise resumption without
+        // depending on a race between a fake delay and a synchronous completion.
+        callbacks.onProgress({
+          thread: buildProgressThread(baseThread, assistantNodeId, null),
+          generating: true,
+          generationId,
+        })
+        const delayMs = resolveTestChatDelayMs(promptSeed)
         await waitForAbortableDelay(abortController, delayMs)
         if (wasAborted()) {
           latestAssistantMessage = {
@@ -298,7 +314,6 @@ export class GenerationEngine {
           }
           shouldPersistAssistant = true
         } else {
-          const promptSeed = extractMessageText(promptMessages[promptMessages.length - 1])
           latestAssistantMessage = {
             id: assistantNodeId,
             role: 'assistant',
@@ -314,7 +329,7 @@ export class GenerationEngine {
         return
       }
 
-      const currentFilePath = normalizeDocumentPath(currentDocument.title) || '(untitled)'
+      const currentFilePath = normalizeDocumentPath(currentDocument.path) || '(untitled)'
       const noteRows = await this.#services.documentNotes.listByDocumentId(contextDocumentId)
       const fileContext = buildCurrentFileContextWithAnnotations(
         currentDocument.content,
@@ -346,7 +361,7 @@ export class GenerationEngine {
         system: `${rendered.systemPrompt}\n\n${rendered.userPrompt}`,
         messages: modelMessages,
         tools: {
-          ...this.buildTools({ ...scope, documentId: contextDocumentId }, editingEnabled),
+          ...this.buildTools({ ...scope, documentId: contextDocumentId }, editingEnabled, actorUserId),
           ...mcpSession.tools,
         },
         stopWhen: stepCountIs(runtimeLimits.aiToolSteps),
@@ -507,13 +522,30 @@ export class GenerationEngine {
     }
   }
 
-  private buildTools(scope: ChatScope, editingEnabled: boolean) {
+  private buildTools(scope: ChatScope, editingEnabled: boolean, actorUserId: string) {
     const editSession = new DocumentEditSession()
+    const assertCanEditDocument = async (documentId: string): Promise<void> => {
+      const role = await this.#services.documentSharing.getEffectiveRole(documentId, actorUserId)
+      if (role !== 'owner' && role !== 'editor') {
+        throw new Error('Document editing access was revoked.')
+      }
+      if (!(await this.#services.documents.hasProjectAssociation(scope.projectId, documentId))) {
+        throw new Error('Document is no longer mounted in this project.')
+      }
+    }
+    const assertCanCreateDocument = async (): Promise<void> => {
+      const project = await this.#services.projects.getById(scope.projectId)
+      if (!project || project.ownerUserId !== actorUserId) {
+        throw new Error('Only the project owner can create documents.')
+      }
+    }
     const context = {
       scope,
       services: this.#services,
       yjsRuntime: this.#yjsRuntime,
       editSession,
+      assertCanEditDocument,
+      assertCanCreateDocument,
     }
     const tools = buildReadTools(context)
     if (!editingEnabled) return tools

@@ -245,7 +245,7 @@ export function EditorPage() {
   const visibleDocuments = useMemo(
     () =>
       (documentsQuery.data ?? []).filter(
-        (doc) => !isDirectorySentinelPath(normalizeDocumentPath(doc.title))
+        (doc) => !isDirectorySentinelPath(normalizeDocumentPath(doc.path))
       ),
     [documentsQuery.data]
   )
@@ -283,6 +283,11 @@ export function EditorPage() {
     [currentDocumentId, visibleDocuments]
   )
 
+  const documentAccessQuery = trpc.documents.accessRole.useQuery(
+    { documentId: currentDocumentId ?? '' },
+    { enabled: Boolean(currentDocumentId) }
+  )
+
   const documentQuery = trpc.documents.get.useQuery(
     {
       projectId: id!,
@@ -302,7 +307,7 @@ export function EditorPage() {
     }
   )
 
-  const updateMutation = trpc.documents.update.useMutation()
+  const moveMutation = trpc.documents.move.useMutation()
   const restoreMutation = trpc.documents.restore.useMutation()
   const createSnapshotMutation = trpc.documents.createSnapshot.useMutation()
   const openOrCreateDefaultDocumentMutation = trpc.documents.openOrCreateDefault.useMutation()
@@ -326,10 +331,7 @@ export function EditorPage() {
           setSearchParams(next, { replace: true })
 
           utils.documents.get.setData({ projectId: id, id: document.id }, document)
-          utils.documents.list.setData({ projectId: id }, (documents) => {
-            if (!documents) return [document]
-            return [document, ...documents.filter((item) => item.id !== document.id)]
-          })
+          void utils.documents.list.invalidate({ projectId: id })
         },
         onError: (error) => {
           toast.error('Failed to create a starter document', {
@@ -388,8 +390,8 @@ export function EditorPage() {
   ])
 
   const documentPath = useMemo(
-    () => normalizeDocumentPath(documentQuery.data?.title ?? ''),
-    [documentQuery.data?.title]
+    () => normalizeDocumentPath(documentQuery.data?.path ?? ''),
+    [documentQuery.data?.path]
   )
 
   const documentBaseName = useMemo(() => {
@@ -450,7 +452,7 @@ export function EditorPage() {
   }, [currentDocumentId, documentBaseName, documentPath, documentQuery.data?.id, titleInput])
 
   const commitTitle = useCallback(() => {
-    if (!id || !currentDocumentId || updateMutation.isPending) return
+    if (!id || !currentDocumentId || moveMutation.isPending) return
 
     const trimmedTitle = titleInput.trim()
     if (!trimmedTitle) {
@@ -478,11 +480,11 @@ export function EditorPage() {
       return
     }
 
-    updateMutation.mutate(
-      { projectId: id, id: currentDocumentId, title: nextPath },
+    moveMutation.mutate(
+      { projectId: id, id: currentDocumentId, path: nextPath },
       {
         onSuccess: (document) => {
-          const normalizedPath = normalizeDocumentPath(document.title)
+          const normalizedPath = normalizeDocumentPath(document.path)
           const parts = pathSegments(normalizedPath)
 
           lastSavedPathRef.current = normalizedPath
@@ -491,7 +493,7 @@ export function EditorPage() {
           utils.documents.list.setData({ projectId: id }, (documents) =>
             documents?.map((item) =>
               item.id === currentDocumentId
-                ? { ...item, title: document.title, updatedAt: document.updatedAt }
+                ? { ...item, path: document.path, updatedAt: document.updatedAt }
                 : item
             )
           )
@@ -505,7 +507,7 @@ export function EditorPage() {
         },
       }
     )
-  }, [currentDocumentId, documentPath, id, titleInput, updateMutation, utils])
+  }, [currentDocumentId, documentPath, id, moveMutation, titleInput, utils])
 
   const handleTitleBlur = useCallback(() => {
     commitTitle()
@@ -790,7 +792,6 @@ export function EditorPage() {
             doc.id === parsedEvent.documentId
               ? {
                   ...doc,
-                  title: parsedEvent.changes.title ?? doc.title,
                   updatedAt: parsedEvent.changes.updatedAt ?? doc.updatedAt,
                   metadata: parsedEvent.changes.metadata
                     ? ({
@@ -808,7 +809,6 @@ export function EditorPage() {
             if (!doc) return doc
             return {
               ...doc,
-              title: parsedEvent.changes.title ?? doc.title,
               updatedAt: parsedEvent.changes.updatedAt ?? doc.updatedAt,
               metadata: parsedEvent.changes.metadata
                 ? ({
@@ -818,6 +818,16 @@ export function EditorPage() {
                 : doc.metadata,
             }
           })
+        }
+        return
+      }
+
+      if (parsedEvent.type === 'document.access-changed') {
+        void utils.documents.list.invalidate({ projectId: id })
+        void utils.documents.accessRole.invalidate({ documentId: parsedEvent.documentId })
+        if (activeId === parsedEvent.documentId) {
+          toast.info('Document access changed. Refreshing your workspace…')
+          void utils.documents.get.invalidate({ projectId: id, id: activeId })
         }
         return
       }
@@ -990,7 +1000,15 @@ export function EditorPage() {
           onSearchResultMarkersChange={handleSearchResultMarkersChange}
         />
       </div>
-      {sidebarPanel === 'chat' && <ChatPanel projectId={id} documentId={currentDocumentId} />}
+      {sidebarPanel === 'chat' && (
+        <ChatPanel
+          projectId={id}
+          documentId={currentDocumentId}
+          canEditDocument={
+            documentAccessQuery.data?.role === 'owner' || documentAccessQuery.data?.role === 'editor'
+          }
+        />
+      )}
       {sidebarPanel === 'project-settings' && <ProjectSettings projectId={id} />}
     </>
   )
@@ -1050,11 +1068,13 @@ export function EditorPage() {
                 !currentDocumentIsVisible
               }
             />
+            {documentAccessQuery.data?.role === 'viewer' ? <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-muted-foreground"><Badge variant="secondary" className="mr-2">View only</Badge>Content is shared read-only. You can still organize this file in your project.</div> : null}
             <Editor
               key={`${currentDocumentId}-${editorSessionKey}`}
               ref={editorRef}
               projectId={id}
               documentId={currentDocumentId}
+              readOnly={documentAccessQuery.data?.role === 'viewer'}
               onConnectionChange={handleConnectionChange}
               searchResultMarkers={activeDocumentSearchMarkers}
               className="prose prose-neutral dark:prose-invert flex-1 flex flex-col max-w-none focus:outline-none"
