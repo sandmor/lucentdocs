@@ -139,10 +139,6 @@ export function ChatPanel({ projectId, documentId, canEditDocument = false, clas
     }
   }, [assistantPreferencesQuery.data, hasActiveThreadId, projectId])
 
-  useEffect(() => {
-    if (!canEditDocument) setDraftEditingEnabled(false)
-  }, [canEditDocument])
-
   const { streamGenerationIdRef, enqueueStreamChunk, stopStreamChunkPump, startStreamChunkPump } =
     useChatStreamPump({
       isThreadActive: (chatId) => activeThreadIdRef.current === chatId,
@@ -430,7 +426,7 @@ export function ChatPanel({ projectId, documentId, canEditDocument = false, clas
       toast.error('Chat Error', { description: message })
       return null
     }
-  }, [createThreadMutation, documentId, draftEditingEnabled, projectId, utils.chat.listByProject])
+  }, [canEditDocument, createThreadMutation, documentId, draftEditingEnabled, projectId, utils.chat.listByProject])
 
   const deleteThread = useCallback(
     async (threadId: string) => {

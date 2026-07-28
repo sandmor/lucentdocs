@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from 'next-themes'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
@@ -12,11 +11,7 @@ import {
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = 'system' } = useTheme()
-  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null)
-
-  useEffect(() => setPortalTarget(document.body), [])
-
-  if (!portalTarget) return null
+  if (typeof document === 'undefined') return null
 
   return createPortal(
     <Sonner
@@ -44,7 +39,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       {...props}
     />,
-    portalTarget
+    document.body
   )
 }
 

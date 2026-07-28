@@ -51,7 +51,7 @@ function NoteSheetItem({
       setIsEditing(true)
       requestAnimationFrame(() => editorRef.current?.focus())
     }
-  }, [isEditing])
+  }, [isEditing, readOnly])
 
   const handleBlur = useCallback(() => {
     requestAnimationFrame(() => {

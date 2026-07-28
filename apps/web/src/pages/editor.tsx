@@ -878,6 +878,7 @@ export function EditorPage() {
       openOrCreateDefaultDocumentMutation,
       setSearchParams,
       utils.documents.get,
+      utils.documents.accessRole,
       utils.documents.list,
       utils.documents.versions,
       utils.chat.getById,

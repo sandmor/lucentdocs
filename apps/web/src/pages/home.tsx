@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { trpc } from '@/lib/trpc'
 import { toast } from 'sonner'
@@ -131,10 +131,6 @@ export function HomePage() {
     { id: projectToDelete?.id ?? '' },
     { enabled: Boolean(projectToDelete?.id) }
   )
-  useEffect(() => {
-    if (!deletionPlan.data) return
-    setDeletionResolutions(Object.fromEntries(deletionPlan.data.homeDocuments.map(({ document }) => [document.id, { action: 'delete' }])) )
-  }, [deletionPlan.data])
   trpc.sync.onProjectsListEvent.useSubscription(undefined, {
     onData: (event) => {
       if (!parseProjectsListSyncEvent(event)) return
@@ -159,7 +155,10 @@ export function HomePage() {
 
   const confirmProjectDelete = () => {
     if (!projectToDelete) return
-    const resolutions = Object.entries(deletionResolutions).map(([documentId, resolution]) => ({ documentId, ...resolution }))
+    const resolutions = (deletionPlan.data?.homeDocuments ?? []).map(({ document }) => ({
+      documentId: document.id,
+      ...(deletionResolutions[document.id] ?? { action: 'delete' as const }),
+    }))
     deleteMutation.mutate({ id: projectToDelete.id, resolutions })
   }
 

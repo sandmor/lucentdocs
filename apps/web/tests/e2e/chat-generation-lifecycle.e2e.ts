@@ -289,10 +289,16 @@ test('sidebar chat generation survives initiator disconnect and reconnecting cli
       timeout: 12_000,
     })
 
+    // Establish the peer's observer before the long-running response starts.
+    // Selecting it afterwards races the slow test response against propagation
+    // of the newly-created thread and does not actually test reconnecting an
+    // already-observing client.
+    await selectFirstChatThread(peerPage)
+    await expect(peerPage.locator('[data-chat-panel="true"]')).toContainText('Seed message')
+
     await sendChatMessage(page, 'Give me a slow mobile continuation')
     await page.close()
 
-    await selectFirstChatThread(peerPage)
     await waitForChatGenerationToStart(peerPage)
     await expect(peerPage.locator('[data-chat-panel="true"]')).toContainText('mobile', {
       timeout: 20_000,

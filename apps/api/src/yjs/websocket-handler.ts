@@ -5,6 +5,7 @@ import * as syncProtocol from 'y-protocols/sync'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import * as encoding from 'lib0/encoding'
 import * as decoding from 'lib0/decoding'
+import type * as Y from 'yjs'
 import { isValidId } from '@lucentdocs/shared'
 import type { YjsRuntime } from './runtime.js'
 import { getYDoc, setupWSConnection } from './runtime.js'
@@ -20,6 +21,10 @@ import { projectSyncBus } from '../app/project-sync.js'
 const MESSAGE_SYNC = 0
 const MESSAGE_AWARENESS = 1
 const SYNC_STEP1 = 0
+type RoleAwareYjsDocument = Y.Doc & {
+  awareness: awarenessProtocol.Awareness
+  conns: Map<WebSocket, Set<number>>
+}
 
 /**
  * y-websocket has no authorization hook. This narrow adapter keeps the normal
@@ -31,7 +36,7 @@ function setupRoleAwareConnection(ws: WebSocket, documentId: string, role: 'owne
     setupWSConnection(ws, { url: `/api/yjs/${documentId}` } as never, { docName: documentId })
     return
   }
-  const doc = getYDoc(documentId) as any
+  const doc = getYDoc(documentId) as RoleAwareYjsDocument
   ws.binaryType = 'arraybuffer'
   doc.conns.set(ws, new Set())
   const send = (message: Uint8Array) => {
@@ -116,16 +121,40 @@ export function setupYjsWebSocket(
       return
     }
 
-    void (async () => {
+    // Bun's Node HTTP compatibility layer only permits `ws.handleUpgrade()`
+    // while this upgrade callback is still on the stack. Do not await
+    // authorization or document loading before upgrading: doing so leaves the
+    // request no longer upgradeable and intermittently throws `upgrade requires
+    // a Request object`. The underlying stream is paused immediately, so the
+    // connection cannot process or lose Yjs frames until authorization finishes.
+    const request = {
+      cookie: req.headers.cookie,
+      host: req.headers.host ?? 'localhost',
+      projectId: (() => {
+        try {
+          return new URL(req.url ?? '', `http://${req.headers.host ?? 'localhost'}`).searchParams.get(
+            'projectId'
+          )
+        } catch {
+          return null
+        }
+      })(),
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      const transport = (ws as WebSocket & { _socket?: { pause(): void; resume(): void } })._socket
+      transport?.pause()
+
+      void (async () => {
       try {
-        const token = readSessionTokenFromCookieHeader(req.headers.cookie)
+        const token = readSessionTokenFromCookieHeader(request.cookie)
         const user = options.authPort.isEnabled()
           ? token
             ? await options.authPort.validateSession(token)
             : null
           : await options.authPort.validateSession('')
         if (!user) {
-          socket.destroy()
+          ws.close(1008, 'Unauthorized')
           return
         }
 
@@ -139,14 +168,13 @@ export function setupYjsWebSocket(
         ])
 
         if (!yjsData && !contentRow) {
-          socket.destroy()
+          ws.close(1008, 'Document not found')
           return
         }
 
-        const url = new URL(req.url ?? '', `http://${req.headers.host ?? 'localhost'}`)
-        const projectId = url.searchParams.get('projectId')
+        const projectId = request.projectId
         if (!projectId || !isValidId(projectId)) {
-          socket.destroy()
+          ws.close(1008, 'Invalid project')
           return
         }
 
@@ -162,36 +190,36 @@ export function setupYjsWebSocket(
             : (await options.documentCollaborators.find(documentId, user.id))?.role
           : null
         if (!project || !isMounted || !canUserAccessProject(user, project) || !documentRole) {
-          socket.destroy()
+          ws.close(1008, 'Forbidden')
           return
         }
 
         await runtime.ensureDocumentLoaded(documentId)
-        wss.handleUpgrade(req, socket, head, (ws) => {
-          setupRoleAwareConnection(ws, documentId, documentRole)
+        setupRoleAwareConnection(ws, documentId, documentRole)
 
-          const unsubscribe = projectSyncBus.subscribe((event) => {
-            if (event.projectId !== projectId) return
-            if (event.type === 'document.access-changed' && event.documentId === documentId) {
-              ws.close()
-              return
-            }
-            if (event.type !== 'project.updated' && event.type !== 'project.deleted') return
-
-            if (event.type === 'project.updated' && event.audienceUserIds.includes(user.id)) {
-              return
-            }
-
+        const unsubscribe = projectSyncBus.subscribe((event) => {
+          if (event.projectId !== projectId) return
+          if (event.type === 'document.access-changed' && event.documentId === documentId) {
             ws.close()
-          })
+            return
+          }
+          if (event.type !== 'project.updated' && event.type !== 'project.deleted') return
 
-          ws.once('close', unsubscribe)
+          if (event.type === 'project.updated' && event.audienceUserIds.includes(user.id)) {
+            return
+          }
+
+          ws.close()
         })
+
+        ws.once('close', unsubscribe)
+        transport?.resume()
       } catch (error) {
         console.error(`Failed to initialize Yjs doc ${documentId}:`, error)
-        socket.destroy()
+        ws.close(1011, 'Failed to initialize document')
       }
-    })()
+      })()
+    })
   })
 
   return wss

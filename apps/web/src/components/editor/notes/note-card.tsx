@@ -82,7 +82,7 @@ export function NoteCard({
       setEditMode('editing')
       requestAnimationFrame(() => editorRef.current?.focus())
     }
-  }, [editMode])
+  }, [editMode, readOnly])
 
   const handleEditorFocus = useCallback(() => {
     setEditMode('editing')
