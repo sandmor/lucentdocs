@@ -115,6 +115,21 @@ export class EmbeddingIndexQueueRepository implements EmbeddingIndexQueueReposit
     return job?.payload
   }
 
+  async hasQueuedDocuments(documentIds: string[]): Promise<boolean> {
+    const uniqueIds = [...new Set(documentIds)].filter(Boolean)
+    const batchSize = 500
+
+    for (let offset = 0; offset < uniqueIds.length; offset += batchSize) {
+      const jobs = await this.queue.getByTypeAndDedupeKeys<EmbeddingQueuePayload>(
+        EMBEDDING_REINDEX_JOB_TYPE,
+        uniqueIds.slice(offset, offset + batchSize)
+      )
+      if (jobs.length > 0) return true
+    }
+
+    return false
+  }
+
   async clearQueuedDocuments(documentIds: string[]): Promise<void> {
     await this.queue.deleteQueuedByTypeAndDedupeKeys(EMBEDDING_REINDEX_JOB_TYPE, documentIds)
   }

@@ -4,7 +4,9 @@ import { adminProcedure, protectedProcedure, router } from '../index.js'
 import type { ImportDocumentErrorKind } from '../../core/services/documents.service.js'
 import {
   isValidId,
+  isDirectorySentinelPath,
   normalizeDocumentPath,
+  parentDocumentPath,
   pathHasSentinelSegment,
   toDirectorySentinelPath,
   parseContent,
@@ -36,6 +38,24 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ])
 )
 const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSchema)
+
+type SemanticSearchScope =
+  | { type: 'project' }
+  | { type: 'directory'; directoryPath: string }
+  | { type: 'directory_subtree'; directoryPath: string }
+
+function isDocumentPathInSearchScope(path: string, scope: SemanticSearchScope): boolean {
+  const normalizedPath = normalizeDocumentPath(path)
+  if (!normalizedPath || isDirectorySentinelPath(normalizedPath)) return false
+  if (scope.type === 'project') return true
+
+  const directoryPath = normalizeDocumentPath(scope.directoryPath)
+  if (scope.type === 'directory') {
+    return parentDocumentPath(normalizedPath) === directoryPath
+  }
+
+  return directoryPath === '' || normalizedPath.startsWith(`${directoryPath}/`)
+}
 
 function normalizeAndValidatePath(
   inputPath: string,
@@ -451,10 +471,31 @@ export const documentsRouter = router({
         }
       }
 
-      return ctx.services.documents.searchForProject(input.projectId, input.query, scope, {
-        limit: input.limit,
-        maxSnippetsPerDocument: input.maxSnippetsPerDocument,
-      })
+      const projectDocuments = await ctx.services.documents.listForProject(input.projectId)
+      const scopedDocumentIds = projectDocuments
+        .filter((document) => isDocumentPathInSearchScope(document.path, scope))
+        .map((document) => document.id)
+
+      if (await ctx.services.embeddingIndex.hasQueuedDocuments(scopedDocumentIds)) {
+        return { results: [], indexingPending: true }
+      }
+
+      const results = await ctx.services.documents.searchForProject(
+        input.projectId,
+        input.query,
+        scope,
+        {
+          limit: input.limit,
+          maxSnippetsPerDocument: input.maxSnippetsPerDocument,
+        }
+      )
+
+      const indexingPending =
+        await ctx.services.embeddingIndex.hasQueuedDocuments(scopedDocumentIds)
+      return {
+        results: indexingPending ? [] : results,
+        indexingPending,
+      }
     }),
 
   openOrCreateDefault: protectedProcedure

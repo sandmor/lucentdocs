@@ -15,6 +15,10 @@ async function placeCaretAtParagraphEnd(page: import('@playwright/test').Page, i
     selection.removeAllRanges()
     selection.addRange(range)
     paragraph.closest<HTMLElement>('.ProseMirror')?.focus()
+    // Playwright's programmatic range does not reliably emit selectionchange.
+    // The editor owns keyboard shortcuts through its ProseMirror selection, so
+    // synchronise it before starting each client-side continuation.
+    document.dispatchEvent(new Event('selectionchange'))
   }, index)
 }
 

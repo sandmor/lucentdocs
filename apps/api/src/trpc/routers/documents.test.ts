@@ -275,6 +275,12 @@ describe('documentsRouter', () => {
       createdAt: now,
       updatedAt: now,
     })
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([
+      sharedDoc.id,
+      localDoc.id,
+      foreignDoc.id,
+      mismatchedModelDoc.id,
+    ])
 
     const caller = documentsRouter.createCaller(
       createCallerContext({
@@ -283,13 +289,15 @@ describe('documentsRouter', () => {
       })
     )
 
-    const results = await caller.search({
+    const response = await caller.search({
       projectId: projectA.id,
       query: 'silver moonlight forest',
       limit: 5,
       scope: { type: 'project' },
     })
+    const { results } = response
 
+    expect(response.indexingPending).toBe(false)
     expect(results.map((result) => result.id)).toEqual([sharedDoc.id, localDoc.id])
     expect(results[0]?.matchType).toBe('snippet')
     expect(results[0]?.snippets).toHaveLength(3)
@@ -412,6 +420,10 @@ describe('documentsRouter', () => {
       createdAt: now,
       updatedAt: now,
     })
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([
+      defaultModelDoc.id,
+      overrideModelDoc.id,
+    ])
 
     const caller = documentsRouter.createCaller(
       createCallerContext({
@@ -420,13 +432,15 @@ describe('documentsRouter', () => {
       })
     )
 
-    const results = await caller.search({
+    const response = await caller.search({
       projectId: project.id,
       query: 'silver moonlight forest',
       limit: 5,
       scope: { type: 'project' },
     })
+    const { results } = response
 
+    expect(response.indexingPending).toBe(false)
     expect(results.map((result) => result.id).sort()).toEqual(
       [defaultModelDoc.id, overrideModelDoc.id].sort()
     )
@@ -519,6 +533,7 @@ describe('documentsRouter', () => {
       createdAt: now,
       updatedAt: now,
     })
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([sharedDoc.id])
 
     const caller = documentsRouter.createCaller(
       createCallerContext({
@@ -540,7 +555,8 @@ describe('documentsRouter', () => {
       { limit: 5 }
     )
 
-    expect(projectResults.map((result) => result.id)).toContain(sharedDoc.id)
+    expect(projectResults.indexingPending).toBe(false)
+    expect(projectResults.results.map((result) => result.id)).toContain(sharedDoc.id)
     expect(documentResults).toHaveLength(1)
   })
 
@@ -614,6 +630,10 @@ describe('documentsRouter', () => {
       createdAt: now,
       updatedAt: now,
     })
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([
+      inScopeDoc.id,
+      outOfScopeDoc.id,
+    ])
 
     const caller = documentsRouter.createCaller(
       createCallerContext({
@@ -622,14 +642,67 @@ describe('documentsRouter', () => {
       })
     )
 
-    const results = await caller.search({
+    const response = await caller.search({
       projectId: project.id,
       query: 'moonlight path',
       scope: { type: 'directory_subtree', directoryPath: 'notes/chapter-one' },
       limit: 10,
     })
 
-    expect(results.map((result) => result.id)).toEqual([inScopeDoc.id])
+    expect(response.indexingPending).toBe(false)
+    expect(response.results.map((result) => result.id)).toEqual([inScopeDoc.id])
+  })
+
+  test('search waits only for queued documents in the requested project-local scope', async () => {
+    const user: User = {
+      id: 'owner_1',
+      name: 'Owner One',
+      email: 'owner1@example.com',
+      role: 'user',
+    }
+    const adapter = createTestAdapter()
+    await initializeEmbeddingSelection(adapter)
+
+    const homeProject = await adapter.services.projects.create('Home', { ownerUserId: user.id })
+    const recipientProject = await adapter.services.projects.create('Recipient', {
+      ownerUserId: user.id,
+    })
+    const sharedDoc = await adapter.services.documents.createForProject(
+      homeProject.id,
+      'home/path.md'
+    )
+    const otherDoc = await adapter.services.documents.createForProject(
+      recipientProject.id,
+      'other/outside.md'
+    )
+    if (!sharedDoc || !otherDoc) throw new Error('Expected search fixtures to be created.')
+
+    await adapter.repositories.projectDocuments.insert({
+      projectId: recipientProject.id,
+      documentId: sharedDoc.id,
+      path: 'mounted/chapter.md',
+      addedByUserId: user.id,
+      addedAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([sharedDoc.id, otherDoc.id])
+    await adapter.services.embeddingIndex.enqueueDocument(otherDoc.id)
+
+    const caller = documentsRouter.createCaller(createCallerContext({ user, adapter }))
+    const outsideScope = await caller.search({
+      projectId: recipientProject.id,
+      query: 'chapter',
+      scope: { type: 'directory_subtree', directoryPath: 'mounted' },
+    })
+    expect(outsideScope.indexingPending).toBe(false)
+
+    await adapter.services.embeddingIndex.enqueueDocument(sharedDoc.id)
+    const mountedScope = await caller.search({
+      projectId: recipientProject.id,
+      query: 'chapter',
+      scope: { type: 'directory_subtree', directoryPath: 'mounted' },
+    })
+    expect(mountedScope).toEqual({ results: [], indexingPending: true })
   })
 
   test('search supports root directory scope for semantic results', async () => {
@@ -699,6 +772,7 @@ describe('documentsRouter', () => {
       createdAt: now,
       updatedAt: now,
     })
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([rootDoc.id, nestedDoc.id])
 
     const caller = documentsRouter.createCaller(
       createCallerContext({
@@ -707,14 +781,15 @@ describe('documentsRouter', () => {
       })
     )
 
-    const results = await caller.search({
+    const response = await caller.search({
       projectId: project.id,
       query: 'moonlight note',
       scope: { type: 'directory', directoryPath: '' },
       limit: 10,
     })
 
-    expect(results.map((result) => result.id)).toEqual([rootDoc.id])
+    expect(response.indexingPending).toBe(false)
+    expect(response.results.map((result) => result.id)).toEqual([rootDoc.id])
   })
 
   test('get returns documents linked to the project even when they are shared across projects', async () => {

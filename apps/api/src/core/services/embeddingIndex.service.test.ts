@@ -84,6 +84,28 @@ describe('EmbeddingIndexService', () => {
     }
   })
 
+  test('reports pending indexing only for the requested documents', async () => {
+    const dbPath = uniqueDbPath('embedding-index-service-pending')
+    cleanupDir = resolve(dbPath, '..')
+    const adapter = createTestAdapter({ dbPath })
+    const queuedDoc = await createProjectDocument(adapter, 'queued.md')
+    const currentDoc = await createProjectDocument(adapter, 'current.md')
+
+    await adapter.repositories.embeddingIndexQueue.clearQueuedDocuments([
+      queuedDoc.id,
+      currentDoc.id,
+    ])
+    await adapter.services.embeddingIndex.enqueueDocument(queuedDoc.id)
+
+    expect(await adapter.services.embeddingIndex.hasQueuedDocuments([])).toBe(false)
+    expect(await adapter.services.embeddingIndex.hasQueuedDocuments([currentDoc.id])).toBe(false)
+    expect(
+      await adapter.services.embeddingIndex.hasQueuedDocuments([currentDoc.id, queuedDoc.id])
+    ).toBe(true)
+
+    void adapter.adapter.engine.close()
+  })
+
   test('flushes queued documents into sqlite-vec storage', async () => {
     const dbPath = uniqueDbPath('embedding-index-service-store')
     cleanupDir = resolve(dbPath, '..')

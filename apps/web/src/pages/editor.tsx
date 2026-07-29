@@ -787,6 +787,7 @@ export function EditorPage() {
       }
 
       if (parsedEvent.type === 'document.updated') {
+        void utils.documents.search.invalidate()
         utils.documents.list.setData({ projectId: id }, (documents) =>
           documents?.map((doc) =>
             doc.id === parsedEvent.documentId
@@ -880,6 +881,7 @@ export function EditorPage() {
       utils.documents.get,
       utils.documents.accessRole,
       utils.documents.list,
+      utils.documents.search,
       utils.documents.versions,
       utils.chat.getById,
       utils.chat.listByDocument,

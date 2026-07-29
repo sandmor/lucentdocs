@@ -93,10 +93,14 @@ test('selection toolbar is replaced by zone controls while AI zone is active', a
   const editor = page.locator('.ProseMirror')
   await editor.click()
   await page.keyboard.type('Before ')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('After ')
   await startInlineGeneration(page)
 
   await expect(page.locator('.ai-writer-floating-controls')).toBeVisible()
 
+  // Select ordinary text outside the live zone. The selection toolbar would be
+  // eligible here, but active zone controls must take precedence.
   await selectEditorText(page, 'Before')
   const selectionToolbar = page.locator('.ai-selection-toolbar')
   const zoneControls = page.locator('.ai-writer-floating-controls').first()

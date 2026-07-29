@@ -60,6 +60,7 @@ export interface EmbeddingIndexService {
     requests: Array<{ documentId: string; expectedLastQueuedAt?: number }>,
     now?: number
   ): Promise<EmbeddingFlushResult>
+  hasQueuedDocuments(documentIds: string[]): Promise<boolean>
   flushDueQueue(config: EmbeddingIndexRuntimeConfig, now?: number): Promise<EmbeddingFlushResult>
   getQueueStats(): Promise<DocumentEmbeddingQueueStats>
 }
@@ -714,6 +715,12 @@ export function createEmbeddingIndexService(
       })
 
       return activeTargetedFlush
+    },
+
+    async hasQueuedDocuments(documentIds: string[]): Promise<boolean> {
+      const uniqueIds = [...new Set(documentIds)].filter((id) => typeof id === 'string' && id)
+      if (uniqueIds.length === 0) return false
+      return repos.embeddingIndexQueue.hasQueuedDocuments(uniqueIds)
     },
 
     async flushDueQueue(

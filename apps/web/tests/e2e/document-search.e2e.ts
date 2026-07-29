@@ -11,14 +11,14 @@ test('semantic search opens a short matching snippet with the correct editor sel
   const content = 'The cedar comet sings softly above the harbor at midnight.'
   await page.keyboard.insertText(content)
 
-  await page.waitForTimeout(1500)
-
   const searchInput = page.locator('[data-document-search="true"]')
   await searchInput.fill('cedar comet midnight')
 
-  await expect
-    .poll(async () => page.locator('[data-search-result-card]').count(), { timeout: 15_000 })
-    .toBe(1)
+  // A result card does not imply that this snippet-navigation flow has an
+  // actionable result. Wait for the control the test will operate on.
+  await expect(page.locator('[data-search-result-snippet]').first()).toBeVisible({
+    timeout: 15_000,
+  })
 
   await page.locator('[data-search-result-snippet]').first().click()
 
@@ -50,14 +50,12 @@ test('semantic search opens a long matching snippet at the match start without s
   ].join(' ')
   await page.keyboard.insertText(longMatch)
 
-  await page.waitForTimeout(1500)
-
   const searchInput = page.locator('[data-document-search="true"]')
   await searchInput.fill('garnet atlas rain barrel')
 
-  await expect
-    .poll(async () => page.locator('[data-search-result-card]').count(), { timeout: 15_000 })
-    .toBe(1)
+  await expect(page.locator('[data-search-result-snippet]').first()).toBeVisible({
+    timeout: 15_000,
+  })
 
   await page.locator('[data-search-result-snippet]').first().click()
 

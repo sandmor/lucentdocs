@@ -196,22 +196,25 @@ export function useDocumentBrowser({
     },
     {
       enabled: isSemanticSearchActive,
+      refetchInterval: (query) => (query.state.data?.indexingPending ? 1_000 : false),
     }
   )
 
   const searchRows = useMemo<Array<BrowserRow>>(() => {
-    const results = (searchResultsQuery.data ?? []).map((result: DocumentSearchResultItem) => ({
-      key: `search:${result.id}`,
-      type: 'search-result' as const,
-      id: result.id,
-      name: basename(normalizeDocumentPath(result.path)),
-      path: normalizeDocumentPath(result.path),
-      createdAt: result.createdAt,
-      updatedAt: result.updatedAt,
-      score: result.score,
-      matchType: result.matchType,
-      snippets: result.snippets,
-    }))
+    const results = (searchResultsQuery.data?.results ?? []).map(
+      (result: DocumentSearchResultItem) => ({
+        key: `search:${result.id}`,
+        type: 'search-result' as const,
+        id: result.id,
+        name: basename(normalizeDocumentPath(result.path)),
+        path: normalizeDocumentPath(result.path),
+        createdAt: result.createdAt,
+        updatedAt: result.updatedAt,
+        score: result.score,
+        matchType: result.matchType,
+        snippets: result.snippets,
+      })
+    )
 
     return results
   }, [searchResultsQuery.data])
@@ -1156,7 +1159,9 @@ export function useDocumentBrowser({
     isLoading,
     isSearchActive,
     isSemanticSearchActive,
-    isSearchLoading: searchResultsQuery.isFetching,
+    isSearchLoading:
+      isSemanticSearchActive &&
+      (searchResultsQuery.isFetching || searchResultsQuery.data?.indexingPending === true),
     searchQuery,
     setSearchQuery,
     clearSearch: () => setSearchQuery(''),
@@ -1170,7 +1175,9 @@ export function useDocumentBrowser({
         ? filterRows.length
         : 0,
     emptyMessage: isSemanticSearchActive
-      ? 'No semantic matches found.'
+      ? searchResultsQuery.data?.indexingPending
+        ? 'Indexing recent document changes...'
+        : 'No semantic matches found.'
       : isFilterActive
         ? 'No documents match this filter.'
         : 'No documents in this directory.',

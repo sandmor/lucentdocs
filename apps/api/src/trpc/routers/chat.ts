@@ -12,6 +12,7 @@ import {
   assertProjectAccess,
   subscribeToProjectAccessRevocation,
 } from '../access.js'
+import { createSubscriptionLifecycle } from '../subscription-lifecycle.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 
@@ -130,53 +131,29 @@ export const chatRouter = router({
     )
     .subscription(({ ctx, input, signal }) => {
       return observable<ChatObserveEvent>((emit) => {
-        let closed = false
-        let unsubscribe: (() => void) | null = null
-        let unsubscribeAccess: (() => void) | null = null
+        const lifecycle = createSubscriptionLifecycle(emit, signal)
 
-        void assertMountedDocumentAccess(ctx, input)
-          .then(() => {
-            unsubscribeAccess = subscribeToProjectAccessRevocation(
-              ctx,
-              input.projectId,
-              (error) => {
-                if (closed) return
-                closed = true
-                unsubscribe?.()
-                unsubscribeAccess?.()
-                emit.error(error)
-              }
-            )
+        void (async () => {
+          try {
+            await assertMountedDocumentAccess(ctx, input)
+            if (lifecycle.closed) return
 
-            return ctx.chatRuntime.subscribe(input, (state) => {
-              emit.next(state)
+            const stopAccess = subscribeToProjectAccessRevocation(ctx, input.projectId, (error) => {
+              lifecycle.error(error)
             })
-          })
-          .then((nextUnsubscribe) => {
-            if (closed) {
-              nextUnsubscribe()
-              return
-            }
-            unsubscribe = nextUnsubscribe
-          })
-          .catch((error) => {
-            emit.error(error instanceof TRPCError ? error : mapRuntimeError(error))
-          })
+            lifecycle.addCleanup(stopAccess)
+            if (lifecycle.closed) return
 
-        const onAbort = () => {
-          closed = true
-          unsubscribe?.()
-          unsubscribeAccess?.()
-        }
+            const stopRuntime = await ctx.chatRuntime.subscribe(input, (state) => {
+              lifecycle.next(state)
+            })
+            lifecycle.addCleanup(stopRuntime)
+          } catch (error) {
+            lifecycle.error(error instanceof TRPCError ? error : mapRuntimeError(error))
+          }
+        })()
 
-        signal?.addEventListener('abort', onAbort)
-
-        return () => {
-          closed = true
-          signal?.removeEventListener('abort', onAbort)
-          unsubscribe?.()
-          unsubscribeAccess?.()
-        }
+        return lifecycle.close
       })
     }),
 

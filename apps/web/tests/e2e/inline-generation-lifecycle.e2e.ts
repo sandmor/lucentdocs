@@ -103,7 +103,9 @@ test('accept then restore and reject reverts the assistant suggestion', async ({
     }
   )
 
-  await page.locator('.ai-writer-floating-controls [data-action="accept"]').first().click()
+  const reviewControls = page.locator('.ai-writer-floating-controls[data-state="review"]').first()
+  await expect(reviewControls).toBeVisible()
+  await reviewControls.locator('[data-action="accept"]').click()
   await expect(page.locator('.ai-generating-text')).toHaveCount(0)
   await expect(editor).toContainText(/Once\s*spark/)
 
@@ -137,7 +139,9 @@ test('dismiss restore suggestion chip hides it for the current editor session', 
     }
   )
 
-  await page.locator('.ai-writer-floating-controls [data-action="accept"]').first().click()
+  const reviewControls = page.locator('.ai-writer-floating-controls[data-state="review"]').first()
+  await expect(reviewControls).toBeVisible()
+  await reviewControls.locator('[data-action="accept"]').click()
   await expect(page.locator('.ai-generating-text')).toHaveCount(0)
 
   const restoreChip = page.locator('[data-testid="restore-suggestion-chip"]')

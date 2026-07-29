@@ -64,14 +64,14 @@ function readGenerationIdFromPayload(payload: unknown): string | null {
   return null
 }
 
-export async function waitForContinuationStartAck(page: PWPage, timeout = 15_000) {
+export async function waitForGenerationStartAck(page: PWPage, procedure: string, timeout = 15_000) {
   const response = await page.waitForResponse(
     (candidate) => {
       if (candidate.request().method() !== 'POST') return false
       const url = candidate.url()
       return (
         url.includes('/trpc/') &&
-        url.includes('inline.startContinuationGeneration') &&
+        url.includes(procedure) &&
         candidate.status() >= 200 &&
         candidate.status() < 300
       )
@@ -93,6 +93,10 @@ export async function waitForContinuationStartAck(page: PWPage, timeout = 15_000
   }
 
   expect(generationId).toBeTruthy()
+}
+
+export async function waitForContinuationStartAck(page: PWPage, timeout = 15_000) {
+  await waitForGenerationStartAck(page, 'inline.startContinuationGeneration', timeout)
 }
 
 export async function placeCaretInsideZoneMiddle(page: PWPage) {

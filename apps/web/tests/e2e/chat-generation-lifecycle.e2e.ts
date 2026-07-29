@@ -1,5 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createProject, waitForEditorConnected } from './helpers/inline-ai'
+import {
+  createProject,
+  waitForEditorConnected,
+  waitForGenerationStartAck,
+} from './helpers/inline-ai'
 
 async function openChatPanel(page: Page): Promise<void> {
   const panel = page.locator('[data-chat-panel="true"]')
@@ -13,7 +17,12 @@ async function sendChatMessage(page: Page, message: string): Promise<void> {
   await openChatPanel(page)
   const input = page.locator('[data-chat-input="true"]')
   await input.fill(message)
+  // The stop button is rendered optimistically before this mutation reaches
+  // the API. Await the response so callers may safely disconnect the page only
+  // after the server owns the generation.
+  const generationAccepted = waitForGenerationStartAck(page, 'chat.generateById')
   await input.press('Enter')
+  await generationAccepted
   await waitForChatGenerationToStart(page)
 }
 

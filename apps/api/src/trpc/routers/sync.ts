@@ -6,6 +6,7 @@ import type { ProjectSyncEvent } from '../project-sync.js'
 import { CHATS_CHANGED_REASONS, DOCUMENTS_CHANGED_REASONS } from '../project-sync.js'
 import { observable } from '@trpc/server/observable'
 import { assertProjectAccess, subscribeToProjectAccessRevocation } from '../access.js'
+import { createSubscriptionLifecycle } from '../subscription-lifecycle.js'
 
 type ProjectsListSyncEvent = Extract<
   ProjectSyncEvent,
@@ -88,33 +89,27 @@ const projectsListSyncEventSchema = z.discriminatedUnion('type', [
 export const syncRouter = router({
   onProjectsListEvent: protectedProcedure.subscription(({ ctx, signal }) => {
     return observable<ProjectsListSyncEvent>((emit) => {
-      const unsubscribe = projectSyncBus.subscribe((event) => {
-        if (
-          event.type === 'documents.changed' ||
-          event.type === 'chats.changed' ||
-          event.type === 'document.updated' ||
-          event.type === 'document.access-changed'
-        ) {
-          return
-        }
+      const lifecycle = createSubscriptionLifecycle(emit, signal)
+      lifecycle.addCleanup(
+        projectSyncBus.subscribe((event) => {
+          if (
+            event.type === 'documents.changed' ||
+            event.type === 'chats.changed' ||
+            event.type === 'document.updated' ||
+            event.type === 'document.access-changed'
+          ) {
+            return
+          }
 
-        if (ctx.user.role !== 'admin' && !event.audienceUserIds.includes(ctx.user.id)) {
-          return
-        }
+          if (ctx.user.role !== 'admin' && !event.audienceUserIds.includes(ctx.user.id)) {
+            return
+          }
 
-        emit.next(projectsListSyncEventSchema.parse(event))
-      })
+          lifecycle.next(projectsListSyncEventSchema.parse(event))
+        })
+      )
 
-      const onAbort = () => {
-        unsubscribe()
-      }
-
-      signal?.addEventListener('abort', onAbort)
-
-      return () => {
-        signal?.removeEventListener('abort', onAbort)
-        unsubscribe()
-      }
+      return lifecycle.close
     })
   }),
 
@@ -126,50 +121,34 @@ export const syncRouter = router({
     )
     .subscription(({ ctx, input, signal }) => {
       return observable<ProjectSyncEvent>((emit) => {
-        let unsubscribe: (() => void) | null = null
-        let unsubscribeAccess: (() => void) | null = null
-        let closed = false
+        const lifecycle = createSubscriptionLifecycle(emit, signal)
 
-        void assertProjectAccess(ctx, input.projectId)
-          .then(() => {
-            unsubscribeAccess = subscribeToProjectAccessRevocation(
-              ctx,
-              input.projectId,
-              (error) => {
-                if (closed) return
-                closed = true
-                unsubscribe?.()
-                unsubscribeAccess?.()
-                emit.error(error)
-              }
-            )
+        void (async () => {
+          try {
+            await assertProjectAccess(ctx, input.projectId)
+            if (lifecycle.closed) return
 
-            unsubscribe = projectSyncBus.subscribe((event) => {
-              if (event.projectId !== input.projectId) {
-                return
-              }
-
-              emit.next(projectSyncEventSchema.parse(event))
+            const stopAccess = subscribeToProjectAccessRevocation(ctx, input.projectId, (error) => {
+              lifecycle.error(error)
             })
-          })
-          .catch((error) => {
-            emit.error(error)
-          })
+            lifecycle.addCleanup(stopAccess)
+            if (lifecycle.closed) return
 
-        const onAbort = () => {
-          closed = true
-          unsubscribe?.()
-          unsubscribeAccess?.()
-        }
+            lifecycle.addCleanup(
+              projectSyncBus.subscribe((event) => {
+                if (event.projectId !== input.projectId) {
+                  return
+                }
 
-        signal?.addEventListener('abort', onAbort)
+                lifecycle.next(projectSyncEventSchema.parse(event))
+              })
+            )
+          } catch (error) {
+            lifecycle.error(error)
+          }
+        })()
 
-        return () => {
-          closed = true
-          signal?.removeEventListener('abort', onAbort)
-          unsubscribe?.()
-          unsubscribeAccess?.()
-        }
+        return lifecycle.close
       })
     }),
 })

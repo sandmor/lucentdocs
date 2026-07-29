@@ -6,6 +6,7 @@ import { protectedProcedure, router } from '../index.js'
 import { InlineRuntimeError, type InlineObserveEvent } from '../../inline/runtime.js'
 import { configManager } from '../../config/runtime.js'
 import { assertMountedDocumentAccess, subscribeToProjectAccessRevocation } from '../access.js'
+import { createSubscriptionLifecycle } from '../subscription-lifecycle.js'
 
 const idSchema = z.string().min(1).max(128).refine(isValidId, { message: 'Invalid ID format' })
 
@@ -220,53 +221,31 @@ export const inlineRouter = router({
     )
     .subscription(({ ctx, input, signal }) => {
       return observable<InlineObserveEvent>((emit) => {
-        let closed = false
-        let unsubscribe: (() => void) | null = null
-        let unsubscribeAccess: (() => void) | null = null
+        const lifecycle = createSubscriptionLifecycle(emit, signal)
 
-        void assertMountedDocumentAccess(ctx, input)
-          .then(() => {
-            unsubscribeAccess = subscribeToProjectAccessRevocation(
-              ctx,
-              input.projectId,
-              (error) => {
-                if (closed) return
-                closed = true
-                unsubscribe?.()
-                unsubscribeAccess?.()
-                emit.error(error)
-              }
-            )
+        const fail = (error: unknown) => {
+          lifecycle.error(error instanceof TRPCError ? error : mapRuntimeError(error))
+        }
 
-            return ctx.inlineRuntime.subscribe(input, (event) => {
-              emit.next(event)
+        void (async () => {
+          try {
+            await assertMountedDocumentAccess(ctx, input)
+            if (lifecycle.closed) return
+
+            const stopAccess = subscribeToProjectAccessRevocation(ctx, input.projectId, fail)
+            lifecycle.addCleanup(stopAccess)
+            if (lifecycle.closed) return
+
+            const stopRuntime = await ctx.inlineRuntime.subscribe(input, (event) => {
+              lifecycle.next(event)
             })
-          })
-          .then((nextUnsubscribe) => {
-            if (closed) {
-              nextUnsubscribe()
-              return
-            }
-            unsubscribe = nextUnsubscribe
-          })
-          .catch((error) => {
-            emit.error(error instanceof TRPCError ? error : mapRuntimeError(error))
-          })
+            lifecycle.addCleanup(stopRuntime)
+          } catch (error) {
+            fail(error)
+          }
+        })()
 
-        const onAbort = () => {
-          closed = true
-          unsubscribe?.()
-          unsubscribeAccess?.()
-        }
-
-        signal?.addEventListener('abort', onAbort)
-
-        return () => {
-          closed = true
-          signal?.removeEventListener('abort', onAbort)
-          unsubscribe?.()
-          unsubscribeAccess?.()
-        }
+        return lifecycle.close
       })
     }),
 })

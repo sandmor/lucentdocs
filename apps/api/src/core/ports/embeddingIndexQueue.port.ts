@@ -16,6 +16,7 @@ export interface EmbeddingIndexQueueRepositoryPort {
   enqueueDocuments(documentIds: string[], queuedAt: number, debounceUntil: number): Promise<void>
   listQueuedDocuments(): Promise<DocumentEmbeddingJobEntity[]>
   getQueuedDocument(documentId: string): Promise<DocumentEmbeddingJobEntity | undefined>
+  hasQueuedDocuments(documentIds: string[]): Promise<boolean>
   clearQueuedDocuments(documentIds: string[]): Promise<void>
   getQueueStats(): Promise<DocumentEmbeddingQueueStats>
 }
